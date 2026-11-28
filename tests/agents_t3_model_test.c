@@ -113,11 +113,33 @@ static void test_link_replacement(void)
     assert(apply("T\t0\t0\t1") == 'T' && model.t3_ok);
 }
 
+static void test_thread_list(void)
+{
+    hr_model_reset(&model);
+    assert(apply("HR\t1\tComputer") == 'H' && !model.thread_list);
+    reject("TL\t2");
+    reject("TL\t1\textra");
+    reject("TL\t1\nTL\t1");
+    assert(apply("TL\t1") == 'L' && model.thread_list);
+    assert(apply("M\tt3") == 'M' && model.thread_list && model.hello);
+    assert(apply("M\therdr") == 'M' && model.thread_list);
+    assert(apply("M\tt3") == 'M');
+    assert(apply("A\tt3\t2\nt3t2\tcodex\tb\t1\tAsk\tpodbox\tWaiting\n"
+                 "t3t9\tcodex\tw\t0\tRun\tdesktop\tWorking") == 'A');
+    assert(model.agents_valid && !strcmp(model.agents_ws, "t3"));
+    assert(model.nagents == 2 && !strcmp(model.agents[1].title, "desktop"));
+    hr_model_link_lost(&model);
+    assert(model.thread_list && model.agents_valid);
+    /* A new session's daemon announces it again, or serves projects only */
+    assert(apply("HR\t1\tOlder computer") == 'H' && !model.thread_list);
+}
+
 int main(void)
 {
     test_workspaces();
     test_actions();
     test_link_replacement();
+    test_thread_list();
     puts("agents_t3_model_test: all passed");
     return 0;
 }

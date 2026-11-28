@@ -45,13 +45,14 @@ static bool talk_select,talk_toggle;
 static char key_req[8],action_req[8],t3_talk_start[8];
 static char space_id[16],space_tab[16],detail_pane[16],question_pane[16];
 static char pending_req[8],focus_req[8],talk_req[8],talk_note[64],task_text[244];
-static int detail_shown_age,nout,usage_serial,usage_scroll,detail_scroll,detail_scroll_max,detail_page_lines;
+static int detail_shown_age,nout,usage_serial,usage_scroll,detail_scroll,detail_scroll_max;
 static long last_message,current_tick,usage_at;
 static uint32_t podlink_generation(void){return generation;}
 static int podlink_state(void){return PODLINK_CONNECTED;}
 static void reset_focus(void){resets++;}
 static void forget_keys(void){}
 static void queue_handshake(void){handshakes++;}
+static bool t3_flat(void){return model.thread_list;}
 static void subscribe(const char *ws, const char *tab){(void)ws;(void)tab;}
 static void subscribe_detail(const char *pane){(void)pane;}
 static void ask_usage(void){}

@@ -175,3 +175,9 @@
 - **Lyrics shortcut:** On Now Playing, hold PLAY for one second and release
   to open Lyrics. Repeat to return. SELECT+PLAY switches between Agents and
   Now Playing. The two configurable Now Playing shortcut rows are gone.
+
+- **Agents in T3 mode** opens on your AI threads, those that wait for you
+  first, with no project page. Scrolling no longer switches the thread on
+  the computer; Select opens a thread and switches it there. Update the
+  AstraPod desktop app too: with an older one the player still lists
+  projects first.

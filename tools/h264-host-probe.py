@@ -31,11 +31,14 @@ MAIN = r"""
 int main(int argc, char **argv)
 {
     unsigned char avcc[65536];
+    size_t avcc_bytes = (size_t)atoi(argv[3]);
+    if (avcc_bytes > sizeof(avcc))
+        return 2;
     int w = atoi(argv[1]), h = atoi(argv[2]);
     size_t bytes = vpu_h264_buf_size(w, h);
     void *buf = malloc(bytes);
     struct vpu_h264 *v = vpu_h264_open(buf, bytes, w, h);
-    size_t len = fread(avcc, 1, (size_t)atoi(argv[3]), stdin);
+    size_t len = fread(avcc, 1, avcc_bytes, stdin);
     int code = v ? vpu_h264_configure(v, avcc, len) : -1;
     if (!v)
     {
@@ -43,14 +46,14 @@ int main(int argc, char **argv)
         free(buf);
         return 0;
     }
-    if (len < 7) return 2;
+    if (len != avcc_bytes || len < 7) return 2;
     printf("configure=%d %s coded=%dx%d crop=%d,%d,%d,%d level=%d "
            "refs=%d pps_refs=%d frame_num_bits=%d poc=%d\n",
            code, rejection, (v->sps.pic_width_in_mbs_minus1 + 1) * 16,
            (v->sps.pic_height_in_map_units_minus1 + 1) * 16,
            v->sps.crop_left, v->sps.crop_right, v->sps.crop_top,
            v->sps.crop_bottom, v->sps.level_idc, v->sps.max_num_ref_frames,
-           v->pps.num_ref_idx_l0_default_active_minus1 + 1,
+           v->have_pps ? v->pps.num_ref_idx_l0_default_active_minus1 + 1 : 0,
            v->sps.log2_max_frame_num_minus4 + 4, v->sps.pic_order_cnt_type);
     if (code == 0 && argc > 4)
     {

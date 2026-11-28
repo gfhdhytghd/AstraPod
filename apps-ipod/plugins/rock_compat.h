@@ -35,6 +35,7 @@ struct rock_video_request {
     size_t chapter_count;
     bool has_previous;
     bool probe;
+    unsigned int probe_limit; /* Zero decodes the complete file. */
     int result;
     bool themed_controls;
     unsigned accent;

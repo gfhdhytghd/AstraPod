@@ -10,7 +10,8 @@
 #include "settings/video_picture.h"
 #include "plugins/video_stock_osd.h"
 
-int video_h264_probe(const char *path, void *buffer, size_t size);
+int video_h264_probe(const char *path, void *buffer, size_t size,
+                     unsigned limit);
 
 enum mode {
     FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR,
@@ -570,7 +571,7 @@ int main(int argc, char **argv)
 {
     assert(argc == 4);
     reset(FINISH);
-    assert(video_h264_probe(argv[3], scratch, sizeof(scratch)) == 336);
+    assert(video_h264_probe(argv[3], scratch, sizeof(scratch), 0) == 336);
     assert(opens == 1 && configured == 1 && closes == 1 && decoded == 336);
     assert(!drawn && !audio_opens && access("resume", F_OK) < 0);
     FILE *log = fopen("video-probe.log", "r");

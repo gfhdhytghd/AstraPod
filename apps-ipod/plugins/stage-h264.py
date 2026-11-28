@@ -24,7 +24,8 @@ if src.name == "h264_player.c":
     replace('#include "plugin.h"', '#include "plugin.h"\n#include "plugins/rock_compat.h"')
     replace('enum plugin_status plugin_start', """\
 #ifdef HAVE_HW_H264
-int video_h264_probe(const char *path, void *buffer, size_t size);
+int video_h264_probe(const char *path, void *buffer, size_t size,
+                     unsigned limit);
 void video_log_budget(const char *path, size_t needed);
 #endif
 
@@ -71,7 +72,8 @@ enum plugin_status plugin_start""")
             '''#ifdef HAVE_HW_H264
     if (request->probe)
     {
-        request->result = video_h264_probe(path, buffer, buffer_size);
+        request->result = video_h264_probe(path, buffer, buffer_size,
+                                           request->probe_limit);
         return request->result < 0 ? PLUGIN_ERROR : PLUGIN_OK;
     }
     const struct video_play_options options = {
@@ -287,8 +289,17 @@ static const char *video_read_header(int fd)
     rb->memset(&demux, 0, sizeof(demux));
     if (mp4v_demux_read(fd, &demux) < 0)
         return "demux";
+    if (demux.format != MAKEFOURCC('a', 'v', 'c', '1'))
+        return "avc-sample-entry";
+    if (demux.avc_profile != 66)
+        return "avc-profile";
+    if (demux.avc_level > VIDEO_MAX_LEVEL)
+        return "avc-level";
+    if (demux.width <= 0 || demux.height <= 0 ||
+        demux.width > VIDEO_MAX_WIDTH || demux.height > VIDEO_MAX_HEIGHT)
+        return "video-size";
     if (!video_format_supported(&demux))
-        return "format";
+        return "avc-nal-length";
     if (!video_tables_sane(&demux))
         return "table-counts";
     return NULL;
@@ -331,7 +342,7 @@ size_t video_h264_scratch_size(const char *path)""")
                           const struct video_play_options *options)""",
             """static int video_run(const char *filepath, void *buffer,
                      size_t buffer_size, const struct video_play_options *options,
-                     bool probe)""")
+                     bool probe, unsigned probe_limit)""")
     replace("""    size_t decoder_size;
     size_t audio_codec_workspace_size;""",
             """    size_t decoder_size = 0;
@@ -395,7 +406,10 @@ size_t video_h264_scratch_size(const char *path)""")
         struct mp4v_read_window read = {read_buffer, VIDEO_READ_BUFFER, 0, 0};
         unsigned frames = 0;
         unsigned a = 1, b = 0;
-        for (; sample < demux.num_samples; sample++)
+        uint32_t limit = demux.num_samples;
+        if (probe_limit && probe_limit < limit - sample)
+            limit = sample + probe_limit;
+        for (; sample < limit; sample++)
         {
             offset = size = 0;
             const uint8_t *compressed;
@@ -511,15 +525,16 @@ size_t video_h264_scratch_size(const char *path)""")
         rb->backlight_set_timeout(rb->global_settings->backlight_timeout);
     if (!options && !probe)""")
     replace("int video_h264_play(const char *filepath,", """\
-int video_h264_probe(const char *path, void *buffer, size_t size)
+int video_h264_probe(const char *path, void *buffer, size_t size,
+                     unsigned limit)
 {
-    return video_run(path, buffer, size, NULL, true);
+    return video_run(path, buffer, size, NULL, true, limit);
 }
 
 int video_h264_play_named(const char *path, void *buffer, size_t size,
                           const struct video_play_options *options)
 {
-    return video_run(path, buffer, size, options, false);
+    return video_run(path, buffer, size, options, false, 0);
 }
 
 int video_h264_play(const char *filepath,""")

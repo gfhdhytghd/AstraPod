@@ -1459,6 +1459,7 @@ int rock_probe_video(const char *path, int *decode_result)
 {
     struct rock_video_request request = {
         .path = path, .probe = true, .result = -1,
+        .probe_limit = decode_result ? 0 : 8,
     };
     int status = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, true,
                                      &request);

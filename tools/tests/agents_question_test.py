@@ -47,7 +47,7 @@ static char focus_want[16], talk_req[8], focus_req[8], action_req[8], pending_re
 static struct {int nruns;} key_runs;
 static bool select_down, modal_open, alert_direction_ready, talk_held, talk_discarded, talk_failed, focus_for_detail;
 static bool cache_valid, detail_ready, pending_answer, question_custom, question_closing;
-static bool question_resolving;
+static bool question_resolving, agents_visited;
 static int commands, focus_commands, wakes, notifications, errors;
 static char last_command[8], last_args[32];
 static const struct hr_question *current_question(void);

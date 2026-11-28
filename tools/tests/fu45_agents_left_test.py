@@ -53,23 +53,22 @@ prelude = r'''
 #include "screens/system/agents_screen.h"
 #include "screens/system/herdremote_model.h"
 #include "firmware/target/arm/ipod/button-target.h"
-#define BUTTON_MULTIMEDIA_PREV 1
-#define BUTTON_MULTIMEDIA_NEXT 2
 #define ACTION_STD_CANCEL 3
 #define ACTION_STD_MENU 4
 VIEWS
 struct gui_synclist {int dummy;};
 static enum view view;
-static bool fruit, t3, confirm_selected, alert_direction_ready, detail_follow, detail_ready, question_closing;
-static int calls, raw, direction, detail_scroll, detail_scroll_max = 16, consent;
+static bool fruit, t3, flat, confirm_selected, alert_direction_ready, detail_ready, question_closing;
+static int calls, raw, direction, detail_scroll, detail_scroll_max = 16, consent, tab;
 static char detail_pane[16] = "t3t1";
 static struct hr_question question = {.yes=1, .no=2};
-enum { NONE, SEEK, PLAYBACK, USAGE, PROJECTS, BACKSPACE, FILTER, PAGE, ACTIONS, ALERT, DRAW };
+enum { NONE, TAB, USAGE, PROJECTS, BACKSPACE, FILTER, PAGE, ACTIONS, ALERT, DRAW };
 static bool agents_fruit_nav(void) {return fruit;}
 static bool usage_legacy_keys(void) {return !fruit && !t3;}
 static bool is_t3(const char *s) {return !strncmp(s,"t3",2);}
-static void seek_playback(int dir) {calls=SEEK; direction=dir;}
-static void agents_playback(int btn) {calls=PLAYBACK; direction=btn == BUTTON_MULTIMEDIA_PREV ? -1 : 1;}
+static bool t3_flat(void) {return flat;}
+static int tab_index(void) {return tab;}
+static void select_tab(struct gui_synclist *l,int index) {(void)l; calls=TAB; tab=index;}
 static void open_usage(struct gui_synclist *l) {(void)l; calls=USAGE;}
 static void close_usage(struct gui_synclist *l) {(void)l; calls=PROJECTS;}
 static void send_key(const char *key) {assert(!strcmp(key,"bs")); calls=BACKSPACE;}
@@ -92,28 +91,29 @@ static void check(int screen, int dir, bool held, int expected)
     struct gui_synclist list={0};
     horizontal_button(&list,dir,held);
     assert(calls==expected);
-    if (expected==SEEK || expected==PLAYBACK || expected==FILTER ||
+    if (expected==FILTER ||
         expected==PAGE || expected==ALERT)
         assert(direction==dir);
 }
 int main(void)
 {
-    fruit=true;
-    for (int screen=VIEW_SPACES; screen<=VIEW_CONFIRM; screen++)
-        for (int dir=-1;dir<=1;dir+=2) {
-            check(screen,dir,false,PLAYBACK);
-            check(screen,dir,true,SEEK);
-        }
-    fruit=false; t3=true;
+    t3=true;
     check(VIEW_SPACES,-1,false,USAGE);
     check(VIEW_SPACES,1,false,NONE);
+    flat=true;
+    check(VIEW_SPACES,1,false,TAB); assert(tab==1);
+    check(VIEW_SPACES,1,true,NONE); assert(tab==1);
+    check(VIEW_SPACES,1,false,TAB); assert(tab==0);
+    fruit=true;
+    check(VIEW_SPACES,1,false,NONE);
+    fruit=flat=false;
     check(VIEW_USAGE,-1,true,NONE);
     check(VIEW_USAGE,1,false,PROJECTS);
     check(VIEW_AGENTS,-1,false,FILTER);
     check(VIEW_AGENTS,1,true,NONE);
     check(VIEW_DETAIL,-1,false,PAGE);
-    check(VIEW_DETAIL,1,true,DRAW); assert(detail_follow && detail_scroll==detail_scroll_max);
-    check(VIEW_DETAIL,-1,true,DRAW); assert(!detail_follow && detail_scroll==0);
+    check(VIEW_DETAIL,1,true,DRAW); assert(detail_scroll==detail_scroll_max);
+    check(VIEW_DETAIL,-1,true,DRAW); assert(detail_scroll==0);
     check(VIEW_ALERT,-1,false,ALERT);
     check(VIEW_ALERT,1,false,ALERT);
     check(VIEW_ALERT,-1,true,NONE);
@@ -139,7 +139,7 @@ int main(void)
     assert(consent==0);
     agents_usb_exit(AGENTS_EXIT_MENU);
     assert(consent==1);
-    puts("Agents: body/remote direction maps, phase routing, playback, and MENU-only consent PASS");
+    puts("Agents: body/remote direction maps, phase routing, flat-list tabs, and MENU-only consent PASS");
 }
 '''
 (OUT / 'config.h').write_text('')

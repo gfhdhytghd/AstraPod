@@ -58,6 +58,12 @@
 
 static const uint32_t *irq_stack_top;
 
+#ifdef HAVE_HANG_CATCH_FIQ
+/* Both fatal paths mask IRQ and FIQ before using this stack. */
+static uint32_t report_stack[512] __attribute__((aligned(8)));
+uint32_t *const hang_fiq_stack_end = &report_stack[512];
+#endif
+
 /* Whether the word before a is a call: BL, BX or BLX by register, or a load
  * into pc after a "mov lr, pc" */
 static bool after_call(uint32_t a)
@@ -121,6 +127,7 @@ static void name8(const struct thread_entry *t, char name[8])
     strlcpy(name, t && t->name ? t->name : "?", 8);
 }
 
+#ifndef HAVE_HANG_CATCH_FIQ
 /* Every live thread: its name and state, the return address its switch
  * saved -- inside the call it is waiting in -- and the first caller found
  * on its stack. The thread the tick interrupted is drawing this, so its
@@ -148,6 +155,7 @@ static void stuck_log(void)
     }
     usb_log_sync();
 }
+#endif
 
 static void stuck_draw(unsigned int *y)
 {
@@ -170,6 +178,7 @@ static void stuck_draw(unsigned int *y)
     }
 }
 
+#ifndef HAVE_HANG_CATCH_FIQ
 /* The report goes to the USB log first, and waits up to three seconds for
  * the log's writer: once interrupts are off for the screen, nothing else
  * runs. */
@@ -192,23 +201,43 @@ static void hang_log(const struct thread_entry *t, const uint32_t *calls,
     usb_log_sync();
 }
 
-/* Entered by the stuck thread itself, as the tick returned it here rather
- * than to its loop: the report waits on the log's writer, which an
- * interrupt cannot. */
+#endif
+
+#ifdef HAVE_HANG_CATCH_FIQ
+static void USED_ATTR NORETURN_ATTR hang_show_detail(void);
+
+static void __attribute__((naked, noreturn)) hang_show(void)
+{
+    asm volatile ("msr cpsr_c, #0xdf         \n"
+                  "ldr r0, =hang_fiq_stack_end \n"
+                  "ldr sp, [r0]               \n"
+                  "b hang_show_detail         \n"
+                  ".ltorg                     \n");
+}
+
+static void hang_show_detail(void)
+#else
 static void NORETURN_ATTR hang_show(void)
+#endif
 {
     const struct thread_entry *t = hang_thread;
-    uint32_t calls[STACK_CALLS];
+    uint32_t calls[STACK_CALLS] = { 0 };
     unsigned int y = 1;
-    int n = t ? stack_scan(hang_sp, (uint32_t)t->stack + t->stack_size,
-                           calls, STACK_CALLS) : 0;
+#ifdef HAVE_HANG_CATCH_FIQ
+    panic_screen_enter();
+#endif
+    int n = t && hang_sp >= (uint32_t)t->stack
+          ? stack_scan(hang_sp, (uint32_t)t->stack + t->stack_size,
+                       calls, STACK_CALLS) : 0;
 
     crumb(CR_HANG, hang_stuck ? 0 : hang_pc);
+#ifndef HAVE_HANG_CATCH_FIQ
     if (hang_stuck)
         stuck_log();
     else
         hang_log(t, calls, n);
     panic_screen_enter();
+#endif
     char message[80];
     if (hang_stuck)
         snprintf(message, sizeof(message), "%s blocked %ds, keys unread",
@@ -217,10 +246,21 @@ static void NORETURN_ATTR hang_show(void)
         snprintf(message, sizeof(message), "%s held the core %ds",
                  t && t->name ? t->name : "?", HANG_SECS);
 #ifdef HAVE_CRUMBS
-    crumbs_crash_record(message, &(struct crumb_crash_context) {
+    struct crumb_crash_context context = {
         .kind = CRUMB_CRASH_HANG, .pc = hang_pc, .sp = hang_sp, .lr = hang_lr,
         .status = get_processor_mode(),
-    });
+        .calls = { calls[0], calls[1], calls[2], calls[3] },
+    };
+    strlcpy(context.thread, t && t->name ? t->name : "?", sizeof context.thread);
+    if (hang_stuck && ui_thread)
+    {
+        context.ui_lr = ui_thread->context.lr;
+        context.ui_wait = (uintptr_t)ui_thread->wqp;
+#ifdef HAVE_PRIORITY_SCHEDULING
+        context.ui_caller = (uintptr_t)ui_thread->blk_ra;
+#endif
+    }
+    crumbs_crash_record(message, &context);
 #endif
     lcd_set_viewport(NULL);
 #if LCD_DEPTH > 1
@@ -322,8 +362,6 @@ void *hang_ui_thread;
 long hang_ui_ran;
 static bool fiq_armed;
 static struct hang_watch fiq_watch;
-static uint32_t fiq_stack[512] __attribute__((aligned(8)));
-uint32_t *const hang_fiq_stack_end = &fiq_stack[512];
 
 static struct
 {
@@ -397,13 +435,21 @@ void hang_catch_fiq_show(void)
     crumb(CR_FREEZE, freeze.pc);
     crumb(CR_FREEZE_CONTEXT, (freeze.kind << 8) | (freeze.cpsr & 0xff));
 
-    extern const char _irqstackend[];
+    extern const char _irqstackbegin[], _irqstackend[];
     const struct thread_entry *t = freeze.running;
     uint32_t mode = freeze.cpsr & 0x1f;
-    uint32_t top = (mode == 0x1f || mode == 0x10) && t
-                 ? (uint32_t)t->stack + t->stack_size
-                 : (uint32_t)_irqstackend;
-    uint32_t calls[8];
+    uint32_t base = 0, top = 0;
+    if ((mode == 0x1f || mode == 0x10) && t)
+    {
+        base = (uint32_t)t->stack;
+        top = base + t->stack_size;
+    }
+    else if (mode == 0x12)
+    {
+        base = (uint32_t)_irqstackbegin;
+        top = (uint32_t)_irqstackend;
+    }
+    uint32_t calls[8] = { 0 };
     unsigned int y = 1;
     char name[8];
 
@@ -417,13 +463,22 @@ void hang_catch_fiq_show(void)
         snprintf(message, sizeof(message), "%s starved %lds (runnable)", name,
                  (freeze.tick - freeze.ui_ran) / HZ);
 #ifdef HAVE_CRUMBS
-    crumbs_crash_record(message, &(struct crumb_crash_context) {
+    struct crumb_crash_context context = {
         .kind = CRUMB_CRASH_FREEZE, .pc = freeze.pc, .sp = freeze.sp,
         .lr = freeze.lr, .status = freeze.cpsr,
-    });
+    };
+    strlcpy(context.thread, t && t->name ? t->name : "?", sizeof context.thread);
+    crumbs_crash_record(message, &context);
 #endif
     /* The durable record precedes any reads from the interrupted stack. */
-    int n = stack_scan(freeze.sp, top, calls, 8);
+    int n = freeze.sp >= base ? stack_scan(freeze.sp, top, calls, 8) : 0;
+#ifdef HAVE_CRUMBS
+    if (n > 0)
+    {
+        memcpy(context.calls, calls, sizeof context.calls);
+        crumbs_crash_record(message, &context);
+    }
+#endif
     lcd_set_viewport(NULL);
 #if LCD_DEPTH > 1
     lcd_set_backdrop(NULL);

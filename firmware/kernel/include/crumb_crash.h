@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include "crumbs.h"
 
-#define CRUMB_CRASH_MAGIC 0x43525331u /* CRS1 */
+#define CRUMB_CRASH_MAGIC 0x43525332u /* CRS2 */
 
 struct crumb_crash
 {

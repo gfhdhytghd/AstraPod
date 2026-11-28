@@ -933,6 +933,19 @@ int stock_media_list_action(int action, struct gui_synclist *lists)
     return action;
 }
 
+/* Whether the file walk has found any images, or may yet. */
+static bool loose_photos(void)
+{
+    if (file_index_is_busy())
+        return true;
+    int fd = open(file_index_list(FLAT_IMAGES), O_RDONLY);
+    if (fd < 0)
+        return false;
+    bool any = ffilesize(fd) > 0;
+    close(fd);
+    return any;
+}
+
 /* The Photos menu's pane: the main menu's cover slideshow, as on stock, or
  * stock's No Photos picture when the library has no photos. */
 static void paint_no_photos(struct stock_canvas *band)
@@ -1009,6 +1022,9 @@ int stock_photos_screen(void)
             rc = stock_photos_settings();
         else if (!a.indexed)
         {
+            /* Stock leaves an empty library's menu up. */
+            if (!loose_photos())
+                continue;
             struct ui_scene files = {0};
             ui_scene_open_page(&files, "loose-photos-push");
             rc = browser_flat(FLAT_IMAGES);

@@ -14,6 +14,7 @@
 #include "file.h"
 #include "metadata.h"
 #include "playlist/playlist.h"
+#include "plugins/rock_compat.h"
 #include "root_menu.h"
 #include "podlink-shell-playback.h"
 #include "sm1-test-control.h"
@@ -27,6 +28,7 @@ enum shell_playback_op {
     SHELL_NEXT,
     SHELL_PREV,
     SHELL_OPEN_LYRICS,
+    SHELL_PROBE_VIDEO,
 };
 
 static unsigned operation;
@@ -75,7 +77,7 @@ static void write_playback_status(uint8_t *buffer)
 
 static bool submit(unsigned op, const uint8_t *data, size_t size)
 {
-    if (op < SHELL_PLAY_FILE || op > SHELL_OPEN_LYRICS ||
+    if (op < SHELL_PLAY_FILE || op > SHELL_PROBE_VIDEO ||
         sm1_test_submitted != sm1_test_completed || sm1_test_record_active())
         return false;
 
@@ -92,7 +94,7 @@ static bool submit(unsigned op, const uint8_t *data, size_t size)
         data += 4;
     }
 
-    if (op == SHELL_PLAY_FILE)
+    if (op == SHELL_PLAY_FILE || op == SHELL_PROBE_VIDEO)
     {
         if (size < 2 || size >= sizeof(path) || data[0] != '/' ||
             memchr(data, '\0', size) || memchr(data, '\r', size) ||
@@ -138,6 +140,14 @@ void shell_playback_request(const struct usb_ctrlrequest *req,
 
 static int playback_dispatch(unsigned op)
 {
+    if (op == SHELL_PROBE_VIDEO)
+    {
+#ifdef HAVE_HW_H264
+        return rock_probe_video(path) == 0 ? 0 : EIO;
+#else
+        return ENOSYS;
+#endif
+    }
     if (op == SHELL_PLAY_FILE)
     {
         int fd = open(path, O_RDONLY);

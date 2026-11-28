@@ -22,8 +22,8 @@
  * S5L8702 hardware H.264 player.
  *
  * This is deliberately a narrow production contract: non-fragmented MP4/M4V,
- * the measured iTunes 9.2.1 Constrained Baseline syntax (Level 1.3 or 3.0,
- * up to four advertised reference pictures and ordered slices),
+ * progressive Baseline syntax (Level 3.0 or below, short-term sliding
+ * window reference pictures and ordered slices),
  * <= 640x480, <= 30 fps, with optional AAC-LC audio.
  *
  * Copyright (C) 2025-2026 David Cormier
@@ -51,6 +51,7 @@
 #include "video_audio.h"
 #include "video_pcm.h"
 #include "video_playback.h"
+#include "vpu-h264-6g-errors.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -1474,6 +1475,41 @@ static void video_worker_stop(struct video_pipeline *pipe, unsigned int *worker)
 }
 #endif
 
+static const char *video_decoder_reason(int code, char *message, size_t size)
+{
+    if (code <= VPU_H264_REF_LIMIT_BASE - 32)
+    {
+        unsigned int counts = VPU_H264_REF_LIMIT_BASE - code;
+        rb->snprintf(message, size, "Too many reference frames (%u > %u)",
+                     counts / 32, counts % 32);
+        return message;
+    }
+
+    switch (code)
+    {
+    case VPU_H264_AVCC_ERROR: return "Invalid AVC configuration";
+    case VPU_H264_SPS_ERROR: return "Invalid H.264 SPS";
+    case VPU_H264_PPS_ERROR: return "Unsupported H.264 PPS";
+    case VPU_H264_PROFILE_ERROR: return "Need H.264 Baseline";
+    case VPU_H264_LEVEL_ERROR: return "Need H.264 Level 3.0 or below";
+    case VPU_H264_POC_ERROR: return "Unsupported H.264 picture order";
+    case VPU_H264_FRAME_NUM_ERROR: return "Invalid H.264 frame/POC bit width";
+    case VPU_H264_GAPS_ERROR: return "Unsupported H.264 frame number gaps";
+    case VPU_H264_INTERLACE_ERROR: return "Interlaced H.264 is unsupported";
+    case VPU_H264_SIZE_ERROR: return "H.264 coded size exceeds video bounds";
+    case VPU_H264_CROP_ERROR: return "Invalid H.264 crop";
+    case VPU_H264_MEMORY_ERROR: return "Not enough H.264 reference memory";
+    case VPU_H264_REF_LIST_ERROR: return "Unsupported H.264 reference reordering";
+    case VPU_H264_REF_MARKING_ERROR: return "Unsupported H.264 reference marking";
+    case VPU_H264_SLICE_COUNT_ERROR: return "H.264 picture exceeds 10 slices";
+    case VPU_H264_ACTIVE_REFS_ERROR: return "Invalid H.264 active reference count";
+    case VPU_H264_RECONFIGURE_ERROR: return "H.264 reference layout changed";
+    case H264_DECODE_TIMEOUT: return "H.264 hardware decode timed out";
+    case H264_DECODE_STATUS_ERROR: return "H.264 hardware returned a decode error";
+    default: return "Invalid H.264 sample";
+    }
+}
+
 static size_t video_frame_bytes(const struct mp4v_demux_res *movie)
 {
     return (size_t)((movie->width + 15) & ~15) *
@@ -1667,11 +1703,14 @@ int video_h264_play_named(const char *filepath, void *buffer,
     decoder = rb->hw_h264->open(
         decoder_buffer, decoder_size,
         (demux.width + 15) & ~15, (demux.height + 15) & ~15);
-    if (decoder == NULL ||
-        rb->hw_h264->configure(decoder, demux.codecdata,
-                           demux.codecdata_len) < 0)
+    int configure_code = decoder ? rb->hw_h264->configure(
+        decoder, demux.codecdata, demux.codecdata_len) : -1;
+    if (configure_code < 0)
     {
-        rb->splash(HZ * 2, "H.264 decoder init failed");
+        char message[64];
+        rb->splash(HZ * 2, decoder ?
+                   video_decoder_reason(configure_code, message, sizeof(message)) :
+                   "Cannot open H.264 decoder");
         goto cleanup;
     }
 
@@ -1853,8 +1892,9 @@ start_pipeline:
 
         if (pipe.error)
         {
+            char message[64];
             rb->splash(HZ * 2, pipe.read_failed ? "Video sample read failed" :
-                                                   "VPU sample decode failed");
+                       video_decoder_reason(pipe.error, message, sizeof(message)));
             goto cleanup;
         }
 

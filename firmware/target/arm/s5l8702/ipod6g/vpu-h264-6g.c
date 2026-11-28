@@ -24,6 +24,7 @@
 #include "kernel.h"
 #include "s5l87xx.h"
 #include "vpu-h264-6g.h"
+#include "vpu-h264-6g-errors.h"
 #include "vpu-6g.h"
 
 #include <string.h>
@@ -40,7 +41,11 @@
 #define PHYS(x)     ((uint32_t)(uintptr_t)S5L8702_PHYSICAL_ADDR(x))
 #define UNCACHED(x) S5L8702_UNCACHED_ADDR(x)
 
-#define MAX_DPB_FRAMES  5  /* four short-term references and one output */
+/* The descriptor stores L0's active reference count minus one in 4 bits.
+ * There is a separate output address after the 17 reference slots. */
+#define MAX_REF_FRAMES  16
+#define MAX_DPB_FRAMES  (MAX_REF_FRAMES + 1)
+#define LEVEL_30_DPB_MBS 8100
 #define BS_DMA_SIZE     262144
 #define SLICE_DESC_SIZE 320
 #define SLICE_DESC_WORDS 8
@@ -161,7 +166,7 @@ static int map_rbsp_to_ebsp(const uint8_t *ebsp, int ebsp_len, int rbsp_pos)
 /* ---- H.264 header structures ---- */
 
 struct sps {
-    int profile_idc, level_idc;
+    int profile_idc, level_idc, constraint_flags;
     int pic_width_in_mbs_minus1, pic_height_in_map_units_minus1;
     int log2_max_frame_num_minus4;
     int pic_order_cnt_type, log2_max_pic_order_cnt_lsb_minus4;
@@ -189,6 +194,7 @@ struct slice_hdr {
     int num_ref_idx_l0_active_minus1;
     int ref_list_modification;
     int adaptive_ref_marking;
+    int long_term_reference;
     unsigned long bits_consumed;
 };
 
@@ -198,15 +204,12 @@ static void parse_sps(struct sps *sps, struct bs *b)
 {
     b->bit_offset = 8;
     sps->profile_idc = bs_u8(b);
-    bs_un(b, 8);
+    sps->constraint_flags = bs_u8(b);
     sps->level_idc = bs_u8(b);
     bs_ue(b);
 
     if (sps->profile_idc != 66)
-    {
-        b->error = 1;
         return;
-    }
 
     sps->log2_max_frame_num_minus4 = bs_ue(b);
     sps->pic_order_cnt_type = bs_ue(b);
@@ -214,10 +217,7 @@ static void parse_sps(struct sps *sps, struct bs *b)
      * slice headers) are both supported; the VPU does not consume POC,
      * and playback timing comes from the container. */
     if (sps->pic_order_cnt_type != 0 && sps->pic_order_cnt_type != 2)
-    {
-        b->error = 1;
         return;
-    }
     if (sps->pic_order_cnt_type == 0)
         sps->log2_max_pic_order_cnt_lsb_minus4 = bs_ue(b);
     else
@@ -279,7 +279,7 @@ static bool pps_supported(const struct pps *pps)
         pps->num_slice_groups_minus1 == 0 &&
         !pps->weighted_pred_flag && pps->weighted_bipred_idc == 0 &&
         pps->num_ref_idx_l0_default_active_minus1 >= 0 &&
-        pps->num_ref_idx_l0_default_active_minus1 < MAX_DPB_FRAMES - 1 &&
+        pps->num_ref_idx_l0_default_active_minus1 < MAX_REF_FRAMES &&
         pps->pic_init_qp_minus26 >= -26 &&
         pps->pic_init_qp_minus26 <= 25 &&
         pps->chroma_qp_index_offset >= -12 &&
@@ -314,6 +314,7 @@ static void parse_slice_header(const struct sps *sps, const struct pps *pps,
         pps->num_ref_idx_l0_default_active_minus1;
     sh->ref_list_modification = 0;
     sh->adaptive_ref_marking = 0;
+    sh->long_term_reference = 0;
     if (sh->slice_type == 0 || sh->slice_type == 1)
     {
         if (bs_u1(b))
@@ -361,7 +362,8 @@ static void parse_slice_header(const struct sps *sps, const struct pps *pps,
     {
         if (nal_type == 5)
         {
-            bs_u1(b); bs_u1(b);
+            bs_u1(b);
+            sh->long_term_reference = bs_u1(b);
         }
         else
         {
@@ -621,50 +623,112 @@ struct vpu_h264 {
     uint8_t *frame_y[MAX_DPB_FRAMES];
     uint8_t *frame_cb[MAX_DPB_FRAMES];
     uint8_t *frame_cr[MAX_DPB_FRAMES];
-    int frame_y_size;
-    int frame_cb_size;
-    int frame_cr_size;
+    uint8_t *frame_pool;
+    uint8_t *buf_end;
+    int frame_count;
 };
 
-static int apply_sps_dimensions(struct vpu_h264 *v)
+/* H.264 Annex A, Table A-1. Level 1b shares the 396 MB limit. */
+static int level_dpb_mbs(const struct sps *sps)
 {
-    int horizontal_crop;
-    int vertical_crop;
+    switch (sps->level_idc)
+    {
+        case 9: case 10: return 396;
+        case 11: return (sps->constraint_flags & 0x10) ? 396 : 900;
+        case 12: case 13: case 20: return 2376;
+        case 21: return 4752;
+        case 22: return 8100;
+        case 30: return LEVEL_30_DPB_MBS;
+        default: return 0;
+    }
+}
 
-    if (v->sps.profile_idc != 66 || v->sps.level_idc > 30 ||
-        v->sps.pic_order_cnt_type > 2 ||
-        v->sps.log2_max_frame_num_minus4 < 0 ||
-        v->sps.log2_max_frame_num_minus4 > 12 ||
-        v->sps.log2_max_pic_order_cnt_lsb_minus4 < 0 ||
-        v->sps.log2_max_pic_order_cnt_lsb_minus4 > 12 ||
-        v->sps.max_num_ref_frames < 0 ||
-        v->sps.max_num_ref_frames >= MAX_DPB_FRAMES || v->sps.gaps_allowed ||
-        !v->sps.frame_mbs_only ||
-        v->sps.pic_width_in_mbs_minus1 < 0 ||
-        v->sps.pic_width_in_mbs_minus1 >= v->max_w / 16 ||
-        v->sps.pic_height_in_map_units_minus1 < 0 ||
-        v->sps.pic_height_in_map_units_minus1 >= v->max_h / 16)
-        return -1;
+static int max_refs_for_size(int dpb_mbs, int w, int h)
+{
+    return MIN(MAX_REF_FRAMES, dpb_mbs / ((w / 16) * (h / 16)));
+}
 
-    v->pic_wmb = v->sps.pic_width_in_mbs_minus1 + 1;
-    v->pic_hmb = v->sps.pic_height_in_map_units_minus1 + 1;
-    v->pic_w = v->pic_wmb * 16;
-    v->pic_h = v->pic_hmb * 16;
-    horizontal_crop = v->sps.crop_left + v->sps.crop_right;
-    vertical_crop = v->sps.crop_top + v->sps.crop_bottom;
-    v->display_w = v->pic_w - horizontal_crop;
-    v->display_h = v->pic_h - vertical_crop;
+/* Include worst-case alignment in the caller's arena reservation. */
+static size_t frame_pool_size(int w, int h, int count)
+{
+    return ((size_t)w * h * 3 / 2 + 4095 + 2 * 31) * count;
+}
 
-    if (horizontal_crop < 0 || horizontal_crop >= v->pic_w ||
-        vertical_crop < 0 || vertical_crop >= v->pic_h ||
-        v->display_w <= 0 || v->display_h <= 0 ||
-        (v->display_w & 1) || (v->display_h & 1))
-        return -1;
+static int apply_sps(struct vpu_h264 *v, const struct sps *sps)
+{
+    int dpb_mbs = level_dpb_mbs(sps);
 
-    v->frame_y_size = v->pic_w * v->pic_h;
-    v->frame_cb_size = (v->pic_w / 2) * (v->pic_h / 2);
-    v->frame_cr_size = v->frame_cb_size;
+    if (sps->profile_idc != 66)
+        return VPU_H264_PROFILE_ERROR;
+    if (!dpb_mbs)
+        return VPU_H264_LEVEL_ERROR;
+    if (sps->pic_order_cnt_type != 0 && sps->pic_order_cnt_type != 2)
+        return VPU_H264_POC_ERROR;
+    if (sps->log2_max_frame_num_minus4 > 12 ||
+        sps->log2_max_pic_order_cnt_lsb_minus4 > 12)
+        return VPU_H264_FRAME_NUM_ERROR;
+    if (sps->gaps_allowed)
+        return VPU_H264_GAPS_ERROR;
+    if (!sps->frame_mbs_only)
+        return VPU_H264_INTERLACE_ERROR;
+    if (sps->pic_width_in_mbs_minus1 >= v->max_w / 16 ||
+        sps->pic_height_in_map_units_minus1 >= v->max_h / 16)
+        return VPU_H264_SIZE_ERROR;
+
+    int w = (sps->pic_width_in_mbs_minus1 + 1) * 16;
+    int h = (sps->pic_height_in_map_units_minus1 + 1) * 16;
+    int display_w = w - sps->crop_left - sps->crop_right;
+    int display_h = h - sps->crop_top - sps->crop_bottom;
+    if (display_w <= 0 || display_h <= 0)
+        return VPU_H264_CROP_ERROR;
+
+    int max_refs = max_refs_for_size(dpb_mbs, w, h);
+    if (sps->max_num_ref_frames > max_refs)
+        return VPU_H264_REF_LIMIT_BASE -
+               MIN(sps->max_num_ref_frames, 255) * 32 - max_refs;
+
+    int count = sps->max_num_ref_frames + 1;
+    if (w != v->pic_w || h != v->pic_h || count != v->frame_count)
+    {
+        if (v->have_sps)
+            return VPU_H264_RECONFIGURE_ERROR;
+        if (frame_pool_size(w, h, count) >
+            (size_t)(v->buf_end - v->frame_pool))
+            return VPU_H264_MEMORY_ERROR;
+
+        uint8_t *p = v->frame_pool;
+        int y_size = w * h;
+        int c_size = y_size / 4;
+        for (int i = 0; i < count; i++)
+        {
+            v->frame_y[i] = (uint8_t *)ALIGN4K(p);
+            v->frame_cb[i] = (uint8_t *)ALIGN32(v->frame_y[i] + y_size);
+            v->frame_cr[i] = (uint8_t *)ALIGN32(v->frame_cb[i] + c_size);
+            p = v->frame_cr[i] + c_size;
+            memset(v->frame_y[i], 0x10, y_size);
+            memset(v->frame_cb[i], 0x80, c_size);
+            memset(v->frame_cr[i], 0x80, c_size);
+        }
+        commit_dcache();
+        v->frame_count = count;
+    }
+
+    v->sps = *sps;
+    v->pic_wmb = w / 16;
+    v->pic_hmb = h / 16;
+    v->pic_w = w;
+    v->pic_h = h;
+    v->display_w = display_w;
+    v->display_h = display_h;
+    v->have_sps = 1;
     return 0;
+}
+
+static int configure_sps(struct vpu_h264 *v, struct bs *b)
+{
+    struct sps sps = {0};
+    parse_sps(&sps, b);
+    return b->error ? VPU_H264_SPS_ERROR : apply_sps(v, &sps);
 }
 
 /* ---- Public API ---- */
@@ -673,16 +737,19 @@ size_t vpu_h264_buf_size(int max_w, int max_h)
 {
     size_t sz = 0;
 
-    if (max_w <= 0 || max_h <= 0 || max_w > 1280 || max_h > 720)
+    if (max_w <= 0 || max_h <= 0 || max_w > 640 || max_h > 480 ||
+        max_w % 16 || max_h % 16)
         return 0;
     sz += sizeof(struct vpu_h264) + 32;
     sz += (size_t)max_w * max_h * 3 / 2 + 4096; /* ctrl_buf */
     sz += SLICE_DESC_SIZE + 32;
     sz += BS_DMA_SIZE + 32;
     sz += BS_DMA_SIZE + 32; /* nalu_buf */
-    sz += ((size_t)max_w * max_h + 4096) * MAX_DPB_FRAMES; /* frame_y */
-    sz += ((size_t)max_w * max_h / 4 + 32) * MAX_DPB_FRAMES;
-    sz += ((size_t)max_w * max_h / 4 + 32) * MAX_DPB_FRAMES;
+    /* Smaller coded pictures can have more references. The DPB payload
+     * grows with picture size up to the Level 3.0 macroblock budget. */
+    int mbs = (max_w / 16) * (max_h / 16);
+    sz += 384 * (MIN(LEVEL_30_DPB_MBS, mbs * MAX_REF_FRAMES) + mbs);
+    sz += (4095 + 2 * 31) * MAX_DPB_FRAMES;
     return sz;
 }
 
@@ -691,11 +758,10 @@ struct vpu_h264 *vpu_h264_open(void *buf, size_t buf_size,
 {
     uint8_t *p = (uint8_t *)buf;
     struct vpu_h264 *v;
-    int fy_sz, fc_sz, ctrl_sz;
+    int ctrl_sz;
 
-    if (max_w <= 0 || max_h <= 0 || max_w > 1280 || max_h > 720)
-        return NULL;
-    if (!buf || buf_size < vpu_h264_buf_size(max_w, max_h))
+    size_t needed = vpu_h264_buf_size(max_w, max_h);
+    if (!buf || !needed || buf_size < needed)
         return NULL;
 
     v = (struct vpu_h264 *)ALIGN32(p);
@@ -706,8 +772,6 @@ struct vpu_h264 *vpu_h264_open(void *buf, size_t buf_size,
     v->max_h = max_h;
 
     ctrl_sz = max_w * max_h * 3 / 2;
-    fy_sz = max_w * max_h;
-    fc_sz = max_w * max_h / 4;
 
     v->ctrl_buf   = (uint8_t *)ALIGN4K(p);  p = v->ctrl_buf + ctrl_sz;
     v->slice_desc = (uint8_t *)ALIGN32(p);
@@ -715,36 +779,11 @@ struct vpu_h264 *vpu_h264_open(void *buf, size_t buf_size,
     v->bs_dma     = (uint8_t *)ALIGN32(p);  p = v->bs_dma + BS_DMA_SIZE;
     v->nalu_buf   = (uint8_t *)ALIGN32(p);  p = v->nalu_buf + BS_DMA_SIZE;
 
-    {
-        int i;
-        for (i = 0; i < MAX_DPB_FRAMES; i++)
-        {
-            v->frame_y[i]  = (uint8_t *)ALIGN4K(p); p = v->frame_y[i] + fy_sz;
-            v->frame_cb[i] = (uint8_t *)ALIGN32(p); p = v->frame_cb[i] + fc_sz;
-            v->frame_cr[i] = (uint8_t *)ALIGN32(p); p = v->frame_cr[i] + fc_sz;
-        }
-    }
+    v->frame_pool = p;
+    v->buf_end = (uint8_t *)buf + buf_size;
 
-    v->frame_y_size = fy_sz;
-    v->frame_cb_size = fc_sz;
-    v->frame_cr_size = fc_sz;
-    v->cur_out = 0;
-    v->dpb_count = 0;
-
-    /* Zero control buffers */
     memset(v->ctrl_buf, 0, ctrl_sz);
     memset(v->bs_dma, 0, BS_DMA_SIZE);
-
-    /* Pre-fill frame buffers with neutral YCbCr (black) */
-    {
-        int i;
-        for (i = 0; i < MAX_DPB_FRAMES; i++)
-        {
-            memset(v->frame_y[i],  0x10, fy_sz);
-            memset(v->frame_cb[i], 0x80, fc_sz);
-            memset(v->frame_cr[i], 0x80, fc_sz);
-        }
-    }
 
     /* Make all cached initialization visible before the VPU uses DMA. */
     commit_dcache();
@@ -756,17 +795,14 @@ int vpu_h264_configure(struct vpu_h264 *v,
                         const uint8_t *avcc, int avcc_len)
 {
     int i, cnt, offset;
-    int nalu_len_size;
     struct bs b;
 
     if (!v || !avcc || avcc_len < 7)
-        return -1;
+        return VPU_H264_AVCC_ERROR;
 
     /* avcC structure: version(1) profile(1) compat(1) level(1)
      * nalu_len_size(1) num_sps(1) [sps_len(2) sps_data]...
      * num_pps(1) [pps_len(2) pps_data]... */
-    nalu_len_size = (avcc[4] & 0x03) + 1;
-    (void)nalu_len_size;
 
     /* Parse SPS */
     cnt = avcc[5] & 0x1F;
@@ -777,23 +813,21 @@ int vpu_h264_configure(struct vpu_h264 *v,
         offset += 2;
         if (sps_len < 1 || offset + sps_len > avcc_len ||
             (avcc[offset] & 0x9f) != 7)
-            return -1;
+            return VPU_H264_AVCC_ERROR;
         int rbsp_len = ebsp_to_rbsp(v->nalu_buf, avcc + offset, sps_len);
         b.buf = v->nalu_buf;
         b.bit_offset = 0;
         b.bit_length = rbsp_len * 8;
         b.error = 0;
-        parse_sps(&v->sps, &b);
-
-        if (b.error || apply_sps_dimensions(v) < 0)
-            return -2;
-        v->have_sps = 1;
+        int result = configure_sps(v, &b);
+        if (result < 0)
+            return result;
         offset += sps_len;
     }
 
     /* Parse PPS */
     if (offset >= avcc_len)
-        return -1;
+        return VPU_H264_AVCC_ERROR;
     cnt = avcc[offset++];
     for (i = 0; i < cnt && offset + 2 <= avcc_len; i++)
     {
@@ -801,7 +835,7 @@ int vpu_h264_configure(struct vpu_h264 *v,
         offset += 2;
         if (pps_len < 1 || offset + pps_len > avcc_len ||
             (avcc[offset] & 0x9f) != 8)
-            return -1;
+            return VPU_H264_AVCC_ERROR;
         int rbsp_len = ebsp_to_rbsp(v->nalu_buf, avcc + offset, pps_len);
         b.buf = v->nalu_buf;
         b.bit_offset = 0;
@@ -809,12 +843,12 @@ int vpu_h264_configure(struct vpu_h264 *v,
         b.error = 0;
         parse_pps(&v->pps, &b);
         if (b.error || !pps_supported(&v->pps))
-            return -3;
+            return VPU_H264_PPS_ERROR;
         v->have_pps = 1;
         offset += pps_len;
     }
 
-    return (v->have_sps && v->have_pps) ? 0 : -1;
+    return (v->have_sps && v->have_pps) ? 0 : VPU_H264_AVCC_ERROR;
 }
 
 struct picture_slice {
@@ -847,10 +881,6 @@ static int parse_picture_slice(struct vpu_h264 *v, const uint8_t *nalu,
                        slice->nal_ref_idc, &slice->header);
     if (b.error ||
         (slice->header.slice_type != 0 && slice->header.slice_type != 2) ||
-        slice->header.num_ref_idx_l0_active_minus1 < 0 ||
-        slice->header.num_ref_idx_l0_active_minus1 >= MAX_DPB_FRAMES - 1 ||
-        slice->header.ref_list_modification ||
-        slice->header.adaptive_ref_marking ||
         slice->header.disable_deblocking_filter_idc < 0 ||
         slice->header.disable_deblocking_filter_idc > 2 ||
         slice->header.alpha_c0_offset_div2 < -6 ||
@@ -858,6 +888,15 @@ static int parse_picture_slice(struct vpu_h264 *v, const uint8_t *nalu,
         slice->header.beta_offset_div2 < -6 ||
         slice->header.beta_offset_div2 > 6)
         return -1;
+    if (slice->header.slice_type == 0 &&
+        slice->header.num_ref_idx_l0_active_minus1 >=
+            v->sps.max_num_ref_frames)
+        return VPU_H264_ACTIVE_REFS_ERROR;
+    if (slice->header.ref_list_modification)
+        return VPU_H264_REF_LIST_ERROR;
+    if (slice->header.adaptive_ref_marking ||
+        slice->header.long_term_reference)
+        return VPU_H264_REF_MARKING_ERROR;
     return 0;
 }
 
@@ -894,7 +933,7 @@ static int decode_picture(struct vpu_h264 *v, struct picture_slice *slices,
 
     if (is_idr)
         v->dpb_count = 0;
-    for (i = v->dpb_count - 1; i >= 0 && dpb_fill < MAX_DPB_FRAMES; i--)
+    for (i = v->dpb_count - 1; i >= 0; i--)
     {
         int bi = v->dpb_order[i];
         dpb_y[dpb_fill] = PHYS(v->frame_y[bi]);
@@ -949,20 +988,19 @@ static int decode_picture(struct vpu_h264 *v, struct picture_slice *slices,
     v->last_out = out_buf;
     if (slices[0].nal_ref_idc != 0 && v->sps.max_num_ref_frames > 0)
     {
-        int max_ref = MIN(v->sps.max_num_ref_frames,
-                          MAX_DPB_FRAMES - 1);
-        while (v->dpb_count >= max_ref)
+        int max_ref = v->frame_count - 1;
+        if (v->dpb_count == max_ref)
         {
-            for (i = 0; i < v->dpb_count - 1; i++)
-                v->dpb_order[i] = v->dpb_order[i + 1];
             v->dpb_count--;
+            memmove(v->dpb_order, v->dpb_order + 1,
+                    v->dpb_count * sizeof(v->dpb_order[0]));
         }
         v->dpb_order[v->dpb_count++] = out_buf;
     }
     /* Non-reference pictures can leave older references in the DPB when
      * the output cursor wraps. Skip their buffers until they are evicted. */
     do {
-        out_buf = (out_buf + 1) % MAX_DPB_FRAMES;
+        out_buf = (out_buf + 1) % v->frame_count;
         for (i = 0; i < v->dpb_count && v->dpb_order[i] != out_buf; i++)
             ;
     } while (i < v->dpb_count);
@@ -989,11 +1027,7 @@ int vpu_h264_decode_nalu(struct vpu_h264 *v,
 
     if (nal_type == 7)
     {
-        parse_sps(&v->sps, &b);
-        if (b.error || apply_sps_dimensions(v) < 0)
-            return -1;
-        v->have_sps = 1;
-        return 0;
+        return configure_sps(v, &b);
     }
     if (nal_type == 8)
     {
@@ -1005,8 +1039,9 @@ int vpu_h264_decode_nalu(struct vpu_h264 *v,
     }
     if (nal_type == 1 || nal_type == 5)
     {
-        if (parse_picture_slice(v, nalu, nalu_len, &slice) < 0)
-            return -1;
+        int result = parse_picture_slice(v, nalu, nalu_len, &slice);
+        if (result < 0)
+            return result;
         return decode_picture(v, &slice, 1);
     }
     return 0;
@@ -1039,16 +1074,19 @@ int vpu_h264_decode_sample(struct vpu_h264 *v, const uint8_t *sample,
         nal_type = sample[position] & 0x1f;
         if (nal_type == 1 || nal_type == 5)
         {
-            if (slice_count >= (int)VPU_MAX_SLICES ||
-                parse_picture_slice(v, sample + position, nalu_len,
-                                    &slices[slice_count]) < 0)
-                return -1;
+            if (slice_count >= (int)VPU_MAX_SLICES)
+                return VPU_H264_SLICE_COUNT_ERROR;
+            int result = parse_picture_slice(v, sample + position, nalu_len,
+                                             &slices[slice_count]);
+            if (result < 0)
+                return result;
             slice_count++;
         }
         else if (nal_type == 7 || nal_type == 8)
         {
-            if (vpu_h264_decode_nalu(v, sample + position, nalu_len) < 0)
-                return -1;
+            int result = vpu_h264_decode_nalu(v, sample + position, nalu_len);
+            if (result < 0)
+                return result;
         }
         position += nalu_len;
     }

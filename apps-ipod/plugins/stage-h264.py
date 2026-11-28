@@ -218,7 +218,9 @@ elif src.name == "video_playback.c":
     replace("size_t video_h264_scratch_size(const char *path)", r"""
 static int video_log_open(const char *path, const char *stage, int code)
 {
-    int fd = rb->open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    const char *log = rb->strncmp(path, "/Videos/_probe/", 15) == 0 ?
+                      "/Videos/_probe/results.log" : ROCK_VIDEO_LOG;
+    int fd = rb->open(log, O_WRONLY | O_CREAT | O_APPEND, 0666);
     if (fd >= 0)
         rb->fdprintf(fd, "\n%s stage=%s code=%d\n", path, stage, code);
     return fd;
@@ -365,13 +367,18 @@ size_t video_h264_scratch_size(const char *path)""")
     }""")
     replace('    if (!options)\n        rb->splash(0, "Starting video...");',
             '    if (!options && !probe)\n        rb->splash(0, "Starting video...");')
-    cut("    if (decoder == NULL ||", "    start_tick =", r"""    code = decoder ? rb->hw_h264->configure(decoder, demux.codecdata,
+    cut("    int configure_code = decoder", "    start_tick =", r"""    code = decoder ? rb->hw_h264->configure(decoder, demux.codecdata,
                                             demux.codecdata_len) : -1;
     if (code < 0)
     {
         failure = decoder ? "decoder-configure" : "decoder-open";
         if (!probe)
-            rb->splash(HZ * 2, "H.264 decoder init failed");
+        {
+            char message[64];
+            rb->splash(HZ * 2, decoder ?
+                       video_decoder_reason(code, message, sizeof(message)) :
+                       "Cannot open H.264 decoder");
+        }
         goto cleanup;
     }
     if (probe)
@@ -384,8 +391,9 @@ size_t video_h264_scratch_size(const char *path)""")
                      (unsigned long)buffer_size,
                      (unsigned long)(pool.cursor - (uint8_t *)buffer));
         struct mp4v_read_window read = {read_buffer, VIDEO_READ_BUFFER, 0, 0};
-        uint32_t limit = MIN(demux.num_samples, sample + 8);
-        for (; sample < limit; sample++)
+        unsigned frames = 0;
+        unsigned a = 1, b = 0;
+        for (; sample < demux.num_samples; sample++)
         {
             offset = size = 0;
             const uint8_t *compressed;
@@ -398,16 +406,41 @@ size_t video_h264_scratch_size(const char *path)""")
             }
             code = rb->hw_h264->decode_sample(decoder, compressed, size,
                                               demux.nalu_len_size);
-            rb->fdprintf(log, "sample=%u offset=%u bytes=%u decode=%d\n",
-                         (unsigned)sample, (unsigned)offset, (unsigned)size, code);
+            if (code > 0)
+            {
+                const uint8_t *planes[3];
+                int w, h, stride;
+                rb->hw_h264->get_frame(decoder, &planes[0], &planes[1],
+                                       &planes[2], &w, &h, &stride);
+                for (int plane = 0; plane < 3; plane++)
+                {
+                    int shift = plane != 0;
+                    for (int row = 0; row < (h >> shift); row++)
+                    {
+                        const uint8_t *pixels = planes[plane] +
+                                                row * (stride >> shift);
+                        for (int col = 0; col < (w >> shift); col++)
+                        {
+                            a += pixels[col];
+                            b += a;
+                        }
+                        a %= 65521;
+                        b %= 65521;
+                    }
+                }
+                frames++;
+            }
             if (code < 0)
             {
                 failure = "sample-decode";
                 break;
             }
         }
+        rb->fdprintf(log, "samples=%u frames=%u decode=%d adler32=%08lx\n",
+                     (unsigned)sample, frames, code,
+                     (unsigned long)((b << 16) | a));
         rb->close(log);
-        if (!failure)
+        if (!failure && frames)
             result = VIDEO_FINISHED;
         goto cleanup;
     }
@@ -452,6 +485,13 @@ size_t video_h264_scratch_size(const char *path)""")
         int log = video_log_open(filepath, failure, code);
         if (log >= 0)
         {
+            if ((!rb->strcmp(failure, "decoder-configure") ||
+                 !rb->strcmp(failure, "sample-decode")) && code < 0)
+            {
+                char message[64];
+                rb->fdprintf(log, "%s\n",
+                             video_decoder_reason(code, message, sizeof(message)));
+            }
             rb->fdprintf(log, "pool granted=%lu sample=%u offset=%u bytes=%u\n",
                          (unsigned long)buffer_size, (unsigned)sample,
                          (unsigned)offset, (unsigned)size);

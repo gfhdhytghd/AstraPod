@@ -24,7 +24,8 @@ if src.name == "h264_player.c":
     replace('#include "plugin.h"', '#include "plugin.h"\n#include "plugins/rock_compat.h"')
     replace('enum plugin_status plugin_start', """\
 #ifdef HAVE_HW_H264
-int video_h264_probe(const char *path, void *buffer, size_t size);
+int video_h264_probe(const char *path, void *buffer, size_t size,
+                     unsigned limit);
 void video_log_budget(const char *path, size_t needed);
 #endif
 
@@ -70,8 +71,11 @@ enum plugin_status plugin_start""")
     replace('    result = video_h264_play(path, buffer, buffer_size);',
             '''#ifdef HAVE_HW_H264
     if (request->probe)
-        return video_h264_probe(path, buffer, buffer_size) < 0 ?
-            PLUGIN_ERROR : PLUGIN_OK;
+    {
+        request->result = video_h264_probe(path, buffer, buffer_size,
+                                           request->probe_limit);
+        return request->result < 0 ? PLUGIN_ERROR : PLUGIN_OK;
+    }
     const struct video_play_options options = {
         .title = request->title,
         .battery_level = request->battery_level,
@@ -218,7 +222,9 @@ elif src.name == "video_playback.c":
     replace("size_t video_h264_scratch_size(const char *path)", r"""
 static int video_log_open(const char *path, const char *stage, int code)
 {
-    int fd = rb->open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    const char *log = rb->strncmp(path, "/Videos/_probe/", 15) == 0 ?
+                      "/Videos/_probe/results.log" : ROCK_VIDEO_LOG;
+    int fd = rb->open(log, O_WRONLY | O_CREAT | O_APPEND, 0666);
     if (fd >= 0)
         rb->fdprintf(fd, "\n%s stage=%s code=%d\n", path, stage, code);
     return fd;
@@ -283,8 +289,17 @@ static const char *video_read_header(int fd)
     rb->memset(&demux, 0, sizeof(demux));
     if (mp4v_demux_read(fd, &demux) < 0)
         return "demux";
+    if (demux.format != MAKEFOURCC('a', 'v', 'c', '1'))
+        return "avc-sample-entry";
+    if (demux.avc_profile != 66)
+        return "avc-profile";
+    if (demux.avc_level > VIDEO_MAX_LEVEL)
+        return "avc-level";
+    if (demux.width <= 0 || demux.height <= 0 ||
+        demux.width > VIDEO_MAX_WIDTH || demux.height > VIDEO_MAX_HEIGHT)
+        return "video-size";
     if (!video_format_supported(&demux))
-        return "format";
+        return "avc-nal-length";
     if (!video_tables_sane(&demux))
         return "table-counts";
     return NULL;
@@ -327,7 +342,7 @@ size_t video_h264_scratch_size(const char *path)""")
                           const struct video_play_options *options)""",
             """static int video_run(const char *filepath, void *buffer,
                      size_t buffer_size, const struct video_play_options *options,
-                     bool probe)""")
+                     bool probe, unsigned probe_limit)""")
     replace("""    size_t decoder_size;
     size_t audio_codec_workspace_size;""",
             """    size_t decoder_size = 0;
@@ -365,13 +380,18 @@ size_t video_h264_scratch_size(const char *path)""")
     }""")
     replace('    if (!options)\n        rb->splash(0, "Starting video...");',
             '    if (!options && !probe)\n        rb->splash(0, "Starting video...");')
-    cut("    if (decoder == NULL ||", "    start_tick =", r"""    code = decoder ? rb->hw_h264->configure(decoder, demux.codecdata,
+    cut("    int configure_code = decoder", "    start_tick =", r"""    code = decoder ? rb->hw_h264->configure(decoder, demux.codecdata,
                                             demux.codecdata_len) : -1;
     if (code < 0)
     {
         failure = decoder ? "decoder-configure" : "decoder-open";
         if (!probe)
-            rb->splash(HZ * 2, "H.264 decoder init failed");
+        {
+            char message[64];
+            rb->splash(HZ * 2, decoder ?
+                       video_decoder_reason(code, message, sizeof(message)) :
+                       "Cannot open H.264 decoder");
+        }
         goto cleanup;
     }
     if (probe)
@@ -384,7 +404,11 @@ size_t video_h264_scratch_size(const char *path)""")
                      (unsigned long)buffer_size,
                      (unsigned long)(pool.cursor - (uint8_t *)buffer));
         struct mp4v_read_window read = {read_buffer, VIDEO_READ_BUFFER, 0, 0};
-        uint32_t limit = MIN(demux.num_samples, sample + 8);
+        unsigned frames = 0;
+        unsigned a = 1, b = 0;
+        uint32_t limit = demux.num_samples;
+        if (probe_limit && probe_limit < limit - sample)
+            limit = sample + probe_limit;
         for (; sample < limit; sample++)
         {
             offset = size = 0;
@@ -398,17 +422,42 @@ size_t video_h264_scratch_size(const char *path)""")
             }
             code = rb->hw_h264->decode_sample(decoder, compressed, size,
                                               demux.nalu_len_size);
-            rb->fdprintf(log, "sample=%u offset=%u bytes=%u decode=%d\n",
-                         (unsigned)sample, (unsigned)offset, (unsigned)size, code);
+            if (code > 0)
+            {
+                const uint8_t *planes[3];
+                int w, h, stride;
+                rb->hw_h264->get_frame(decoder, &planes[0], &planes[1],
+                                       &planes[2], &w, &h, &stride);
+                for (int plane = 0; plane < 3; plane++)
+                {
+                    int shift = plane != 0;
+                    for (int row = 0; row < (h >> shift); row++)
+                    {
+                        const uint8_t *pixels = planes[plane] +
+                                                row * (stride >> shift);
+                        for (int col = 0; col < (w >> shift); col++)
+                        {
+                            a += pixels[col];
+                            b += a;
+                        }
+                        a %= 65521;
+                        b %= 65521;
+                    }
+                }
+                frames++;
+            }
             if (code < 0)
             {
                 failure = "sample-decode";
                 break;
             }
         }
+        rb->fdprintf(log, "samples=%u frames=%u decode=%d adler32=%08lx\n",
+                     (unsigned)sample, frames, code,
+                     (unsigned long)((b << 16) | a));
         rb->close(log);
-        if (!failure)
-            result = VIDEO_FINISHED;
+        if (!failure && frames)
+            result = frames;
         goto cleanup;
     }
 
@@ -449,9 +498,18 @@ size_t video_h264_scratch_size(const char *path)""")
     replace("cleanup:\n", r"""cleanup:
     if (failure)
     {
+        if (probe && code < 0)
+            result = code;
         int log = video_log_open(filepath, failure, code);
         if (log >= 0)
         {
+            if ((!rb->strcmp(failure, "decoder-configure") ||
+                 !rb->strcmp(failure, "sample-decode")) && code < 0)
+            {
+                char message[64];
+                rb->fdprintf(log, "%s\n",
+                             video_decoder_reason(code, message, sizeof(message)));
+            }
             rb->fdprintf(log, "pool granted=%lu sample=%u offset=%u bytes=%u\n",
                          (unsigned long)buffer_size, (unsigned)sample,
                          (unsigned)offset, (unsigned)size);
@@ -467,15 +525,16 @@ size_t video_h264_scratch_size(const char *path)""")
         rb->backlight_set_timeout(rb->global_settings->backlight_timeout);
     if (!options && !probe)""")
     replace("int video_h264_play(const char *filepath,", """\
-int video_h264_probe(const char *path, void *buffer, size_t size)
+int video_h264_probe(const char *path, void *buffer, size_t size,
+                     unsigned limit)
 {
-    return video_run(path, buffer, size, NULL, true);
+    return video_run(path, buffer, size, NULL, true, limit);
 }
 
 int video_h264_play_named(const char *path, void *buffer, size_t size,
                           const struct video_play_options *options)
 {
-    return video_run(path, buffer, size, options, false);
+    return video_run(path, buffer, size, options, false, 0);
 }
 
 int video_h264_play(const char *filepath,""")

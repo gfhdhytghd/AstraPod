@@ -49,7 +49,7 @@ struct vpu_h264 *vpu_h264_open(void *buf, size_t buf_size,
 
 /* Feed avcC decoder configuration (from MP4 container).
  * Parses SPS and PPS NALUs from the avcC blob.
- * Returns 0 on success, -1 for framing, -2 for SPS, -3 for PPS. */
+ * Returns 0 on success or a negative AVC validation result. */
 int vpu_h264_configure(struct vpu_h264 *v,
                         const uint8_t *avcc, int avcc_len);
 

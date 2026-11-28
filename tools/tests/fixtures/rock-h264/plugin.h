@@ -83,6 +83,8 @@ struct plugin_api {
     struct font *(*font_get)(int);
     int (*font_get_width)(struct font *, unsigned int);
     const unsigned char *(*font_get_bits)(struct font *, unsigned int);
+    int (*strcmp)(const char *, const char *);
+    int (*strncmp)(const char *, const char *, size_t);
     int (*snprintf)(char *, size_t, const char *, ...);
     int (*sound_min)(int);
     int (*sound_max)(int);

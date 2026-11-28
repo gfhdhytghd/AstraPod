@@ -578,11 +578,13 @@ static void *rock_claim_scratch(size_t minimum, size_t preferred,
             *granted = minimum;
         if (!scratch || (current_video && current_video->probe))
         {
-            int fd = rock_open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND);
+            const char *path = current_video && current_video->path ?
+                               current_video->path : "(file picker)";
+            const char *log = !strncmp(path, "/Videos/_probe/", 15) ?
+                              "/Videos/_probe/results.log" : ROCK_VIDEO_LOG;
+            int fd = rock_open(log, O_WRONLY | O_CREAT | O_APPEND);
             if (fd >= 0)
             {
-                const char *path = current_video && current_video->path ?
-                    current_video->path : "(file picker)";
                 rock_fdprintf(fd, "\n%s stage=core-alloc code=%d "
                               "free=%lu largest=%lu limit=%lu "
                               "requested=%lu granted=%lu\n",
@@ -1453,10 +1455,17 @@ int rock_run_from_shell(const char *path)
 }
 
 #ifdef HAVE_HW_H264
-int rock_probe_video(const char *path)
+int rock_probe_video(const char *path, int *decode_result)
 {
-    struct rock_video_request request = {.path = path, .probe = true};
-    return rock_open_foreground(ROCK_VIDEO_MODULE, path, false, true, &request);
+    struct rock_video_request request = {
+        .path = path, .probe = true, .result = -1,
+        .probe_limit = decode_result ? 0 : 8,
+    };
+    int status = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, true,
+                                     &request);
+    if (decode_result)
+        *decode_result = request.result;
+    return status;
 }
 #endif
 

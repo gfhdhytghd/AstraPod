@@ -2,7 +2,8 @@
 ROCK_H264_SRC := $(ROCK_SRC)/h264_player
 ROCK_H264_OBJ := $(ROCK_OBJECTS)/h264
 ROCK_H264_STAGE := $(ROCK_OUT)/staged/h264
-ROCK_H264_FLAGS = $(ROCK_FLAGS) -I$(ROCK_H264_SRC) -I$(ROOTDIR)/lib/rbcodec/codecs
+ROCK_H264_FLAGS = $(ROCK_FLAGS) -I$(ROCK_H264_SRC) -I$(ROOTDIR)/lib/rbcodec/codecs \
+    -I$(FIRMDIR)/target/arm/s5l8702/ipod6g
 
 $(ROCK_H264_STAGE)/%.c: $(ROCK_H264_SRC)/%.c $(APPSDIR)/plugins/stage-h264.py
 	$(SILENT)mkdir -p $(@D)

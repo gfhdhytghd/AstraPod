@@ -152,6 +152,8 @@ static fb_data *lcd_fb;
 #define PF_SORTING_NEXT (LAST_ACTION_PLACEHOLDER + 3)
 #define PF_SORTING_PREV (LAST_ACTION_PLACEHOLDER + 4)
 #define PF_RANDOM (LAST_ACTION_PLACEHOLDER + 5)
+#define PF_KEY_PREV (LAST_ACTION_PLACEHOLDER + 6)
+#define PF_KEY_NEXT (LAST_ACTION_PLACEHOLDER + 7)
 
 /* Both this fork's targets are CONFIG_KEYPAD == IPOD_4G_PAD (confirmed via
  * firmware/export/config/ipod6g.h and ipodvideo.h), so only that keypad's
@@ -692,6 +694,7 @@ static struct ui_pace flow_pace, panel_pace, wps_pace;
 static uint32_t anim_clock;
 static unsigned anim_sampled_frame;
 static int anim_frac;
+static int flat_key_origin = -1;
 /* Direction of the gap on screen. Reversing travel can walk the same
  * geometry backwards, then choose a new gap when it crosses the centre. */
 static int anim_pose_step;
@@ -1266,6 +1269,16 @@ const struct custom_format format_transposed = {
     .get_size = get_size
 };
 
+static const struct button_mapping cover_navigation[] = {
+    { PF_KEY_PREV, BUTTON_LEFT, BUTTON_NONE },
+    { PF_KEY_NEXT, BUTTON_RIGHT, BUTTON_NONE },
+    { PF_KEY_PREV, BUTTON_LEFT | BUTTON_REPEAT, BUTTON_NONE },
+    { PF_KEY_NEXT, BUTTON_RIGHT | BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_NONE, BUTTON_LEFT | BUTTON_REL, BUTTON_NONE },
+    { ACTION_NONE, BUTTON_RIGHT | BUTTON_REL, BUTTON_NONE },
+    LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_PLUGIN | 1)
+};
+
 static const struct button_mapping* get_context_map(int context)
 {
     /* action_code_lookup() ORs in CONTEXT_REMOTE for any button with
@@ -1274,6 +1287,8 @@ static const struct button_mapping* get_context_map(int context)
      * pf_contexts[context & ~CONTEXT_PLUGIN] indexes ~2 billion entries
      * past this 2-element array on a remote button press. */
     context &= ~(CONTEXT_LOCKED | CONTEXT_REMOTE);
+    if (context == (CONTEXT_PLUGIN | CONTEXT_CUSTOM))
+        return cover_navigation;
     return pf_contexts[context & ~CONTEXT_PLUGIN];
 }
 
@@ -2760,6 +2775,12 @@ static void flat_note_scroll(void)
     uint32_t now = motion_clock();
     int gap = motion_elapsed(now, pf_flat_last_input);
 
+    if (flat_key_origin >= 0)
+    {
+        flat_key_origin = -1;
+        anim_clock = now;
+        anim_sampled_frame = 0;
+    }
     pf_flat_last_input = now;
     if (gap >= full)
         pf_flat_interval = full;    /* a fresh gesture: forget the old pace */
@@ -3400,6 +3421,7 @@ void set_current_slide(const int slide_index)
 {
     buf_ctx_lock();
     int old_center_index = center_index;
+    flat_key_origin = -1;
     pf_state = pf_idle;
     step = 0;
     unsigned scale = ui_theme_duration(UI_THEME_MOTION_ONE);
@@ -3498,6 +3520,7 @@ void carousel_reload(int (*compare)(const void *, const void *))
  */
 static void start_animation(void)
 {
+    flat_key_origin = -1;
     if (!pf_motion_scale)
     {
         set_current_slide(target);
@@ -3538,6 +3561,38 @@ static void flow_click(int direction)
     target = to;
     if (pf_state != pf_scrolling)
         start_animation();
+}
+
+/* A physical step uses the stock time and ease in either cover layout. */
+static void cover_key_step(int direction)
+{
+    pf_random_spinning = false;
+    if (!flat_view())
+    {
+        flow_click(direction);
+        return;
+    }
+
+    int to = fbound(0, target + direction, number_of_slides - 1);
+    if (to == target)
+        return;
+    target = to;
+    if (!pf_motion_scale || slide_frame == (to << 16))
+    {
+        set_current_slide(to);
+        return;
+    }
+
+    bool idle = pf_state != pf_scrolling;
+    pf_state = pf_scrolling;
+    flat_key_origin = slide_frame;
+    step = (to << 16) > slide_frame ? 1 : -1;
+    if (idle)
+        anim_pose_step = step;
+    anim_clock = ui_clock_start();
+    anim_sampled_frame = 0;
+    anim_frac = 0;
+    pf_flat_snap = false;
 }
 
 /* The wheel posts physical detents in bits 24..30 and velocity below them.
@@ -4518,6 +4573,7 @@ static void move_center(int index)
 /* The covers at rest on the target. */
 static void land(void)
 {
+    flat_key_origin = -1;
     pf_state = pf_idle;
     pf_random_spinning = false;
     slide_frame = center_index << 16;
@@ -4562,6 +4618,15 @@ static void update_scroll_animation(void)
      * several, at half rate or after a late wake, follows the same pace. */
     int adv = 0;
     unsigned sample = anim_sampled_frame - left;
+    if (flat_key_origin >= 0)
+    {
+        int progress = stock_progress(USEC_TIMER - anim_clock, STOCK_SCROLL_US,
+                                      false);
+        int position = flat_key_origin +
+            (int64_t)(target_frame - flat_key_origin) * progress / STOCK_ONE;
+        adv = (position - slide_frame) * step;
+        left = 0;
+    }
     while (left > 0 && adv < remain)
     {
         uint32_t sample_clock = anim_clock + ui_frame_clock(++sample);
@@ -8612,6 +8677,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
         else
         {
             int context = CONTEXT_PLUGIN;
+            if (!panel.live && model->play_album)
+                context |= CONTEXT_CUSTOM | CONTEXT_LOCAL_LEFT_RIGHT;
             if (!flat_view() && !panel.live && !leaving)
                 context |= CONTEXT_WHEEL_DETENTS;
             button = get_custom_action(context, timeout, get_context_map);
@@ -8909,6 +8976,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
         int old_target = target;
         switch (button)
         {
+        case PF_KEY_PREV:
+        case PF_KEY_NEXT:
+            cover_key_step(button == PF_KEY_NEXT ? 1 : -1);
+            reopening = false;
+            art_owed = true;
+            button = ACTION_NONE;
+            break;
         case PF_NEXT:
         case PF_NEXT_REPEAT:
             show_next_slide();

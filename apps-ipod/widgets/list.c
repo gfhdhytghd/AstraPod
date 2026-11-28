@@ -1079,10 +1079,11 @@ bool simplelist_show_list(struct simplelist_info *info)
     if (info->speak_onshow)
         gui_synclist_speak_item(&lists);
 
+    int context = info->page_with_left_right
+        ? CONTEXT_PAGED_LIST | CONTEXT_LOCAL_LEFT_RIGHT : CONTEXT_TREE;
     while(1)
     {
-        list_do_action(CONTEXT_TREE | info->context_flags, info->timeout,
-                       &lists, &action);
+        list_do_action(context, info->timeout, &lists, &action);
 
         /* We must yield in this case or no other thread can run */
         if (info->timeout == TIMEOUT_NOBLOCK)
@@ -1173,9 +1174,9 @@ void simplelist_info_init(struct simplelist_info *info, char* title,
     info->scroll_all = false;
     info->hide_theme = false;
     info->speak_onshow = true;
+    info->page_with_left_right = false;
     info->wps_on_play = false;
     info->timeout = HZ/10;
-    info->context_flags = 0;
     info->selection = 0;
     info->top_item = -1;
     info->action_callback = NULL;

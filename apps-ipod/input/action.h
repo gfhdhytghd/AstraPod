@@ -26,6 +26,7 @@
 /* Let the screen's keymap handle LEFT/RIGHT under wheel navigation.
  * PLAY still goes through global transport. */
 #define CONTEXT_LOCAL_LEFT_RIGHT 0x01000000
+
 #define CONTEXT_WHEEL_DETENTS 0x02000000 /* physical wheel steps for this input context */
 #define CONTEXT_REMAPPED 0x08000000 /* marker for key remap context table */
 #define CORE_CONTEXT_REMAP(context) (CONTEXT_REMAPPED | context)
@@ -106,6 +107,7 @@ enum {
     CONTEXT_AGENTS, /* System > Agents: a list with ACTION_AGENTS_TALK */
     CONTEXT_VIDEO_PLAYBACK, /* Native movie player, uses the WPS keymap. */
     CONTEXT_DIALOG, /* A dialog with its own button map. */
+    CONTEXT_PAGED_LIST, /* Physical arrows page without leaving the list. */
     LAST_CONTEXT_PLACEHOLDER,
 };
 
@@ -379,8 +381,9 @@ int get_custom_action(int context,int timeout,
 /* Scope MENU to one step back in Now Playing's control-menu subtree. */
 bool action_set_menu_back(bool enabled);
 bool action_menu_back(void);
-/* Use wheel navigation and transport keys on a paged screen. */
-bool action_set_wheel_transport(bool enabled);
+
+/* Raw UI polling with the same LEFT/RIGHT ownership and global PLAY. */
+int action_get_raw_button(int context, int timeout);
 
 int get_action(int context, int timeout);
 

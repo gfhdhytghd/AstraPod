@@ -24,6 +24,8 @@
 #include "lang.h"
 #include "lcd.h"
 #include "root_menu.h"
+#include "screens/playback/wps.h"
+#include "system/volume.h"
 #include "settings/settings.h"
 #include "system.h"
 #include "ui/scene.h"
@@ -430,7 +432,22 @@ static enum slideshow_music slideshow_start(int *order, int count, int selected)
     return SLIDESHOW_UNCHANGED;
 }
 
-static bool photo_view(const struct albums *a, int *sel, bool playing)
+static const struct button_mapping *photo_view_keys(int context)
+{
+    (void)context;
+    static const struct button_mapping keys[] = {
+        { ACTION_WPS_SKIPPREV, BUTTON_LEFT, BUTTON_NONE },
+        { ACTION_WPS_SKIPNEXT, BUTTON_RIGHT, BUTTON_NONE },
+        { ACTION_NONE, BUTTON_LEFT | BUTTON_REL, BUTTON_NONE },
+        { ACTION_NONE, BUTTON_RIGHT | BUTTON_REL, BUTTON_NONE },
+        { ACTION_NONE, BUTTON_LEFT | BUTTON_REPEAT, BUTTON_NONE },
+        { ACTION_NONE, BUTTON_RIGHT | BUTTON_REPEAT, BUTTON_NONE },
+        LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_WPS)
+    };
+    return keys;
+}
+
+static bool photo_view(const struct albums *a, int *sel)
 {
     int handle = core_alloc(3 * PHOTO_PIXELS * sizeof(fb_data) +
                             a->slide_count * sizeof(int));
@@ -443,12 +460,7 @@ static bool photo_view(const struct albums *a, int *sel, bool playing)
     int position = *sel;
     enum slideshow_music music = SLIDESHOW_UNCHANGED;
     int interval = MIN(20, MAX(0, global_settings.photo_duration)) * HZ;
-    if (playing)
-    {
-        music = slideshow_start(order, a->slide_count, *sel);
-        if (global_settings.photo_shuffle)
-            position = 0;
-    }
+    bool playing = false;
     draw_photo(a, *sel, current);
     lcd_bitmap(current, 0, 0, LCD_WIDTH, LCD_HEIGHT);
     lcd_update();
@@ -457,10 +469,12 @@ static bool photo_view(const struct albums *a, int *sel, bool playing)
     bool usb = false;
     for (;;)
     {
-        int action = get_action(CONTEXT_WPS, playing && interval ?
-                                MAX(1, due - current_tick) : TIMEOUT_BLOCK);
+        int action = get_custom_action(
+            CONTEXT_PLUGIN | CONTEXT_LOCAL_LEFT_RIGHT,
+            playing && interval ? MAX(1, due - current_tick) : TIMEOUT_BLOCK,
+            photo_view_keys);
         int step = 0;
-        if (action == ACTION_WPS_MENU)
+        if (action == ACTION_WPS_MENU || action == ACTION_STD_CANCEL)
             break;
         if (action == SYS_USB_CONNECTED)
         {
@@ -468,7 +482,12 @@ static bool photo_view(const struct albums *a, int *sel, bool playing)
             break;
         }
         default_event_handler(action);
-        if (action == ACTION_WPS_PLAY || action == ACTION_WPS_BROWSE)
+        if (action == ACTION_WPS_PLAY)
+        {
+            wps_wheel_transport(action);
+            continue;
+        }
+        if (action == ACTION_WPS_BROWSE)
         {
             playing = !playing;
             if (playing)
@@ -482,6 +501,12 @@ static bool photo_view(const struct albums *a, int *sel, bool playing)
                 music = SLIDESHOW_UNCHANGED;
             }
             due = current_tick + interval;
+            continue;
+        }
+        if (playing && (action == ACTION_WPS_VOLUP ||
+                        action == ACTION_WPS_VOLDOWN))
+        {
+            adjust_volume(action == ACTION_WPS_VOLUP ? 1 : -1);
             continue;
         }
         if (action == ACTION_WPS_SKIPPREV || action == ACTION_WPS_VOLDOWN)
@@ -535,24 +560,29 @@ static bool photo_grid(const struct albums *a, const char *title)
         draw_grid(a, title, sel);
     while (a->slide_count)
     {
-        int action = get_action(CONTEXT_STD, TIMEOUT_BLOCK);
+        int action = get_action(CONTEXT_PAGED_LIST | CONTEXT_LOCAL_LEFT_RIGHT,
+                                TIMEOUT_BLOCK);
         int button;
         get_action_statuscode(&button);
-        if ((button & BUTTON_MENU) && action == ACTION_STD_CANCEL)
+        if (action == ACTION_STD_CANCEL)
             break;
         if (default_event_handler(action) == SYS_USB_CONNECTED)
         {
             usb = true;
             break;
         }
-        if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
+        if (action == ACTION_LISTTREE_PGUP && sel >= GRID_PAGE)
+            sel -= GRID_PAGE;
+        else if (action == ACTION_LISTTREE_PGDOWN &&
+                 (sel / GRID_PAGE + 1) * GRID_PAGE < a->slide_count)
+            sel = MIN(a->slide_count - 1, sel + GRID_PAGE);
+        else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
             sel = MAX(0, sel - 1);
         else if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
             sel = MIN(a->slide_count - 1, sel + 1);
-        else if ((action == ACTION_STD_OK && (button & BUTTON_SELECT)) ||
-                 action == ACTION_TREE_WPS)
+        else if (action == ACTION_STD_OK && (button & BUTTON_SELECT))
         {
-            usb = photo_view(a, &sel, action == ACTION_TREE_WPS);
+            usb = photo_view(a, &sel);
             if (usb)
                 break;
         }

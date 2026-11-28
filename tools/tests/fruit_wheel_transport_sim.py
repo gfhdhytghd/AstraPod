@@ -12,6 +12,7 @@ import argparse
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,9 @@ class Playback:
             "elapsed": "&'playback.c'::static_id3_entries[0].elapsed",
             "activity": "&'activity.c'::current_activity[0]",
             "depth": "&'activity.c'::current_activity_top",
+            "cover": "&center_index",
+            "cover_visible": "&'carousel.c'::pf_shown",
+            "cover_state": "&'carousel.c'::pf_state",
         }
         activities = sorted(set(SCREEN_ACTIVITY.values()))
         args = ["gdb", "-nx", "-batch", str(binary)]
@@ -159,45 +163,130 @@ def probe(sim, playing, name, hold_seek=False, region=(22, 240, 0, 320),
     print(f"PASS {name}", flush=True)
 
 
-def probe_about(sim, playback):
-    """The page owns LEFT/RIGHT and the running playlist owns PLAY."""
+def probe_paging(sim, playback, name, region=np.s_[35:220, :]):
+    """Both arrows move the UI while PLAY controls the same playlist."""
     out = Path(sim.log.name).parent
-    press(sim, "select")
     before = frame(sim)
-    page = np.s_[135:226, :]
+    Image.fromarray(before).save(out / f"{name}-start.png")
     track = playback.get("track")
     elapsed = playback.get("elapsed", size=8)
-    assert playback.get("status") == 3, "About needs paused playback"
+    center = playback.get("cover") if name == "cover-flow" else None
+    assert playback.get("status") == 3, f"{name} needs paused playback"
     for key in ("right", "back"):
-        press(sim, key)
+        first = len(sim.seen)
+        press(sim, key, hold=10)
+        if center is not None:
+            expected = center + (key == "right")
+            wait_for(lambda: playback.get("cover") == expected and
+                     playback.get("cover_state") == 0,
+                     f"{name} {key} did not land exactly one album away")
         after = frame(sim)
-        assert np.any(before[page] != after[page]), f"About did not page on {key}"
-        assert playback.get("track") == track, f"About {key} skipped track"
-        assert playback.get("elapsed", size=8) == elapsed, f"About {key} sought"
-        assert playback.get("status") == 3, f"About {key} changed playback"
-        Image.fromarray(after).save(out / f"about-{key}.png")
+        Image.fromarray(after).save(out / f"{name}-{key}.png")
+        assert np.any(before[region] != after[region]), (name, key, "no paging")
+        assert playback.get("track") == track, (name, key, "skipped track")
+        assert playback.get("elapsed", size=8) == elapsed, (name, key, "sought")
+        assert playback.get("status") == 3, (name, key, "changed playback")
+        if name == "slideshow":
+            for _, raw in sim.seen[first:]:
+                picture = np.frombuffer(raw, np.uint8).reshape(240, 320, 3)
+                if picture[100, 100, 0] > 15 and picture[100, 100, 1] > 15:
+                    Image.fromarray(picture).save(out / f"{name}-{key}-fade.png")
+                    break
+            else:
+                raise AssertionError((name, key, "configured fade did not run"))
         before = after
 
     press(sim, "play")
-    wait_for(lambda: playback.get("status") == 1, "About PLAY did not resume")
+    wait_for(lambda: playback.get("status") == 1, f"{name} PLAY did not resume")
     press(sim, "play")
-    wait_for(lambda: playback.get("status") == 3, "About PLAY did not pause")
-    assert playback.get("track") == track, "About PLAY changed the track"
-    assert np.array_equal(before[page], frame(sim)[page]), "PLAY changed page"
-    press(sim, "menu")
-    print("PASS About paging and playback", flush=True)
+    wait_for(lambda: playback.get("status") == 3, f"{name} PLAY did not pause")
+    assert playback.get("track") == track, (name, "PLAY changed the track")
+    assert np.array_equal(before[region], frame(sim)[region]), (
+        name, "PLAY changed the page")
+    print(f"PASS {name} paging and playback", flush=True)
+
+
+def create_indexed_photos(root):
+    """Synthetic indexed photos, with enough entries to page the grid."""
+    def record(tag, fields=(), body=b"", count=None):
+        header = 12 + len(fields) * 4
+        return struct.pack("<4sII" + "I" * len(fields), tag, header,
+                           header + len(body) if count is None else count,
+                           *fields) + body
+
+    colors = (0xf800, 0x07e0, 0x001f, 0xffe0) * 4
+    photos = root / "Photos"
+    thumbs = photos / "Thumbs"
+    thumbs.mkdir(parents=True, exist_ok=True)
+    formats = ((1066, 64 * 64), (1024, 320 * 240))
+    for fmt, pixels in formats:
+        data = b"".join(struct.pack("<H", c) * pixels for c in colors)
+        (thumbs / f"F{fmt}_1.ithmb").write_bytes(data)
+
+    images = []
+    for i in range(len(colors)):
+        records = []
+        for fmt, pixels in formats:
+            path = f":Thumbs:F{fmt}_1.ithmb".encode()
+            name = record(b"mhod", body=struct.pack("<III", len(path), 0, 0)
+                          + path)
+            size = pixels * 2
+            thumb = record(b"mhni", (1, fmt, i * size, size, 0, 0), name)
+            records.append(record(b"mhod", (2,), thumb))
+        images.append(record(b"mhii", (len(records), i + 1), b"".join(records)))
+    album = record(b"mhba", (0, 0, 0, 0, 1 << 16))
+    sections = [
+        record(b"mhsd", (1,), record(b"mhli", body=b"".join(images),
+                                     count=len(images))),
+        record(b"mhsd", (2,), record(b"mhla", body=album, count=1)),
+    ]
+    (photos / "Photo Database").write_bytes(record(b"mhfd", body=b"".join(sections)))
+
+
+def start_paused(sim, playback):
+    move(sim, 6)
+    press(sim, "select", hold=10)
+    wps = playback.activities["ACTIVITY_WPS"]
+    wait_for(lambda: playback.get("status") == 1 and playback.activity() == wps,
+             "Shuffle Songs did not enter Now Playing")
+    sim.settle(quiet=.60, limit=2)
+    press(sim, "play", hold=12)
+    try:
+        wait_for(lambda: playback.get("status") == 3,
+                 "Now Playing did not pause", limit=1.2)
+    except AssertionError:
+        # Startup can carry SELECT into the first WPS poll. Only retry the
+        # fixture setup; every paging and PLAY assertion uses a single key.
+        assert playback.get("status") == 1 and playback.activity() == wps
+        press(sim, "play", hold=12)
+        wait_for(lambda: playback.get("status") == 3, "Now Playing did not pause")
+
+
+def indexed_photos(sim, playback):
+    start_paused(sim, playback)
+    press(sim, "menu", hold=10)
+    menu = playback.activities["ACTIVITY_MAINMENU"]
+    wait_for(lambda: playback.activity() == menu, "Photos fixture did not reach Home")
+    sim.settle(quiet=.4, limit=1.5)
+    # With wrap disabled, reset to the first row. Now Playing can return
+    # to either Music or Shuffle Songs depending on startup timing.
+    move(sim, -8)
+    move(sim, 2)
+    press(sim, "select", hold=10)  # Photos
+    press(sim, "select", hold=10)  # All Photos, indexed grid
+    probe_paging(sim, playback, "photo-grid")
+    press(sim, "select")  # Full-screen still
+    probe_paging(sim, playback, "indexed-photo")
+    press(sim, "select")  # Manual slideshow
+    probe_paging(sim, playback, "slideshow")
 
 
 def walk(sim, playback, sim_binary):
     # Main menu -> Shuffle Songs -> Now Playing, with a real queued playlist.
     out = Path(sim.log.name).parent
     Image.fromarray(frame(sim)).save(out / "start.png")
-    move(sim, 6)
-    press(sim, "select")
+    start_paused(sim, playback)
     Image.fromarray(frame(sim)).save(out / "shuffled.png")
-    wait_for(lambda: playback.get("status") == 1, "Shuffle Songs did not start")
-    press(sim, "play")
-    wait_for(lambda: playback.get("status") == 3, "Now Playing did not pause")
     probe(sim, playback, "now-playing", hold_seek=True, expect_body_stable=False)
     press(sim, "menu")
 
@@ -207,7 +296,11 @@ def walk(sim, playback, sim_binary):
     press(sim, "select")
     probe(sim, playback, "music-menu", region=(22, 240, 0, 142))
     press(sim, "select")
-    probe(sim, playback, "cover-flow", region=(190, 225, 70, 250))
+    wait_for(lambda: playback.get("cover_visible", size=1),
+             "Cover Flow did not present", limit=12)
+    if playback.get("cover") > 0:
+        move(sim, -1)
+    probe_paging(sim, playback, "cover-flow", np.s_[190:225, 65:255])
     press(sim, "select")
     probe(sim, playback, "album-panel")
     press(sim, "menu")
@@ -217,9 +310,9 @@ def walk(sim, playback, sim_binary):
     move(sim, 2)
     press(sim, "select")
     press(sim, "select")
-    probe(sim, playback, "photos-list")
+    probe_paging(sim, playback, "photos-list")
     press(sim, "select")
-    probe(sim, playback, "photo")
+    probe_paging(sim, playback, "photo", np.s_[50:190, :])
     before = frame(sim)
     move(sim, 1)
     assert np.any(frame(sim)[50:190] != before[50:190]), "wheel did not page photos"
@@ -236,6 +329,13 @@ def walk(sim, playback, sim_binary):
     probe(sim, playback, "clock-sheet")
     press(sim, "menu")
     press(sim, "menu")
+    move(sim, 1)
+    press(sim, "select")  # Calendars
+    press(sim, "select")  # All Calendars, month view
+    probe_paging(sim, playback, "calendar-month")
+    press(sim, "menu")
+    press(sim, "menu")
+    move(sim, -1)
     # The standard SDL build has no USB PodLink service or Agents screen.
     symbols = subprocess.check_output(["nm", str(sim_binary)], text=True)
     if any(line.endswith(" agents_screen") for line in symbols.splitlines()):
@@ -253,10 +353,14 @@ def walk(sim, playback, sim_binary):
     move(sim, 1)
     press(sim, "select")
     probe(sim, playback, "settings", region=(22, 240, 0, 142))
-    probe_about(sim, playback)
+    press(sim, "select")  # About
+    probe_paging(sim, playback, "about", np.s_[135:226, :])
     press(sim, "menu")
+    press(sim, "menu")
+    sim.settle(quiet=.4, limit=1.5)
     press(sim, "menu", hold=45)
-    assert playback.activity() == playback.activities["ACTIVITY_QUICKSCREEN"]
+    wait_for(lambda: playback.activity() == playback.activities["ACTIVITY_QUICKSCREEN"],
+             "Control Centre did not open")
     # Control Centre is a page of controls, not a navigation page:
     # SELECT closes it cleanly back to the menu.
     press(sim, "select")
@@ -348,7 +452,9 @@ qs bottom: hardware keyclick
         create_fixture(fixture, args.zip, config + "native theme: fruit-company\n")
         with ZipFile(args.zip) as resources:
             resources.extract(".rockbox/themes/stock-art.bin", fixture)
-        Image.new("RGB", (192, 192), (24, 180, 98)).save(fixture / "Images/Other.jpg")
+        for i in range(16):
+            image = Image.new("RGB", (192, 192), (24 + i * 12, 180, 98))
+            image.save(fixture / "Images" / f"Photo {i:02d}.jpg")
         install_sim_codecs(args.binary, fixture)
         build_tagcache(args.binary, fixture, args.output / "tagcache.log")
         # A database build can leave its temporary startup config behind.
@@ -368,6 +474,16 @@ start directory: /Playlists
                     lambda sim, playback: probe_chord(sim, playback, theme))
             assert not (root / ".rockbox/native-theme.log").exists(), (
                 theme, "native theme rejected")
+        indexed = Path(temporary) / "indexed"
+        shutil.copytree(fixture, indexed)
+        create_indexed_photos(indexed)
+        (indexed / ".rockbox/config.cfg").write_text(config + """\
+native theme: fruit-company
+photo duration: 0
+photo transition: fade
+list wraparound: off
+""", encoding="utf-8")
+        run_sim(args.binary, indexed, args.output, "indexed-photos", indexed_photos)
         run_sim(args.binary, fixture, args.output, "transport",
                 lambda sim, playback: walk(sim, playback, args.binary))
 

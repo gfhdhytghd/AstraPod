@@ -1968,11 +1968,11 @@ static int month_page(struct ical_index *idx, int filter)
             dirty = false;
         }
 
-        int action = get_action(CONTEXT_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ);
-        int step = calendar_button_step(action);
-        if (step)
+        int action = get_action(CONTEXT_PAGED_LIST | CONTEXT_LOCAL_LEFT_RIGHT,
+                                HZ);
+        if (action == ACTION_LISTTREE_PGUP || action == ACTION_LISTTREE_PGDOWN)
         {
-            extras_step_month(&p.shown, step);
+            extras_step_month(&p.shown, action == ACTION_LISTTREE_PGUP ? -1 : 1);
             month_title(&p.shown, title, sizeof(title));
             dirty = true;
             continue;

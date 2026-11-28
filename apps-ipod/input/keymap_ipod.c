@@ -184,6 +184,17 @@ static const struct button_mapping button_context_tree_scroll_lr[]  = {
     LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_CUSTOM|CONTEXT_TREE),
 }; /* button_context_tree_scroll_lr */
 
+static const struct button_mapping button_context_paged_list[] = {
+    { ACTION_LISTTREE_PGUP, BUTTON_LEFT, BUTTON_NONE },
+    { ACTION_LISTTREE_PGDOWN, BUTTON_RIGHT, BUTTON_NONE },
+    { ACTION_NONE, BUTTON_LEFT | BUTTON_REL, BUTTON_NONE },
+    { ACTION_NONE, BUTTON_RIGHT | BUTTON_REL, BUTTON_NONE },
+    { ACTION_NONE, BUTTON_LEFT | BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_NONE, BUTTON_RIGHT | BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_STD_CANCEL, BUTTON_MENU | BUTTON_REL, BUTTON_MENU },
+    LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_TREE)
+};
+
 static const struct button_mapping button_context_wps[]  = {
     { ACTION_WPS_PLAY,      BUTTON_PLAY|BUTTON_REL,         BUTTON_PLAY },
     { ACTION_WPS_CONTEXT,   BUTTON_PLAY|BUTTON_REPEAT,      BUTTON_PLAY },
@@ -564,6 +575,7 @@ static const struct button_mapping* get_context_mapping_remote( int context )
         case CONTEXT_MAINMENU:
         case CONTEXT_CUSTOM|CONTEXT_TREE:
             return remote_button_context_tree;
+        case CONTEXT_PAGED_LIST:
         case CONTEXT_LIST:
         case CONTEXT_BOOKMARKSCREEN:
             return remote_button_context_list;
@@ -650,6 +662,9 @@ const struct button_mapping* get_context_mapping(int context)
             /* else fall through to CUSTOM|CONTEXT_TREE */
         case CONTEXT_CUSTOM|CONTEXT_TREE:
             return button_context_tree;
+
+        case CONTEXT_PAGED_LIST:
+            return button_context_paged_list;
 
         case CONTEXT_LIST:
             return button_context_standard;

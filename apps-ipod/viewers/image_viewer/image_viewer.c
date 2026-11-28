@@ -26,7 +26,7 @@
  *
  * Memory: one block holds both the file-name list and the decoded image,
  * carved up by get_pic_list() advancing `buf` past the list. Album art and
- * wheel-navigation photos try the app buffer first to keep audio playing.
+ * photos try the app buffer first to keep audio playing.
  * Other files and images too large for that use a core_alloc_maximum() block. That is pinned for the
  * whole session, so a USB connect would deadlock on it -- iv_usb_inserted()
  * drops it from the USB thread before that can happen, and the viewer takes
@@ -57,6 +57,7 @@
 #include "logf.h"
 #include "button.h"
 #include "input/agents_shortcut.h"
+#include "input/action.h"
 #include "input/remote_menu.h"
 #include "lang.h"            /* str(), LANG_* */
 #include "settings/settings.h"        /* global_settings, set_option/int/bool, ID2P */
@@ -596,7 +597,7 @@ static int iv_get_button(int timeout)
     while (true)
     {
         int wait = ui_scene_poll(timeout);
-        int button = agents_shortcut_get_button(wait);
+        int button = action_get_raw_button(CONTEXT_LOCAL_LEFT_RIGHT, wait);
         if (button != BUTTON_NONE || wait == timeout)
             return button;
         if (timeout > 0)
@@ -1475,7 +1476,7 @@ int image_viewer(const char *file)
     splashf(0, "%s", str(LANG_WAIT));
 
     /* Use the app buffer to leave the playback queue alive behind photos. */
-    if (!iv_take_buffer(is_album_art || ui_wheel_navigation()))
+    if (!iv_take_buffer(true))
     {
         ui_scene_cancel(&scene);
         splash(HZ * 2, "Out of memory");
@@ -1546,7 +1547,7 @@ int image_viewer(const char *file)
              * another and show the same picture again. The file list lived
              * in the old one. */
             iv_usb_dropped = false;
-            if (!iv_take_buffer(ui_wheel_navigation()))
+            if (!iv_take_buffer(true))
             {
                 splash(HZ * 2, "Out of memory");
                 condition = PLUGIN_ERROR;

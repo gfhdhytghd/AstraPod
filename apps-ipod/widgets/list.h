@@ -414,12 +414,12 @@ struct simplelist_info {
     bool scroll_all;
     bool hide_theme;
     bool speak_onshow; /* list speaks first item or 'empty list' */
+    bool page_with_left_right;
     bool wps_on_play;  /* PLAY exits with selection == -2, meaning "go to the
                           playing screen". Only for callers that can act on it:
                           the settings lists have no GO_TO_* to return, and
                           there PLAY is ignored rather than meaning "back". */
     int  timeout;
-    int  context_flags; /* optional action context flags */
     int  selection; /* the item to select when the list is first displayed */
     int  top_item;  /* the row shown first, or -1 for wherever the selection
                        puts it; a short list stays at its top */

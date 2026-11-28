@@ -305,6 +305,8 @@ static const struct button_mapping *genius_keymap(int context)
 {
     (void)context;
     static const struct button_mapping keys[] = {
+        { ACTION_NONE, BUTTON_LEFT, BUTTON_NONE },
+        { ACTION_NONE, BUTTON_RIGHT, BUTTON_NONE },
         { ACTION_STD_PREV, BUTTON_LEFT | BUTTON_REL, BUTTON_LEFT },
         { ACTION_STD_NEXT, BUTTON_RIGHT | BUTTON_REL, BUTTON_RIGHT },
         { ACTION_WPS_PLAY, BUTTON_PLAY | BUTTON_REL, BUTTON_PLAY },

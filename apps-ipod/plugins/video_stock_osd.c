@@ -59,11 +59,9 @@
 
 /* Bars: the progress bar and the level bars of Volume and Brightness. */
 #define BAR_Y        212
-#define PROGRESS_X   54
-#define PROGRESS_W   212
+#define PROGRESS_X   54   /* the bar's inset either side, under 10 minutes */
 #define LEVEL_W      208
-#define TIME_RIGHT   44   /* elapsed time ends here */
-#define TIME_LEFT    276  /* remaining time starts here */
+#define TIME_GAP     10   /* between the bar and each time */
 #define TIME_BASE    223
 
 /* The Picture page, as stock's Shuffle selector */
@@ -235,11 +233,34 @@ static void text(int font, const char *text, int x, int baseline,
 struct page {
     unsigned char mode;
     int elapsed, remaining;  /* seconds */
+    int inset;               /* the progress bar's, either side */
     int marker;              /* scrub marker's centre on the bar, or -1 */
     int fill;                /* level bar's blue columns */
     int picture;             /* enum video_picture_mode */
     int thumb_x, thumb_w;    /* the highlight, as it stands this frame */
 };
+
+static void time_text(char *buffer, size_t size, const char *sign, int s)
+{
+    if (s >= 3600)
+        snprintf(buffer, size, "%s%d:%02d:%02d", sign, s / 3600, s / 60 % 60,
+                 s % 60);
+    else
+        snprintf(buffer, size, "%s%d:%02d", sign, s / 60, s % 60);
+}
+
+/* Stock sizes the progress bar to the video, as long as it plays: the
+ * remaining time at the start stands at the right margin, and the bar ends
+ * TIME_GAP before it, with the same inset on the left. */
+static int progress_inset(int length)
+{
+    char buffer[16];
+    if (time_font < 0)
+        return PROGRESS_X;
+    time_text(buffer, sizeof(buffer), "-", length);
+    int wider = text_width(time_font, buffer) - text_width(time_font, "-0:00");
+    return PROGRESS_X + MAX(wider, 0);
+}
 
 static struct page page_of(const struct video_stock_state *s)
 {
@@ -254,8 +275,10 @@ static struct page page_of(const struct video_stock_state *s)
     {
         p.elapsed = position / 1000;
         p.remaining = (duration - position) / 1000;
+        p.inset = progress_inset(duration / 1000);
         if (s->mode == VIDEO_STOCK_SCRUB && duration)
-            p.marker = (int)((uint64_t)position * PROGRESS_W / duration);
+            p.marker = (int)((uint64_t)position *
+                             (LCD_WIDTH - 2 * p.inset) / duration);
     }
     else if (s->level_max > 0)
         p.fill = MIN(MAX(s->level, 0), s->level_max) * LEVEL_W / s->level_max;
@@ -287,15 +310,6 @@ static int segments(int x[VIDEO_PICTURE_COUNT], int w[VIDEO_PICTURE_COUNT])
     return at - WELL_X;
 }
 
-static void time_text(char *buffer, size_t size, const char *sign, int s)
-{
-    if (s >= 3600)
-        snprintf(buffer, size, "%s%d:%02d:%02d", sign, s / 3600, s / 60 % 60,
-                 s % 60);
-    else
-        snprintf(buffer, size, "%s%d:%02d", sign, s / 60, s % 60);
-}
-
 static void level_bar(int x, int fill)
 {
     tile(STOCK_ART_VIDEO_PROGRESSBAR_FILL, x, BAR_Y, fill);
@@ -310,21 +324,24 @@ static void put_page(const struct page *p, int dx)
     {
     case VIDEO_STOCK_PROGRESS:
     case VIDEO_STOCK_SCRUB:
-        tile(STOCK_ART_VIDEO_PROGRESSBAR, PROGRESS_X + dx, BAR_Y, PROGRESS_W);
+    {
+        int left = p->inset + dx, right = LCD_WIDTH - p->inset + dx;
+        tile(STOCK_ART_VIDEO_PROGRESSBAR, left, BAR_Y, right - left);
         if (p->marker >= 0)
         {
             /* The diamond is cut to the bar: a triangle at either end. */
             enum stock_art_id id = STOCK_ART_NOWPLAYING_PROGRESSBAR_SCRUB;
             int w = stock_art[id].width;
-            put_part(id, 0, w, PROGRESS_X + dx + p->marker - w / 2, BAR_Y,
-                     PROGRESS_X + dx, PROGRESS_X + dx + PROGRESS_W, BAR);
+            put_part(id, 0, w, left + p->marker - w / 2, BAR_Y, left, right,
+                     BAR);
         }
         time_text(buffer, sizeof(buffer), "", p->elapsed);
-        text(time_font, buffer, TIME_RIGHT + dx - text_width(time_font, buffer),
-             TIME_BASE, WHITE);
+        text(time_font, buffer,
+             left - TIME_GAP - text_width(time_font, buffer), TIME_BASE, WHITE);
         time_text(buffer, sizeof(buffer), "-", p->remaining);
-        text(time_font, buffer, TIME_LEFT + dx, TIME_BASE, WHITE);
+        text(time_font, buffer, right + TIME_GAP, TIME_BASE, WHITE);
         break;
+    }
     case VIDEO_STOCK_VOLUME:
         put(STOCK_ART_VIDEO_VOLUME_LOW, 31 + dx, 212, TEXT);
         put(STOCK_ART_VIDEO_VOLUME_HIGH, 274 + dx, 210, TEXT);
@@ -616,6 +633,7 @@ static bool present(unsigned char *const planes[3],
 
     if (bottom)
     {
+        prepare();              /* the time font sizes the progress bar */
         struct page p = page_of(s);
         if (bands[1].shown && p.mode != page_new.mode)
         {

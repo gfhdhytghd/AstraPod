@@ -103,8 +103,12 @@ def open_music(sim):
     _, frames = sim.frames_since(0)
     home = Image.frombytes("RGB", (W, H), frames[-1]).crop(title).tobytes()
     for _ in range(2):
-        shots = record(sim, 80, "select")
-        if shots[-1][1].crop(title).tobytes() != home:
+        sim.send("down select")
+        sim.wait(6)
+        sim.send("up select")
+        sim.wait(80)
+        _, frames = sim.frames_since(0)
+        if Image.frombytes("RGB", (W, H), frames[-1]).crop(title).tobytes() != home:
             return
     raise AssertionError("Music did not open from Home")
 

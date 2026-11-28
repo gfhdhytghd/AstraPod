@@ -6,8 +6,8 @@
  * used and free space, and under it one of three pages -- the 4-segment
  * capacity bar (Audio, Video, Photos, Other), the library's seven counts,
  * and the serial number, model and version. AstraPod's logo and name stand
- * in for Apple's. Select steps forward round the pages; Menu leaves; wheel
- * does nothing; Left/Right/Play remain playback-only.
+ * in for Apple's. Left, Right and Select turn pages; Menu leaves and Play
+ * controls playback.
  *
  * Parts: the numbers, the painters, then the loop.
  ****************************************************************************/
@@ -18,7 +18,6 @@
 #include "config.h"
 #include "system.h"
 #include "kernel.h"
-#include "audio.h"
 #include "button.h"
 #include "dir.h"
 #include "file.h"
@@ -44,7 +43,7 @@
 #include "system/shutdown.h"
 #include "draw/viewport.h"
 #include "ui/stock_art.h"
-#include "root_menu.h"
+#include "widgets/menu.h"
 #include "fruit_about.h"
 #include "ui/scene.h"
 #if defined(IPOD_6G) && !defined(SIMULATOR)
@@ -52,6 +51,8 @@
 #endif
 
 #define PAGES 3
+#define TURN_FRAMES 8
+#define TURN_FRAME_MS 34
 #define WHITE 0xffffff
 #define VALUE_GREY 0xe0e2e4
 /* Where stock 2.0.5 draws each part. */
@@ -596,21 +597,38 @@ static void put_identity(struct stock_canvas *c)
     }
 }
 
-static void compose(struct stock_canvas *c)
+static void put_page(struct stock_canvas *c, int page, int offset)
+{
+    /* Translate the content over the stationary background. The canvas
+     * dimensions clip it at the panel edges. */
+    struct stock_canvas shifted = *c;
+    shifted.x -= offset;
+    if (page == 0)
+    {
+        put_bar(&shifted);
+        put_legend(&shifted);
+    }
+    else if (page == 1)
+        put_counts(&shifted);
+    else
+        put_identity(&shifted);
+}
+
+static void compose(struct stock_canvas *c, int from, int incoming)
 {
     stock_art_put(c, STOCK_ART_BACKGROUND_LIGHTBLUE, 0, 0);
-    stock_art_put(c, STOCK_ART_SETTINGS_ABOUT_BAND, 0, BAND_Y);
-    stock_art_put(c, STOCK_ART_ASTRAPOD_ABOUT_LOGO, LOGO_X, LOGO_Y);
-    put_space(c);
-    if (about.page == 0)
+    if (c->y < BAR_Y)
     {
-        put_bar(c);
-        put_legend(c);
+        stock_art_put(c, STOCK_ART_SETTINGS_ABOUT_BAND, 0, BAND_Y);
+        stock_art_put(c, STOCK_ART_ASTRAPOD_ABOUT_LOGO, LOGO_X, LOGO_Y);
+        put_space(c);
     }
-    else if (about.page == 1)
-        put_counts(c);
-    else
-        put_identity(c);
+    if (c->y + c->height > BAR_Y)
+    {
+        if (incoming)
+            put_page(c, from, incoming - LCD_WIDTH);
+        put_page(c, about.page, incoming);
+    }
     for (int i = 0; i < PAGES; i++)
         stock_art_put(c, i == about.page ?
                       STOCK_ART_SETTINGS_ABOUT_BUBBLE_SELECTED :
@@ -621,7 +639,7 @@ static void compose(struct stock_canvas *c)
 
 /* Composed at 8 bits a channel, as stock composes, in as many rows at a time
  * as the scratch buffer holds, and truncated once. */
-static void paint(int y0, int y1)
+static void paint(int y0, int y1, int from, int incoming)
 {
     static const char owner[] = "About";
     size_t size;
@@ -635,7 +653,7 @@ static void paint(int y0, int y1)
         struct stock_canvas band = {
             pixels, 0, y, LCD_WIDTH, MIN(rows, y1 - y),
         };
-        compose(&band);
+        compose(&band, from, incoming);
         stock_canvas_show(&band, clip);
     }
     app_release_buffer(owner);
@@ -695,21 +713,33 @@ static int load_font(const char *name)
     return font >= 0 ? font : FONT_UI;
 }
 
-/* Navigation under Fruit themes: SELECT advances pages, MENU leaves, wheel
- * does nothing, and LEFT/RIGHT/PLAY stay playback-only. */
+/* PLAY maps locally in themes without global wheel transport. */
 static const struct button_mapping *about_keymap(int context)
 {
     (void)context;
     static const struct button_mapping keys[] = {
         { ACTION_STD_OK, BUTTON_SELECT | BUTTON_REL, BUTTON_SELECT },
-        { ACTION_STD_MENU, BUTTON_MENU | BUTTON_REL, BUTTON_MENU },
+        { ACTION_STD_CANCEL, BUTTON_MENU | BUTTON_REL, BUTTON_MENU },
         { ACTION_WPS_PLAY, BUTTON_PLAY | BUTTON_REL, BUTTON_PLAY },
         { ACTION_NONE, BUTTON_PLAY | BUTTON_REPEAT, BUTTON_NONE },
-        { ACTION_WPS_SKIPNEXT, BUTTON_RIGHT | BUTTON_REL, BUTTON_RIGHT },
-        { ACTION_WPS_SKIPPREV, BUTTON_LEFT | BUTTON_REL, BUTTON_LEFT },
+        { ACTION_STD_NEXT, BUTTON_RIGHT | BUTTON_REL, BUTTON_RIGHT },
+        { ACTION_STD_PREV, BUTTON_LEFT | BUTTON_REL, BUTTON_LEFT },
         LAST_ITEM_IN_LIST
     };
     return keys;
+}
+
+/* Stock moves only the contents, always to the left. Its eight steps
+ * advance every ~34 ms with a quadratic ease-out. */
+static int turn_offset(unsigned frame)
+{
+    unsigned left = TURN_FRAMES - frame;
+    return LCD_WIDTH * left * left / (TURN_FRAMES * TURN_FRAMES);
+}
+
+static long turn_tick(long start, unsigned frame)
+{
+    return start + (frame * TURN_FRAME_MS * HZ + 500) / 1000;
 }
 
 static unsigned bar_stamp(void)
@@ -732,53 +762,58 @@ int fruit_about_screen(void)
     about.regular = load_font("13-helvetica");
     read_info(&about.info);
     viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
-    paint(0, LCD_HEIGHT);
+    paint(0, LCD_HEIGHT, 0, 0);
     speak_page();
     unsigned last_bar = bar_stamp();
+    unsigned frame = TURN_FRAMES;
+    int from = 0;
+    long start = 0;
 
     while (1)
     {
-        int action = get_custom_action(CONTEXT_PLUGIN, HZ / 2, about_keymap);
-        if (action == ACTION_STD_MENU)
+        int timeout = HZ / 2;
+        if (frame < TURN_FRAMES)
+            timeout = MAX(0, turn_tick(start, frame + 1) - current_tick);
+        int action = get_custom_action(
+            CONTEXT_PLUGIN | CONTEXT_LOCAL_LEFT_RIGHT, timeout, about_keymap);
+        if (action == ACTION_STD_CANCEL)
             break;
-        if (action == ACTION_STD_OK)
+
+        if (action == ACTION_STD_OK || action == ACTION_STD_NEXT ||
+            action == ACTION_STD_PREV)
         {
-            about.page = (about.page + 1) % PAGES;
-            paint(0, LCD_HEIGHT);
-            last_bar = bar_stamp();
+            from = about.page;
+            int step = action == ACTION_STD_PREV ? -1 : 1;
+            about.page = (from + step + PAGES) % PAGES;
+            frame = global_settings.animations ? 0 : TURN_FRAMES;
+            paint(BAR_Y, LCD_HEIGHT, from, turn_offset(frame));
+            /* The first paint also loads the incoming page's glyphs. */
+            start = current_tick;
             speak_page();
         }
         else if (action == ACTION_WPS_PLAY)
-        {
-            int st = audio_status();
-            if (st & AUDIO_STATUS_PLAY)
-            {
-                if (st & AUDIO_STATUS_PAUSE)
-                    unpause_action(true);
-                else
-                    pause_action(true);
-            }
-        }
-        else if (action == ACTION_WPS_SKIPNEXT)
-        {
-            if (audio_status() & AUDIO_STATUS_PLAY)
-                audio_next();
-        }
-        else if (action == ACTION_WPS_SKIPPREV)
-        {
-            if (audio_status() & AUDIO_STATUS_PLAY)
-                audio_prev();
-        }
+            wps_wheel_transport(action);
         else if (default_event_handler(action) == SYS_USB_CONNECTED)
         {
-            ret = GO_TO_ROOT;
+            ret = MENU_ATTACHED_USB;
             break;
         }
+
+        unsigned next = frame;
+        while (next < TURN_FRAMES &&
+               TIME_AFTER(current_tick, turn_tick(start, next + 1) - 1))
+            next++;
+        if (next != frame)
+        {
+            frame = next;
+            paint(BAR_Y, LCD_HEIGHT, from, turn_offset(frame));
+        }
+
         unsigned now_bar = bar_stamp();
         if (now_bar != last_bar)
         {
             last_bar = now_bar;
-            paint(0, EXTRAS_BAR_HEIGHT);
+            paint(0, EXTRAS_BAR_HEIGHT, from, turn_offset(frame));
         }
     }
 

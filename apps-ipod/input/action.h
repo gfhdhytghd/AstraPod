@@ -23,6 +23,9 @@
 #define CONTEXT_CUSTOM  0x40000000 /* | this against anything to get your context number */
 #define CONTEXT_CUSTOM2 0x20000000 /* as above */
 #define CONTEXT_PLUGIN  0x10000000 /* for plugins using get_custom_action */
+/* Let the screen's keymap handle LEFT/RIGHT under wheel navigation.
+ * PLAY still goes through global transport. */
+#define CONTEXT_LOCAL_LEFT_RIGHT 0x01000000
 #define CONTEXT_WHEEL_DETENTS 0x02000000 /* physical wheel steps for this input context */
 #define CONTEXT_REMAPPED 0x08000000 /* marker for key remap context table */
 #define CORE_CONTEXT_REMAP(context) (CONTEXT_REMAPPED | context)

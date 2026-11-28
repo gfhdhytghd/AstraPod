@@ -148,10 +148,27 @@ void crumb(enum crumb_id id, uint32_t value)
     restore_interrupt(level);
 }
 
-void crumbs_crash_record(const char *message, const struct crumb_crash_context *context)
+extern const char *thread_current_name(void);
+
+static uint32_t crash_save(const char *message,
+                           const struct crumb_crash_context *context)
 {
     uint32_t boot = crumb_ring_head_ok(RING_A) ? RING_A->boot : 0;
-    crumb_crash_store(CRASH_A, boot, RBVERSION, message, context);
+    struct crumb_crash_context saved = *context;
+    if (!saved.thread[0])
+        strlcpy(saved.thread, thread_current_name(), sizeof saved.thread);
+    crumb_crash_store(CRASH_A, boot, RBVERSION, message, &saved);
+    return boot;
+}
+
+void crumbs_crash_save(const char *message, const struct crumb_crash_context *context)
+{
+    crash_save(message, context);
+}
+
+void crumbs_crash_record(const char *message, const struct crumb_crash_context *context)
+{
+    uint32_t boot = crash_save(message, context);
 #ifdef HAVE_IPOD_CRASH_RECOVERY
     /* No disk, scheduler, I2C or LCD from a fatal context. A recovery
      * fault drops through to the original diagnostic screen and halt. */
@@ -160,6 +177,8 @@ void crumbs_crash_record(const char *message, const struct crumb_crash_context *
         asm volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(zero) : "memory");
         system_reboot();
     }
+#else
+    (void)boot;
 #endif
 }
 
@@ -244,7 +263,10 @@ static void crash_report(void)
                           "AstraPod native crash\nFirmware: %s\nBoot: %lu\n"
                           "%s: %s\n"
                           "pc: %08lx  sp: %08lx  lr: %08lx  status: %08lx\n"
-                          "exception: %lu  fsr: %08lx  far: %08lx\n",
+                          "exception: %lu  fsr: %08lx  far: %08lx\n"
+                          "thread: %.16s\n"
+                          "ui lr: %08lx  wait: %08lx  caller: %08lx\n"
+                          "stack candidates: %08lx %08lx %08lx %08lx\n",
                           (const char *)crash->data.version,
                           (unsigned long)crash->data.boot,
                           kinds[context.kind],
@@ -252,7 +274,14 @@ static void crash_report(void)
                           (unsigned long)context.pc, (unsigned long)context.sp,
                           (unsigned long)context.lr, (unsigned long)context.status,
                           (unsigned long)context.exception, (unsigned long)context.fault_status,
-                          (unsigned long)context.fault_address);
+                          (unsigned long)context.fault_address, context.thread,
+                          (unsigned long)context.ui_lr,
+                          (unsigned long)context.ui_wait,
+                          (unsigned long)context.ui_caller,
+                          (unsigned long)context.calls[0],
+                          (unsigned long)context.calls[1],
+                          (unsigned long)context.calls[2],
+                          (unsigned long)context.calls[3]);
     if (length <= 0 || (size_t)length >= sizeof(output))
         return;
 

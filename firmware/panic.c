@@ -68,15 +68,17 @@ void panic_screen_enter(void)
 }
 
 #if defined(CPU_ARM) && defined(HAVE_RB_BACKTRACE)
+static volatile uintptr_t panic_entry_sp USED_ATTR;
 void panicf_f( const char *fmt, ...) USED_ATTR;
 
 /* we wrap panicf() here with naked function to catch SP value */
 void __attribute__((naked)) panicf( const char *fmt, ...)
 {
     (void)fmt;
-    asm volatile ("mov r4, sp \n"
-                  "b panicf_f \n"
-                 );
+    asm volatile ("ldr ip, =panic_entry_sp \n"
+                  "str sp, [ip]            \n"
+                  "b panicf_f              \n"
+                  ".ltorg                 \n");
     while (1);
 }
 
@@ -85,11 +87,7 @@ void __attribute__((naked)) panicf( const char *fmt, ...)
  */
 void panicf_f( const char *fmt, ...)
 {
-    int sp;
-
-    asm volatile ("mov %[SP],r4 \n"
-                  : [SP] "=r" (sp)
-                 );
+    int sp = panic_entry_sp;
 
     int pc = (int)__builtin_return_address(0);
 #elif defined(BACKTRACE_MIPSUNWINDER)
@@ -122,6 +120,9 @@ void panicf( const char *fmt, ...)
         .pc = (uintptr_t)__builtin_return_address(0),
 #ifdef HAVE_RB_BACKTRACE
         .sp = (uint32_t)sp,
+#if defined(CPU_ARM)
+        .lr = (uint32_t)pc,
+#endif
 #endif
         .status = get_processor_mode(),
     });

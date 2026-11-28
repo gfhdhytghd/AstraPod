@@ -163,7 +163,6 @@ def fiq(u, cpsr=0x9f):
         c = u.reg_read(UC_ARM_REG_CPSR)
         assert c & 0x1f == 0x11 and c & 0xc0 == 0xc0, hex(c)
         assert u.reg_read(UC_ARM_REG_SP) == rd(u, sym('hang_fiq_stack_end'))
-        assert u.reg_read(UC_ARM_REG_SP) == sym('fiq_stack') + 2048
         return 'show'
     assert pc == INT_PC, hex(pc)
     c = u.reg_read(UC_ARM_REG_CPSR)

@@ -81,7 +81,7 @@
  */
 #if defined(IPOD_6G) && !defined(SIMULATOR)
 #define HAVE_SM1_ALAC_API
-#define CODEC_API_VERSION 51
+#define CODEC_API_VERSION 52
 #else
 #define CODEC_API_VERSION 50
 #endif
@@ -229,6 +229,10 @@ struct codec_api {
 #if defined(HAVE_RECORDING) && defined(IPOD_6G)
     /* Preserve the Classic playback API, including the SM1 ALAC entries. */
 #include "codec_recording_api.h"
+#endif
+#ifdef HAVE_SM1_ALAC_API
+    /* Read ALAC sample sizes without moving the playback buffer cursor. */
+    size_t (*alac_read_at)(off_t offset, void *buffer, size_t size);
 #endif
 };
 

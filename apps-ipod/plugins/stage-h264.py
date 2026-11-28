@@ -410,6 +410,10 @@ size_t video_h264_scratch_size(const char *path)""")
                 video_log_event(filepath, "aac-decode", -1, clock_ms);
             video_audio_stop();
             have_audio = false;""")
+    replace('        rb->splash(HZ * 2, "Video worker failed");',
+            '        failure = "worker-start";\n'
+            '        code = -1;\n'
+            '        rb->splash(HZ * 2, "Video worker failed");')
     replace("        if (pipe.error)\n        {", """        if (pipe.error)
         {
             failure = pipe.read_failed ? "sample-read" : "sample-decode";

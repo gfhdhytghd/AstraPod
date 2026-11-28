@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Run the staged player with cooperative virtual time, cold reads and stalls."""
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import re
 import subprocess as sp
 import sys
@@ -168,7 +167,7 @@ static ssize_t cold_read(int fd, void *buffer, size_t size)
 harness += r"""
 int main(int argc, char **argv)
 {
-    assert(argc == 4);
+    assert(argc == 3);
     reset(FINISH);
     profile = argv[2][0] - '0';
     if (profile == 2)
@@ -204,7 +203,7 @@ sp.run(["cc", "-std=gnu11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
 
 
 def run(video, profile):
-    trace = sp.run([binary, video, str(profile), "run"], cwd=out, text=True,
+    trace = sp.run([binary, video, str(profile)], cwd=out, text=True,
                    stdout=sp.PIPE, check=True).stdout
     (out / f"trace-{profile}.txt").write_text(trace)
     frames = [tuple(map(int, line.split()[1:]))

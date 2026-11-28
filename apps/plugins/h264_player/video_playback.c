@@ -70,7 +70,15 @@
 #define VIDEO_CATCH_UP_MS        160
 #define VIDEO_CATCH_UP_LEAD_MS   240
 #define VIDEO_CATCH_UP_RETRY_MS  50
+#ifdef VIDEO_ROCK_WORKER
+#ifdef DEFAULT_STACK_SIZE
+#define VIDEO_WORKER_STACK      MAX(12u * 1024u, DEFAULT_STACK_SIZE)
+#else
 #define VIDEO_WORKER_STACK      (12u * 1024u)
+#endif
+#else
+#define VIDEO_WORKER_STACK      0
+#endif
 #define VIDEO_OSD_SHOW_TICKS     (HZ * 4)
 #define VIDEO_RESUME_MAGIC       0x48323634u
 #define VIDEO_RESUME_FILE        PLUGIN_APPS_DATA_DIR \
@@ -1359,12 +1367,14 @@ static void video_decode_step(struct video_pipeline *pipe)
         pipe->read_failed = true;
         goto failed;
     }
-    if (pipe->stop)
+    if (pipe->stop || (pipe->paused && !pipe->preview))
         return;
 
+    pipe->busy = true;
     start = video_time_us();
     result = rb->hw_h264->decode_sample(pipe->decoder, compressed,
                                         size, demux.nalu_len_size);
+    pipe->busy = false;
     video_measure(STAGE_DECODE, video_time_us() - start);
     if (rb->hw_h264->decode_timing)
     {
@@ -1430,9 +1440,7 @@ static void video_decode_worker(void *arg)
         if (pipe->ready && (!pipe->paused || pipe->preview) &&
             video_queue_fill(pipe) < VIDEO_QUEUE_DEPTH)
         {
-            pipe->busy = true;
             video_decode_step(pipe);
-            pipe->busy = false;
             rb->yield();
         }
         else
@@ -1532,7 +1540,7 @@ int video_h264_play_named(const char *filepath, void *buffer,
     uint32_t play_ms;
     char title[42];
     struct video_osd osd = {.options = options, .title = title};
-    long start_tick;
+    long start_tick = 0;
     long pause_started = 0;
     bool paused = false;
     bool cpu_boosted = false;
@@ -1761,6 +1769,8 @@ start_pipeline:
             action == VIDEO_INPUT_SEEK_BACK ||
             action == VIDEO_INPUT_SEEK_FORWARD)
         {
+            if (have_audio)
+                video_audio_output_pause(true);
 #ifdef VIDEO_ROCK_WORKER
             video_worker_stop(&pipe, &worker);
 #endif

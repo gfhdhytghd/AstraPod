@@ -316,7 +316,7 @@ static void audio_pcm_insert(const void *channel1, const void *channel2,
             break;
 
         bool gap = audio_gap != 0;
-        frames = gap ? MIN(audio_gap, AUDIO_PCM_FRAMES) : count - consumed;
+        frames = gap ? (int)MIN(audio_gap, AUDIO_PCM_FRAMES) : count - consumed;
         if (frames > AUDIO_PCM_FRAMES)
             frames = AUDIO_PCM_FRAMES;
         if (gap)

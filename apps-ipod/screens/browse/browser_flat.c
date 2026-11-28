@@ -469,7 +469,8 @@ static int show_list(const char *type, char *title)
             info.top_item = heads;
         }
         info.selection = MIN(sel, heads + shown_ct - 1);
-        info.wps_on_play = !loose_videos_only;
+        info.page_with_left_right = flat_kind == FLAT_IMAGES;
+        info.wps_on_play = !loose_videos_only && !info.page_with_left_right;
         if (loose_videos_only)
             info.action_callback = stock_media_list_action;
 

@@ -1228,6 +1228,7 @@ struct detail_field {
 
 struct page {
     void (*compose)(struct stock_canvas *band, struct page *p);
+    bool page_months;
     uint32_t *band;
     struct cal_date shown;
     int cal_filter;                  /* -1 = All Calendars, >=0 = specific */
@@ -1287,7 +1288,9 @@ static int page_run(struct page *p, char *title, size_t size,
             ui_page_invalidate(&page, bounds);
             ui_page_draw(&page);
         }
-        int action = extras_get_action(HZ, true);
+        int action = p->page_months
+            ? get_action(CONTEXT_PAGED_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ)
+            : extras_get_action(HZ, true);
         if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
             break;
         if (default_event_handler(action) == SYS_USB_CONNECTED)
@@ -1725,6 +1728,19 @@ static bool month_key(struct page *p, int action, char *title, size_t size)
 {
     switch (action)
     {
+        case ACTION_LISTTREE_PGUP:
+        case ACTION_LISTTREE_PGDOWN:
+        {
+            struct cal_date *date = &p->shown;
+            int day = date->day;
+            date->day = 1;
+            if (action == ACTION_LISTTREE_PGUP)
+                step_days(date, -1);
+            else
+                step_days(date, month_days(date->year, date->month));
+            date->day = MIN(day, month_days(date->year, date->month));
+            break;
+        }
         case ACTION_STD_NEXT:
         case ACTION_STD_NEXTREPEAT:
             step_days(&p->shown, 1);
@@ -1748,6 +1764,7 @@ static int month_page(int cal_filter)
     char title[48];
     static struct page p;
     p = (struct page){ .compose = month_compose, .shown = today(),
+                       .page_months = true,
                        .cal_filter = cal_filter };
     p.font = font_load_ex(CAL_FONT, 0, global_settings.glyphs_to_cache);
     if (p.font < 0)

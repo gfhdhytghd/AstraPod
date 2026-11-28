@@ -198,6 +198,20 @@ def session(build, case, theme="scrim"):
                     proc.wait(timeout=5)
 
 
+def empty_menu_rows(sim):
+    for name in ("rentals", "tv shows", "music videos", "video playlists"):
+        label = name.replace(" ", "-")
+        sim.tap("down")
+        sim.text(label, [name])
+        before = Image.open(sim.case / f"{label}.png")
+        sim.tap("select")
+        after = sim.image()
+        # Ignore the status bar, whose battery animation runs independently.
+        content = (0, 20, 160, 240)
+        assert after and before.crop(content).tobytes() == \
+            after.crop(content).tobytes(), f"SELECT opened empty {name}"
+
+
 def stock_navigation(sim, theme):
     if theme == "classic":
         sim.text("home", ["videos", "files"])
@@ -206,18 +220,25 @@ def stock_navigation(sim, theme):
         sim.tap("down")
     sim.go("select", "videos-menu", ["movies", "rentals", "tv shows",
                                    "music videos", "playlists", "settings"])
-    sim.go("select", "movies", ["indexed film", "3 s", "loose"])
+    sim.go("select", "movies", ["indexed film", "loose"])
+    movie = Image.open(sim.case / "movies.png")
+    duration = movie.crop((58, 49, 145, 64))
+    duration = ImageOps.invert(ImageOps.autocontrast(ImageOps.grayscale(duration)))
+    duration_png = sim.case / "movie-duration.png"
+    duration.resize((348, 60)).save(duration_png)
+    text = subprocess.check_output(
+        ["tesseract", duration_png, "stdout", "--psm", "7"],
+        stderr=subprocess.DEVNULL, text=True)
+    assert "".join(text.lower().split()) == "3s", text
     sim.go("select", "movies-open", ["ipod video"])
     sim.text("movies-back", ["indexed film", "loose"])
     sim.go("menu", "videos-back", ["rentals", "tv shows", "music videos"])
-    for label in ("rentals", "tv-shows", "music-videos", "video-playlists"):
-        sim.tap("down")
-        sim.go("select", label, ["rentals", "tv shows", "music videos"])
+    empty_menu_rows(sim)
     sim.tap("down")
     sim.go("select", "settings", ["tv out", "tv signal", "tv screen",
                                  "fit to screen", "alternate audio",
                                  "captions", "subtitles"])
-    sim.go("menu", "settings-back", ["rentals", "tv shows", "music videos"])
+    sim.go("menu", "settings-back", ["movies", "video playlists", "rentals"])
 
 
 def loose_navigation(sim):

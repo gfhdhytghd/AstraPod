@@ -8,8 +8,7 @@
 #include "video_audio.h"
 #include "plugins/rock_h264.h"
 
-enum mode { FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR,
-            SEEK_INIT_ERROR, CONTROLS };
+enum mode { FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR };
 static enum mode mode;
 static volatile long current_tick;
 static unsigned int thread_id = 1;
@@ -21,6 +20,7 @@ static uint8_t picture[16 * 16 * 3 / 2];
 static unsigned control_action, resume_calls;
 static int resume_choice;
 static long paused_at;
+static bool exercise_controls;
 static bool saw_timeout;
 
 static unsigned audio_opens, audio_closes, audio_seeks;
@@ -158,7 +158,7 @@ static int action(int context, int timeout)
     assert(context == CONTEXT_VIDEO_PLAYBACK && timeout == TIMEOUT_NOBLOCK);
     if (decoded < 4)
         return ACTION_NONE;
-    if (mode == CONTROLS)
+    if (exercise_controls)
     {
         switch (control_action)
         {
@@ -231,7 +231,7 @@ static void draw(unsigned char * const src[3], int sx, int sy, int stride,
     assert(active && src[0] && src[1] && src[2]);
     assert(!x && !y && !sx && !sy &&
            stride == LCD_WIDTH && w == LCD_WIDTH && h == LCD_HEIGHT);
-    if (mode == CONTROLS)
+    if (exercise_controls)
     {
         /* The uniform source remains visible through the inset panels. */
         int rail = src[0][208 * stride + 300];
@@ -320,6 +320,7 @@ static void reset(enum mode next)
     current_tick = 0;
     sent_menu = sent_seek = false;
     control_action = 0;
+    exercise_controls = false;
     saw_timeout = false;
     mode = next;
     rock_h264_begin(scratch, sizeof(scratch));
@@ -391,7 +392,8 @@ int main(int argc, char **argv)
     };
     reset(FINISH);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == VIDEO_FINISHED);
-    reset(CONTROLS);
+    reset(FINISH);
+    exercise_controls = true;
     assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
            VIDEO_EXIT);
     assert(!resume_calls && saw_timeout);
@@ -414,7 +416,8 @@ int main(int argc, char **argv)
            VIDEO_FINISHED);
     assert(resume_calls == 3 && decoded == 336);
 
-    reset(CONTROLS);
+    reset(FINISH);
+    exercise_controls = true;
     assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
            VIDEO_EXIT);
     assert(resume_calls == 3);

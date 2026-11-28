@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Import the app icons, or pack them for the Games, Other Apps and Demos lists.
 
-Each PNG here is one app's icon, 55x55 RGBA, named after its module path
+Each PNG here is one app's icon, 55x55 RGBA with square corners, named
+after its module path
 under .rockbox/rocks/ with '/' written as '__' (games__2048.png); the native
 Music Quiz is native__music_quiz.png. The ids are the ones
 apps-ipod/screens/browse/app_list.c lists.
@@ -13,8 +14,8 @@ apps-ipod/screens/browse/app_list.c lists.
                                     run time; bundle-theme.sh does this
 
 --import takes DIR/<id>.png, DIR/<id with '/' as '__'>.png and either with
-a size suffix (games__2048-96.png), keeps the largest copy of each icon and
-needs Pillow. It overwrites the icons it finds and leaves the others.
+a size suffix (games__2048-96.png), keeps the largest copy of each icon,
+squares off rounded corners and needs Pillow. It overwrites the icons it finds and leaves the others.
 --pack is pure Python, so a build host needs nothing beyond python3. An app
 with no icon here draws the pack's placeholder tile.
 """
@@ -65,6 +66,7 @@ def import_icons(source):
             icon = image.convert('RGBA')
         if icon.size != (SIZES[0], SIZES[0]):
             icon = icon.resize((SIZES[0], SIZES[0]), Image.LANCZOS)
+        icon.putdata(square_corners(list(icon.getdata()), SIZES[0]))
         icon.save(HERE / file_name(app), optimize=True)
         print('%s <- %s' % (file_name(app), path))
     missing = sorted(ids - set(best))
@@ -122,25 +124,81 @@ def resample(px, src, dst):
     return out
 
 
-def placeholder(size):
-    """A grey rounded tile, drawn 4x4 supersampled."""
-    n = 4
-    radius = size * 0.2
-    out = []
+# The corner box: the icon's straight edges have begun by here.
+SQUARE_REACH = 16
+# Rows of an edge's outline and highlight, carried round a squared corner.
+SQUARE_RIM = 2
+
+
+def square_corners(px, size):
+    """Fill the rounded-off corners of an icon tile, so it is square.
+
+    The outer rows follow the straight edges, alpha and colour, so the
+    outline, highlight and shadow run on into the corner; the rest of the
+    corner settles from the pixels round it. Art inside the old curve is
+    left as it is."""
+    last = size - 1
+
+    def at(x, y):
+        return px[y * size + x]
+
+    def along(x, y, dx, dy, want):
+        """The edge's colour nearest the corner: the first pixel towards
+        the middle whose alpha is the straight edge's."""
+        while abs(at(x, y)[3] - want) > 8 and 0 < x < last and 0 < y < last:
+            x, y = x + dx, y + dy
+        return at(x, y)
+
+    def profile(get):
+        vals = sorted(get(k)[3]
+                      for k in range(SQUARE_REACH, last - SQUARE_REACH + 1))
+        return vals[len(vals) // 2]
+
+    row_alpha = [profile(lambda k: at(k, y)) for y in range(size)]
+    col_alpha = [profile(lambda k: at(x, k)) for x in range(size)]
+    out = list(px)
+    hole = []
     for y in range(size):
         for x in range(size):
-            cover = 0
-            for sy in range(n):
-                for sx in range(n):
-                    px = x + (sx + 0.5) / n
-                    py = y + (sy + 0.5) / n
-                    cx = min(max(px, radius), size - radius)
-                    cy = min(max(py, radius), size - radius)
-                    if (px - cx) ** 2 + (py - cy) ** 2 <= radius * radius:
-                        cover += 1
-            t = y / (size - 1)
-            grey = int(round(222 - 70 * t))
-            out.append((grey, grey, grey + 6, cover * 255 // (n * n)))
+            left, top = x < SQUARE_REACH, y < SQUARE_REACH
+            if (not (left or x > last - SQUARE_REACH) or
+                    not (top or y > last - SQUARE_REACH) or
+                    at(x, y)[3] >= 248):
+                continue
+            ex = x if left else last - x
+            ey = y if top else last - y
+            alpha = row_alpha[y] * col_alpha[x] / 255
+            if min(ex, ey) > SQUARE_RIM and alpha > 254:
+                hole.append(y * size + x)
+                continue
+            edge = along(x, y, 1 if left else -1, 0, row_alpha[y])
+            side = along(x, y, 0, 1 if top else -1, col_alpha[x])
+            if ey != ex:
+                rgb = edge[:3] if ey < ex else side[:3]
+            else:
+                rgb = [(p + q) / 2 for p, q in zip(edge[:3], side[:3])]
+            out[y * size + x] = tuple(rgb) + (alpha,)
+    for i in hole:
+        out[i] = None
+    for _ in range(200):
+        settled = {}
+        for i in hole:
+            near = [out[j] for j in (i - 1, i + 1, i - size, i + size)
+                    if out[j] is not None and out[j][3] > 200]
+            if near:
+                settled[i] = tuple(sum(c[k] for c in near) / len(near)
+                                   for k in range(3)) + (255,)
+        for i, value in settled.items():
+            out[i] = value
+    return [tuple(int(round(c)) for c in p) for p in out]
+
+
+def placeholder(size):
+    """A grey square tile, darkening downwards."""
+    out = []
+    for y in range(size):
+        grey = int(round(222 - 70 * y / (size - 1)))
+        out += [(grey, grey, grey + 6, 255)] * size
     return out
 
 

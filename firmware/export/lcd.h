@@ -534,6 +534,10 @@ void lcd_wait_idle(void);
 struct h264_lcd_timing;
 void lcd_blit_video_timed(unsigned char *const planes[3],
                           struct h264_lcd_timing *timing);
+/* Use RGB565 framebuffer rows outside the even YUV row range [first, end). */
+void lcd_blit_video_bands_timed(unsigned char *const planes[3],
+                                int first, int end,
+                                struct h264_lcd_timing *timing);
 #endif
 
 #define FB_CURRENTVP_BUFFER (lcd_current_viewport->buffer)

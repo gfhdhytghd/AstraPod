@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "config.h"
+#include "plugins/video_stock_osd.h"
 
 #ifdef ASTRAPOD_ROCK_COMPAT
 int rock_browser(void *unused);
@@ -40,6 +41,7 @@ struct rock_video_request {
     int (*resume_menu)(void);
     bool (*control_centre)(void); /* False on USB takeover. */
     int (*picture_mode)(int step); /* Zero reads without changing the mode. */
+    const struct video_stock_osd *stock_osd; /* NULL draws the plugin's own */
 };
 #ifdef HAVE_HW_H264
 int rock_probe_video(const char *path);

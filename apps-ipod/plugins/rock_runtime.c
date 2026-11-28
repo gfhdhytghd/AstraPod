@@ -723,6 +723,18 @@ static bool rock_video_themed_controls(void)
            ui_wheel_navigation();
 }
 
+/* Classic and Fruit Company draw the stock movie overlay. */
+static const struct video_stock_osd *rock_video_stock_osd(void)
+{
+#ifdef HAVE_HW_H264
+    const char *theme = ui_theme_active_name();
+    if (!strcmp(theme, ui_theme_builtin_name(UI_THEME_CLASSIC)) ||
+        !strcmp(theme, ui_theme_builtin_name(UI_THEME_FRUIT_COMPANY)))
+        return &video_stock_osd;
+#endif
+    return NULL;
+}
+
 static bool rock_set_int(const unsigned char *title, const char *unit, int voice_unit,
                          const int *value, void (*changed)(int), int step, int min,
                          int max, const char *(*format)(char *, size_t, int, const char *))
@@ -1190,6 +1202,7 @@ static int invoke_module(void *opaque)
         .resume_menu = themed_video ? rock_video_resume_menu : NULL,
         .control_centre = rock_video_control_centre,
         .picture_mode = rock_video_picture_mode,
+        .stock_osd = themed_video ? rock_video_stock_osd() : NULL,
     };
     const void *parameter = call->file;
     if (video)
@@ -1201,6 +1214,8 @@ static int invoke_module(void *opaque)
     int result = call->module->entry_point(parameter);
 #ifdef HAVE_HW_H264
     current_video = NULL;
+    if (video)
+        video_stock_osd_release();
 #endif
     if (get_current_activity() == ACTIVITY_PLUGIN)
         pop_current_activity_without_refresh();
@@ -1478,6 +1493,7 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
         .resume_menu = themed ? rock_video_resume_menu : NULL,
         .control_centre = rock_video_control_centre,
         .picture_mode = rock_video_picture_mode,
+        .stock_osd = rock_video_stock_osd(),
     };
     int result = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, false,
                                       &request);

@@ -38,6 +38,8 @@ enum video_result
     VIDEO_NEXT,
 };
 
+struct video_stock_osd;
+
 struct video_play_options
 {
     const char *title;
@@ -52,6 +54,7 @@ struct video_play_options
     int (*resume_menu)(void);
     bool (*control_centre)(void); /* False on USB takeover. */
     int (*picture_mode)(int step); /* Zero reads without changing the mode. */
+    const struct video_stock_osd *stock_osd; /* Stock overlay, or NULL. */
 };
 
 int video_h264_play_named(const char *path, void *buffer, size_t size,

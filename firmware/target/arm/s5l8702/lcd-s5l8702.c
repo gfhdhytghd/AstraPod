@@ -901,10 +901,12 @@ extern void lcd_write_yuv420_lines(unsigned char const * const src[3],
 static void lcd_blit_yuv_internal(unsigned char *const src[3],
                                   int src_x, int src_y, int stride,
                                   int x, int y, int width, int height,
+                                  int top_rows, int bottom_rows,
                                   struct h264_lcd_timing *timing) ICODE_ATTR;
 static void lcd_blit_yuv_internal(unsigned char *const src[3],
                                   int src_x, int src_y, int stride,
                                   int x, int y, int width, int height,
+                                  int top_rows, int bottom_rows,
                                   struct h264_lcd_timing *timing)
 {
     unsigned int z;
@@ -920,7 +922,7 @@ static void lcd_blit_yuv_internal(unsigned char *const src[3],
     bool videoout_yuv_mirrored = false;
 #endif
 
-    z = stride * src_y;
+    z = stride * (src_y + top_rows);
     yuv_src[0] = src[0] + z + src_x;
     yuv_src[1] = src[1] + (z >> 2) + (src_x >> 1);
     yuv_src[2] = src[2] + (yuv_src[1] - src[1]);
@@ -934,12 +936,16 @@ static void lcd_blit_yuv_internal(unsigned char *const src[3],
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
         /* MPEG playback already supplies planar YUV420. Send those planes
          * directly to the qualified VP path instead of converting twice. */
-        videoout_yuv_mirrored = videoout_mirror_yuv420(
-            yuv_src[0], yuv_src[1], yuv_src[2], 0, 0, stride,
-            x, y, width, height);
+        if (!top_rows && !bottom_rows)
+            videoout_yuv_mirrored = videoout_mirror_yuv420(
+                yuv_src[0], yuv_src[1], yuv_src[2], 0, 0, stride,
+                x, y, width, height);
 #endif
 
-        int lines = height >> 1;
+        for (int row = 0; row < top_rows; row++, out += width)
+            memcpy(out, FBADDR(0, row), width * sizeof(*out));
+
+        int lines = (height - top_rows - bottom_rows) >> 1;
 
         do {
             lcd_write_yuv420_lines(yuv_src, out, width, stride);
@@ -948,6 +954,9 @@ static void lcd_blit_yuv_internal(unsigned char *const src[3],
             yuv_src[2] += stride >> 1;
             out += width << 1;
         } while (--lines);
+
+        for (int row = height - bottom_rows; row < height; row++, out += width)
+            memcpy(out, FBADDR(0, row), width * sizeof(*out));
 
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
         if (!videoout_yuv_mirrored)
@@ -994,7 +1003,8 @@ static void lcd_blit_yuv_internal(unsigned char *const src[3],
 void lcd_blit_yuv(unsigned char *const src[3], int src_x, int src_y,
                   int stride, int x, int y, int width, int height)
 {
-    lcd_blit_yuv_internal(src, src_x, src_y, stride, x, y, width, height, NULL);
+    lcd_blit_yuv_internal(src, src_x, src_y, stride, x, y, width, height,
+                          0, 0, NULL);
 }
 
 #ifdef HAVE_LCD_TE_QUEUE
@@ -1002,7 +1012,16 @@ void lcd_blit_video_timed(unsigned char *const planes[3],
                           struct h264_lcd_timing *timing)
 {
     lcd_blit_yuv_internal(planes, 0, 0, LCD_WIDTH, 0, 0,
-                          LCD_WIDTH, LCD_HEIGHT, timing);
+                          LCD_WIDTH, LCD_HEIGHT, 0, 0, timing);
+}
+
+void lcd_blit_video_bands_timed(unsigned char *const planes[3],
+                                int first, int end,
+                                struct h264_lcd_timing *timing)
+{
+    lcd_blit_yuv_internal(planes, 0, 0, LCD_WIDTH, 0, 0,
+                          LCD_WIDTH, LCD_HEIGHT, first, LCD_HEIGHT - end,
+                          timing);
 }
 #endif
 

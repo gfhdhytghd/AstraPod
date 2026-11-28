@@ -32,6 +32,7 @@
 #include "files/filetypes.h"
 #include "playlist/playlist.h"
 #include "misc.h"
+#include "powermgmt.h"
 #include "kernel.h"
 #include "lang.h"
 #include "lcd.h"
@@ -130,6 +131,7 @@ struct albums {
     fb_data *pane;              /* the menu pane's photo */
     fb_data *menu;              /* the menu as the grid opened over it */
     bool menu_split;
+    bool exit_to_home;
     bool loaded;                 /* the interface can read the catalogue */
     int pane_last;              /* the photo shown last */
 };
@@ -487,8 +489,9 @@ static void transition(const fb_data *before, const fb_data *after,
                 const fb_data *src = before + (row * LCD_HEIGHT / height) * LCD_WIDTH;
                 fb_data *dest = mix + (row + y) * LCD_WIDTH + x;
                 for (int col = 0; col < width; col++)
-                    dest[col] = color_blend(dest[col], src[col * LCD_WIDTH / width],
-                                            256 - blend);
+                    dest[col] = color_blend(src[col * LCD_WIDTH / width],
+                                            after[(row + y) * LCD_WIDTH + x + col],
+                                            blend);
             }
             lcd_bitmap(mix, 0, 0, LCD_WIDTH, LCD_HEIGHT);
         }
@@ -700,11 +703,30 @@ static enum slideshow_music slideshow_start(int *order, int count, int selected)
     { ACTION_NONE, BUTTON_LEFT | BUTTON_REPEAT, BUTTON_NONE }, \
     { ACTION_NONE, BUTTON_RIGHT | BUTTON_REPEAT, BUTTON_NONE }
 
+enum { PHOTO_PLAY_DOWN = LAST_ACTION_PLACEHOLDER + 1 };
+
+/* The view owns the hold timer. The grid still uses normal key repeats. */
+#define VIEW_ARROW(key, down, up) \
+    { down, key, BUTTON_NONE }, \
+    { up, key | BUTTON_REL, BUTTON_NONE }, \
+    { ACTION_NONE, key | BUTTON_REPEAT, BUTTON_NONE }
+
 static const struct button_mapping *photo_view_keys(int context)
 {
     (void)context;
     static const struct button_mapping keys[] = {
-        PHOTO_ARROW_KEYS(ACTION_WPS_SKIPPREV, ACTION_WPS_SKIPNEXT),
+        VIEW_ARROW(BUTTON_LEFT, ACTION_WPS_SEEKBACK, ACTION_WPS_SKIPPREV),
+        VIEW_ARROW(BUTTON_RIGHT, ACTION_WPS_SEEKFWD, ACTION_WPS_SKIPNEXT),
+        { PHOTO_PLAY_DOWN, BUTTON_PLAY, BUTTON_NONE },
+        { ACTION_NONE, BUTTON_PLAY | BUTTON_REPEAT, BUTTON_NONE },
+        { ACTION_WPS_PLAY, BUTTON_PLAY | BUTTON_REL, BUTTON_NONE },
+#ifdef BUTTON_RC_LEFT
+        VIEW_ARROW(BUTTON_RC_LEFT, ACTION_WPS_SEEKBACK, ACTION_WPS_SKIPPREV),
+        VIEW_ARROW(BUTTON_RC_RIGHT, ACTION_WPS_SEEKFWD, ACTION_WPS_SKIPNEXT),
+        { PHOTO_PLAY_DOWN, BUTTON_RC_PLAY, BUTTON_NONE },
+        { ACTION_NONE, BUTTON_RC_PLAY | BUTTON_REPEAT, BUTTON_NONE },
+        { ACTION_WPS_PLAY, BUTTON_RC_PLAY | BUTTON_REL, BUTTON_NONE },
+#endif
         LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_WPS)
     };
     return keys;
@@ -720,6 +742,7 @@ static const struct button_mapping *photo_grid_keys(int context)
     return keys;
 }
 
+#undef VIEW_ARROW
 #undef PHOTO_ARROW_KEYS
 
 static int photo_wheel_steps(void)
@@ -739,22 +762,98 @@ static int photo_wheel_moves(bool forward, int per, int *remainder)
     return moves;
 }
 
-static void present_photo(const fb_data *pixels, bool brightness)
+enum photo_control { PHOTO_NO_CONTROL, PHOTO_VOLUME, PHOTO_BRIGHTNESS };
+
+#define PHOTO_CONTROL_TICKS (5 * HZ)
+#define PHOTO_CAPTION_FADE (HZ / 2)
+#define PHOTO_BAR_WIDTH 208
+
+static void draw_photo_control(enum photo_control control)
 {
-    lcd_bitmap(pixels, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+    bool brightness = control == PHOTO_BRIGHTNESS;
+    int fill = get_normalized_volume() * PHOTO_BAR_WIDTH /
+               MAX(1, global_settings.volume_adjust_norm_steps);
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
     if (brightness)
-    {
-        struct viewport area = { .flags = VP_DEFAULT_FLAGS };
-        viewport_set_fullscreen(&area, SCREEN_MAIN);
-        splash_progress_in(&area,
-                           global_settings.brightness - MIN_BRIGHTNESS_SETTING,
-                           MAX_BRIGHTNESS_SETTING - MIN_BRIGHTNESS_SETTING,
-                           "%s", str(LANG_BRIGHTNESS));
-    }
-#else
-    (void)brightness;
+        fill = (global_settings.brightness - MIN_BRIGHTNESS_SETTING) *
+               PHOTO_BAR_WIDTH /
+               (MAX_BRIGHTNESS_SETTING - MIN_BRIGHTNESS_SETTING);
 #endif
+    fill = MAX(0, MIN(PHOTO_BAR_WIDTH, fill));
+    struct ui_rect clip = { 0, 0, LCD_WIDTH, LCD_HEIGHT };
+    stock_art_draw(brightness ? STOCK_ART_VIDEO_BRIGHTNESS_LOW
+                             : STOCK_ART_VIDEO_VOLUME_LOW,
+                   brightness ? 36 : 31, 212, clip);
+    stock_art_draw(brightness ? STOCK_ART_VIDEO_BRIGHTNESS_HIGH
+                             : STOCK_ART_VIDEO_VOLUME_HIGH,
+                   brightness ? 276 : 274, 210, clip);
+    int x = brightness ? 58 : 56;
+    for (int col = 0; col < PHOTO_BAR_WIDTH; col += 8)
+    {
+        int filled = MIN(8, MAX(0, fill - col));
+        if (filled)
+            stock_art_draw(STOCK_ART_VIDEO_PROGRESSBAR_FILL, x + col, 212,
+                           (struct ui_rect){x + col, 212, filled, 28});
+        if (filled < 8)
+            stock_art_draw(STOCK_ART_VIDEO_PROGRESSBAR, x + col, 212,
+                           (struct ui_rect){x + col + filled, 212,
+                                            8 - filled, 28});
+    }
+}
+
+static void present_photo(const fb_data *pixels, bool paused,
+                          enum photo_control control, int caption,
+                          int position, int total)
+{
+    lcd_bitmap(pixels, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+    if (paused)
+    {
+        struct ui_rect clip = { 0, 0, LCD_WIDTH, TITLE_ROWS };
+        stock_art_draw(STOCK_ART_PHOTOS_HEADER, 0, 0, clip);
+        uint32_t row[LCD_WIDTH];
+        for (int y = 0; y < TITLE_ROWS; y++)
+        {
+            for (int x = 0; x < LCD_WIDTH; x++)
+            {
+                fb_data c = *FBADDR(x, y);
+                row[x] = (RGB_UNPACK_RED(c) << 16) |
+                         (RGB_UNPACK_GREEN(c) << 8) | RGB_UNPACK_BLUE(c);
+            }
+            struct stock_canvas canvas = { row, 0, y, LCD_WIDTH, 1 };
+            extras_bar_put_marks(&canvas, NULL, true, false);
+            stock_art_put(&canvas, STOCK_ART_NOWPLAYING_WHITE_PAUSE, 269, 3);
+            stock_canvas_show(&canvas, (struct ui_rect){0, y, LCD_WIDTH, 1});
+        }
+    }
+    if (control != PHOTO_NO_CONTROL)
+        draw_photo_control(control);
+    else if (caption && subtitle_font >= 0)
+    {
+        char text[48];
+        snprintf(text, sizeof(text), "%d of %d Photos", position + 1, total);
+        int width, height;
+        font_getstringsize((const unsigned char *)text, &width, &height,
+                           subtitle_font);
+        int x = MAX(0, (LCD_WIDTH - width) / 2);
+        int top = LCD_HEIGHT - height - 8;
+        uint32_t row[LCD_WIDTH];
+        for (int y = top; y < top + height; y++)
+        {
+            for (int col = 0; col < LCD_WIDTH; col++)
+            {
+                fb_data c = pixels[y * LCD_WIDTH + col];
+                row[col] = (RGB_UNPACK_RED(c) << 16) |
+                           (RGB_UNPACK_GREEN(c) << 8) | RGB_UNPACK_BLUE(c);
+            }
+            struct stock_canvas canvas = { row, 0, y, LCD_WIDTH, 1 };
+            stock_canvas_text(&canvas, subtitle_font, text, x, top, 0xffffff);
+            stock_canvas_show(&canvas, (struct ui_rect){0, y, LCD_WIDTH, 1});
+            if (caption < 256)
+                for (int col = x; col < MIN(LCD_WIDTH, x + width + 1); col++)
+                    *FBADDR(col, y) = color_blend(pixels[y * LCD_WIDTH + col],
+                                                 *FBADDR(col, y), caption);
+        }
+    }
     lcd_update();
 }
 
@@ -800,6 +899,7 @@ static void push_pages(const fb_data *from, const fb_data *to, bool forward)
 enum photo_view_result {
     PHOTO_VIEW_GRID,
     PHOTO_VIEW_ALBUMS,
+    PHOTO_VIEW_HOME,
     PHOTO_VIEW_USB,
 };
 
@@ -816,6 +916,12 @@ static int photo_ahead(const struct albums *a, const int *order, bool playing,
     return slide_file(a, playing ? order[next] : next);
 }
 
+static int photo_timeout(int timeout, long deadline)
+{
+    int remaining = MAX(1, deadline - current_tick);
+    return timeout == TIMEOUT_BLOCK ? remaining : MIN(timeout, remaining);
+}
+
 static enum photo_view_result photo_view(const struct albums *a, int *sel)
 {
     fb_data *current = a->view;
@@ -823,18 +929,20 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
     fb_data *mix = next + PHOTO_PIXELS;
     int *order = a->order;
     int total = photo_total(a);
-    int position = *sel;
+    int position = *sel, shown = *sel;
     enum slideshow_music music = SLIDESHOW_UNCHANGED;
     int interval = MIN(20, MAX(0, global_settings.photo_duration)) * HZ;
     int last_transition = PHOTO_CUT;
     bool playing = false, paused = false, initial = false;
     long due = current_tick + interval;
-    bool brightness = false;
-    long brightness_due = 0;
+    enum photo_control control = PHOTO_NO_CONTROL;
+    long control_due = 0, caption_due = 0, play_due = 0;
+    bool caption = false, play_down = false;
+    int arrow = 0, tap = 0, wheel_remainder = 0;
+    long arrow_down = 0, tap_due = 0;
     /* The loose picture whose decode the screen still shows a stand-in
      * for, or -1, and which way the last step went */
     int waiting = -1, direction = 1;
-    int wheel_remainder = 0;
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
     int initial_brightness = global_settings.brightness;
 #endif
@@ -842,20 +950,32 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
     /* Stock pushes the grid away to black, then cuts to the photo */
     memcpy(mix, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
     memset(current, 0, PHOTO_PIXELS * sizeof(fb_data));
+    if (global_settings.animations)
+        sleep(6 * HZ / 100);
     push_pages(mix, current, true);
     if (!draw_photo(a, *sel, current, SCREEN_WAIT))
+    {
         waiting = slide_file(a, *sel);
-    present_photo(current, false);
+        memset(current, 0, PHOTO_PIXELS * sizeof(fb_data));
+    }
+    present_photo(current, false, PHOTO_NO_CONTROL, 0, *sel, total);
     for (;;)
     {
         long now = current_tick;
         int timeout = playing && !paused && interval ? MAX(1, due - now)
                                                      : TIMEOUT_BLOCK;
-        if (brightness)
-        {
-            int remaining = MAX(1, brightness_due - now);
-            timeout = timeout == TIMEOUT_BLOCK ? remaining : MIN(timeout, remaining);
-        }
+        if (control != PHOTO_NO_CONTROL)
+            timeout = photo_timeout(timeout, control_due);
+        if (caption)
+            timeout = photo_timeout(timeout,
+                TIME_BEFORE(now, caption_due - PHOTO_CAPTION_FADE) ?
+                caption_due - PHOTO_CAPTION_FADE : now + 3);
+        if (play_down)
+            timeout = photo_timeout(timeout, play_due);
+        if (arrow)
+            timeout = photo_timeout(timeout, arrow_down + 58 * HZ / 100);
+        if (tap)
+            timeout = photo_timeout(timeout, tap_due);
         if (waiting >= 0)
             timeout = timeout == TIMEOUT_BLOCK ? HZ / 20
                                                : MIN(timeout, HZ / 20);
@@ -872,6 +992,13 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
         if (action == ACTION_WPS_MENU || action == ACTION_STD_CANCEL)
         {
             result = playing ? PHOTO_VIEW_ALBUMS : PHOTO_VIEW_GRID;
+            if (!playing)
+                *sel = shown;
+            break;
+        }
+        if (action == ACTION_WPS_QUICKSCREEN && !playing)
+        {
+            result = PHOTO_VIEW_HOME;
             break;
         }
         if (action == SYS_USB_CONNECTED)
@@ -880,11 +1007,22 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
             break;
         }
         default_event_handler(action);
+        now = current_tick;
         bool redraw = action == ACTION_REDRAW;
-        if (brightness && !TIME_BEFORE(current_tick, brightness_due))
+        if (control != PHOTO_NO_CONTROL && !TIME_BEFORE(now, control_due))
         {
-            brightness = false;
+            control = PHOTO_NO_CONTROL;
             redraw = true;
+        }
+        if (caption && !TIME_BEFORE(now, caption_due - PHOTO_CAPTION_FADE))
+        {
+            caption = TIME_BEFORE(now, caption_due);
+            redraw = true;
+        }
+        if (play_down && !TIME_BEFORE(now, play_due))
+        {
+            play_down = false;
+            sys_poweroff();
         }
         if (waiting >= 0)
         {
@@ -895,68 +1033,107 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
             if (state != PHOTO_THUMB_PENDING)
             {
                 waiting = -1;
+                shown = *sel;
                 redraw = true;
             }
         }
 
         int pos = playing ? position : *sel;
         int step = 0;
-        if (action == ACTION_WPS_PLAY && playing)
+        if (arrow && !TIME_BEFORE(now, arrow_down + 58 * HZ / 100))
         {
-            paused = !paused;
-            due = current_tick + interval;
+            if (!playing)
+                pos = arrow < 0 ? 0 : total - 1;
+            arrow = 0;
         }
-        else if (action == ACTION_WPS_BROWSE || action == ACTION_WPS_PLAY)
+        if (tap && !TIME_BEFORE(now, tap_due))
         {
+            step = tap;
+            tap = 0;
+        }
+        if (action == PHOTO_PLAY_DOWN)
+        {
+            play_down = true;
+            play_due = now + 3 * HZ;
+        }
+        else if (action == ACTION_WPS_PLAY && playing && play_down)
+        {
+            play_down = false;
+            paused = !paused;
+            due = now + interval;
+            redraw = true;
+        }
+        else if (action == ACTION_WPS_BROWSE ||
+                 (action == ACTION_WPS_PLAY && play_down))
+        {
+            play_down = false;
             if (!playing)
             {
                 music = slideshow_start(order, total, *sel);
                 pos = position = global_settings.photo_shuffle ? 0 : *sel;
-                last_transition = PHOTO_CUT;
-                playing = initial = true;
-                due = current_tick + interval;
+                playing = initial = caption = true;
+                due = now + interval;
+                caption_due = now + PHOTO_CONTROL_TICKS;
             }
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
             else
             {
-                brightness = !brightness;
-                brightness_due = current_tick + 5 * HZ;
-                redraw = true;
+                control = control == PHOTO_NO_CONTROL ? PHOTO_BRIGHTNESS
+                                                       : PHOTO_NO_CONTROL;
+                control_due = now + PHOTO_CONTROL_TICKS;
             }
 #endif
+            redraw = true;
         }
-        else if (action == ACTION_WPS_VOLUP || action == ACTION_WPS_VOLDOWN)
+        else if (action == ACTION_WPS_VOLUP || action == ACTION_WPS_VOLDOWN ||
+                 action == ACTION_STD_NEXT || action == ACTION_STD_PREV)
         {
-            int wheel = photo_wheel_steps();
-            if (action == ACTION_WPS_VOLDOWN)
-                wheel = -wheel;
+            int sign = action == ACTION_WPS_VOLUP ||
+                       action == ACTION_STD_NEXT ? 1 : -1;
+            int wheel = sign * photo_wheel_steps();
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
-            if (brightness)
+            if (control == PHOTO_BRIGHTNESS)
             {
                 int level = global_settings.brightness + wheel;
                 global_settings.brightness =
                     MIN(MAX_BRIGHTNESS_SETTING, MAX(MIN_BRIGHTNESS_SETTING, level));
                 backlight_set_brightness(global_settings.brightness);
-                brightness_due = current_tick + 5 * HZ;
-                redraw = true;
             }
             else
 #endif
             if (playing)
+            {
                 adjust_volume(wheel);
+                control = PHOTO_VOLUME;
+            }
             else
-                step = photo_wheel_moves(action == ACTION_WPS_VOLUP,
-                                         VIEW_PHOTO_POSITIONS,
+                step = photo_wheel_moves(sign > 0, VIEW_PHOTO_POSITIONS,
                                          &wheel_remainder);
+            if (playing)
+            {
+                control_due = now + PHOTO_CONTROL_TICKS;
+                redraw = true;
+            }
         }
-        else if (action == ACTION_WPS_SKIPPREV)
-            step = -1;
-        else if (action == ACTION_WPS_SKIPNEXT)
-            step = 1;
-        else if (!playing && action == ACTION_WPS_SEEKBACK)
-            pos = 0;
-        else if (!playing && action == ACTION_WPS_SEEKFWD)
-            pos = total - 1;
+        else if (action == ACTION_WPS_SEEKBACK || action == ACTION_WPS_SEEKFWD)
+        {
+            arrow = action == ACTION_WPS_SEEKBACK ? -1 : 1;
+            arrow_down = now;
+        }
+        else if (arrow && (action == ACTION_WPS_SKIPPREV ||
+                           action == ACTION_WPS_SKIPNEXT))
+        {
+            if (playing)
+                step = arrow;
+            else if (TIME_BEFORE(now, arrow_down + HZ / 4))
+            {
+                tap = arrow;
+                tap_due = arrow_down + HZ / 4;
+            }
+            else
+                step = arrow;
+            arrow = 0;
+        }
 
         if (playing && !paused && !step && interval &&
             !TIME_BEFORE(current_tick, due))
@@ -983,22 +1160,32 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
             waiting = draw_photo(a, *sel, next,
                                  playing ? SLIDE_WAIT : SCREEN_WAIT) ?
                       -1 : slide_file(a, *sel);
+            /* Keep the current photo until the full-size decode is ready.
+             * Preview tiles are useful to a slideshow's timed transition. */
+            if (!playing && waiting >= 0)
+                continue;
+            shown = *sel;
             if (playing)
             {
-                if (brightness || redraw)
-                    lcd_bitmap(current, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+                lcd_bitmap(current, 0, 0, LCD_WIDTH, LCD_HEIGHT);
                 transition(current, next, mix, &last_transition, initial);
                 initial = false;
-                brightness = brightness && TIME_BEFORE(current_tick, brightness_due);
+                caption = true;
+                caption_due = current_tick + PHOTO_CONTROL_TICKS;
             }
             fb_data *swap = current;
             current = next;
             next = swap;
             due = current_tick + interval;
-            redraw = !playing || brightness;
+            redraw = true;
         }
         if (redraw)
-            present_photo(current, brightness);
+        {
+            int alpha = caption ? MIN(256, MAX(0L, caption_due - current_tick) *
+                                           256 / PHOTO_CAPTION_FADE) : 0;
+            present_photo(current, playing && paused, control, alpha,
+                          position, total);
+        }
     }
     slideshow_stop(music, result == PHOTO_VIEW_USB);
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
@@ -1130,7 +1317,7 @@ static int grid_wheel_target(int sel, int first, int moves, int total)
     return MIN(total - 1, MAX(0, target));
 }
 
-static bool photo_grid(const struct albums *a, const char *title)
+static bool photo_grid(struct albums *a, const char *title)
 {
     int total = photo_total(a);
     if (!total)
@@ -1198,6 +1385,8 @@ static bool photo_grid(const struct albums *a, const char *title)
         {
             enum photo_view_result result = photo_view(a, &sel);
             usb = result == PHOTO_VIEW_USB;
+            if (result == PHOTO_VIEW_HOME)
+                a->exit_to_home = true;
             if (result != PHOTO_VIEW_GRID)
                 break;
             back = true;
@@ -1494,13 +1683,13 @@ static bool browse_photo_files(struct photo_catalogue *catalogue)
             a->slide_count = a->loose_first = 0;
             a->loose_count = a->loose.file_count;
             usb = show_photo_grid(a, title);
-            if (usb || !a->loose.album_count)
+            if (usb || a->exit_to_home || !a->loose.album_count)
                 break;
             dir.auto_grid = false;
             info.count = directory_count(&dir);
         }
         photo_thumbs_close();
-        if (usb)
+        if (usb || a->exit_to_home)
             break;
         if (descend)
         {
@@ -1603,6 +1792,8 @@ int stock_photos_screen(void)
             if (usb)
                 rc = MENU_ATTACHED_USB;
         }
+        if (a.exit_to_home)
+            rc = GO_TO_ROOT;
         if (rc)
             break;
     }

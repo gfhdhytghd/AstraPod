@@ -245,7 +245,7 @@ def wait_changed(path, before):
     return read_raw(path)
 
 
-def run_roundtrips(s, root, out, fruit):
+def run_roundtrips(s, root, out, fruit, classic_dialog):
     checks = {}
     work_ics = root / "Calendars" / "Work.ics"
     ap_ics = root / "Calendars" / "AstraPod.ics"
@@ -386,8 +386,11 @@ def run_roundtrips(s, root, out, fruit):
     tap(s, "select", 0.9)   # Accept title and wait for the keyboard to close
     tap_until_changed(s, "menu").save(out / "save-prompt.png")
     time.sleep(0.5)         # Let the sheet finish entering before navigation
-    tap(s, "down", 0.35)    # Discard
-    frame = tap(s, "select", 1.0)
+    if classic_dialog:
+        frame = tap(s, "back", 1.0)  # Discard uses LEFT in the classic dialog.
+    else:
+        tap(s, "down", 0.35)        # Highlight Discard in the flat dialog.
+        frame = tap(s, "select", 1.0)
     checks["todo_keyboard_discard"] = {
         "ok": read_raw(work_ics) == txt3 and same(frame, done_frame)
     }
@@ -547,7 +550,8 @@ def main():
             (args.ultra_binary if theme == "fruit-company-ultra"
              and args.ultra_binary else args.binary), args.simdisk, theme,
             seed_data if fruit else seed_native_home,
-            lambda s, root, out: run_roundtrips(s, root, out, fruit),
+            lambda s, root, out: run_roundtrips(
+                s, root, out, fruit, classic_dialog=theme != "scrim"),
             out, theme)
         for name, check in checks.items():
             result[f"{theme}/{name}"] = check

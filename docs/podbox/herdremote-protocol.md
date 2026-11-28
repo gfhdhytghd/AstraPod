@@ -1129,7 +1129,9 @@ metadata or backend error bodies.
 
 ## Player controls for T3 and actions
 
-With `AGENT_CONTROL=t3`, **System > Agents** lists only T3 projects. See the
+With `AGENT_CONTROL=t3`, **System > Agents** lists only T3 records: the
+threads of every project, or the projects of a daemon without the
+[thread list](#t3-thread-list). See the
 [T3 pocket remote design](design/t3-remote/t3-remote-design.md#5-complete-button-maps-per-theme-profile)
 for the button maps. The pocket remote sends choice answers, preset replies,
 and voice controls. Custom text options remain available to computer clients.
@@ -1163,7 +1165,9 @@ thread's title, status and model, latest assistant text, up to three
 recent messages and the oldest pending request. Baseline daemons reply to
 `vd <req> <thread>` with `R <req> err Voice cannot reach T3`.
 
-Send `fp <req> <thread>` to request T3 thread focus. The daemon also
+Send `fp <req> <thread>` to request T3 thread focus. The player sends it
+once, when SELECT opens a thread's detail, never as the wheel moves over
+a thread list. The daemon also
 accepts `fw <req> <thread>`. With `T3_FOLLOW_IPOD=on` (the default),
 the daemon opens a local T3 app link and the desktop app switches its
 thread view. The window may stay behind another window. With follow off,
@@ -1247,3 +1251,39 @@ The player uses `fp` for **Open on computer**. For approval shortcuts,
 send the Allow and Deny option numbers in the `yes` and `no` fields of
 `Q`. With the baseline approval labels, the player also recognizes
 `Approve` / `Allow once` / `Allow` and `Decline` / `Deny`.
+
+### T3 thread list
+
+The wire version is still `1`. After `M`, in reply to every `hr`, a
+daemon that serves the thread list sends:
+
+```text
+TL<TAB>1
+```
+
+The player then shows T3 threads, not projects, on its first page, and
+subscribes with:
+
+```text
+sub<TAB>t3<TAB>active
+sub<TAB>t3<TAB>all
+```
+
+The daemon replies with the usual `A`, whose workspace field is `t3`, and
+sends no tab `T`. The rows span every project that is not archived, at
+most 16, in this order:
+
+- `active`: threads that wait for an answer, oldest request first; then
+  running threads; then the other unsettled threads that are not
+  snoozed. Each group is most recent first.
+- `all`: every thread, most recent first, settled, snoozed and archived
+  included.
+
+In these rows the `title` field is the project's name. The other fields
+keep the meanings above. `W`, `S`, `Q`, `X` and `E` are unchanged and
+still name projects.
+
+A player that does not know `TL` ignores it and lists projects. A daemon
+that does not send `TL` leaves the player on the project list. The
+player forgets `TL` at each `HR` and keeps it across `M`. A `sub t3`
+from a player without the T3 capability is ignored.

@@ -179,3 +179,9 @@
 - **Photos slideshows** now start with the original iPod's settings: 3
   seconds a picture, Random transitions, and PAL for TV Signal. If you
   saved your own values, your player keeps them.
+
+- **Agents in T3 mode** opens on your AI threads, those that wait for you
+  first, with no project page. Scrolling no longer switches the thread on
+  the computer; Select opens a thread and switches it there. Update the
+  AstraPod desktop app too: with an older one the player still lists
+  projects first.

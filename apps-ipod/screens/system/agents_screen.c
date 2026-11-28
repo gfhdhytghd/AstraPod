@@ -113,6 +113,11 @@ static bool detail_ready;       /* its fp has succeeded, so keys may go */
 static long actions_until;
 static bool modal_open;
 static int agents_body_font = FONT_UI;
+/* The theme's title, list and small faces, loaded while Agents is open:
+ * the detail and Usage panels draw in them, not in the UI font */
+static int agents_title_font = FONT_UI, agents_list_font = FONT_UI;
+static int agents_small_font = FONT_UI;
+static enum view detail_from;   /* the list the detail view opened from */
 static int action_choice;
 static struct hr_action confirm_action;
 static int action_row;
@@ -130,7 +135,7 @@ static long detail_wheel_at;
 static bool filter_loading, received_projects;
 static bool dashboard_status_pending;
 static long dashboard_refresh_at;
-static bool detail_follow, detail_new;
+static bool detail_new;
 static volatile bool agents_foreground;
 static bool agents_visited, shortcut_entry;
 static char action_req[8];
@@ -162,11 +167,12 @@ static unsigned int next_req = 1;
 static char pending_req[8];     /* the answer awaiting its result */
 static bool pending_answer;
 static long pending_until;
-/* Focus follows the wheel: the selected workspace (fw) or pane (fp) is
- * focused on the computer as soon as the wheel moves. One fw, fp or ft is
- * out at a time, and says nothing unless it fails; the wheel moving
- * meanwhile leaves only its latest row wanted, sent when the result comes.
- * A row the last request already focused is not sent again. */
+/* Focus follows the wheel for herdr: the selected workspace (fw) or pane
+ * (fp) is focused on the computer as soon as the wheel moves. A T3 thread
+ * is focused once, when SELECT opens it. One fw, fp or ft is out at a time,
+ * and says nothing unless it fails; the wheel moving meanwhile leaves only
+ * its latest row wanted, sent when the result comes. A row the last
+ * request already focused is not sent again. */
 #define FOCUS_REPLY (8 * HZ)
 static char focus_want[16];     /* the row to focus next; "" for none */
 static char focus_done[16];     /* the row the last fw or fp was for */
@@ -195,7 +201,7 @@ static unsigned long native_play_at;
 _Static_assert(sizeof(struct detail_layout) <= 6400, "Detail layout cache budget");
 static struct detail_layout detail_layout;
 static int detail_body_y, detail_body_avail;
-static int usage_scroll, detail_scroll, detail_scroll_max, detail_page_lines;
+static int usage_scroll, detail_scroll, detail_scroll_max;
 static struct row usage_from;   /* the spaces row to go back to */
 
 /* Hold to talk: the band at the foot of the list, while it is wanted */
@@ -239,6 +245,21 @@ static bool t3_mode(void)
 static bool is_t3(const char *id)
 {
     return !strncmp(id, "t3", 2);
+}
+
+/* T3's first page lists the threads of every project, as sub t3 sends
+ * them, when the daemon offers it (TL); an older daemon lists projects */
+#define T3_THREADS "t3"
+static bool t3_flat(void)
+{
+    return t3_mode() && model.thread_list;
+}
+
+/* The page shows T3 threads: a project's, or the list across projects */
+static bool threads_view(void)
+{
+    return (view == VIEW_AGENTS && is_t3(space_id)) ||
+           (view == VIEW_SPACES && t3_flat());
 }
 
 static bool usage_legacy_keys(void)
@@ -825,10 +846,10 @@ static const char *option_parts(const struct hr_option *o, bool *ticked,
  * does not scroll. The numeric battery display leaves a narrower cell. */
 #define TITLE_CELL  124
 
-static int text_px(const char *text)
+static int text_px_in(const char *text, int font)
 {
     int w, h;
-    font_getstringsize((const unsigned char *)text, &w, &h, FONT_UI);
+    font_getstringsize((const unsigned char *)text, &w, &h, font);
     return w;
 }
 
@@ -836,16 +857,17 @@ static int text_px(const char *text)
  * stays in the row's text, which scrolls when selected */
 static bool fits_right(const char *text)
 {
-    return text_px(text) <= RIGHT_CELL;
+    return text_px_in(text, agents_list_font) <= RIGHT_CELL;
 }
 
-/* Cut text to width on a character boundary and end it with an ellipsis,
- * when it is wider. The selected row is left whole: it scrolls. */
-static const char *fit(char *buf, size_t size, const char *text, int width)
+/* Cut text to width in font on a character boundary and end it with an
+ * ellipsis, when it is wider */
+static const char *fit_in(char *buf, size_t size, const char *text, int width,
+                          int font)
 {
     if (text != buf)
         snprintf(buf, size, "%s", text);
-    if (text_px(buf) <= width)
+    if (text_px_in(buf, font) <= width)
         return buf;
     size_t len = strlen(buf);
     while (len > 0)
@@ -856,10 +878,17 @@ static const char *fit(char *buf, size_t size, const char *text, int width)
         if (len + 4 > size)
             continue;
         strcpy(buf + len, "…");
-        if (text_px(buf) <= width)
+        if (text_px_in(buf, font) <= width)
             break;
     }
     return buf;
+}
+
+/* fit_in, measured in the UI font. The selected row is left whole: it
+ * scrolls. */
+static const char *fit(char *buf, size_t size, const char *text, int width)
+{
+    return fit_in(buf, size, text, width, FONT_UI);
 }
 
 /* What is wrong with the link or the data, or NULL when nothing is */
@@ -976,9 +1005,28 @@ static void join_question(const struct hr_question *q)
 static void list_chrome(struct gui_synclist *list)
 {
     list->empty_title = list->empty_hint = list->footer = NULL;
-    gui_synclist_set_notes(list, view == VIEW_AGENTS && is_t3(space_id) &&
+    gui_synclist_set_notes(list, threads_view() &&
                           model.agents_valid && model.nagents > 0);
-    if (view == VIEW_SPACES)
+    if (view == VIEW_SPACES && t3_flat())
+    {
+        if (model.agents_valid && !strcmp(model.agents_ws, space_id) &&
+            !model.nagents && !model.nquestions)
+        {
+            bool all = !strcmp(space_tab, "all");
+            list->empty_title = all ? "No threads" : "No active threads";
+            list->empty_hint = all ? "Start a thread in T3 Code" :
+                               agents_fruit_nav() ? NULL : "Press RIGHT for All";
+        }
+        if (t3_unavailable())
+            list->footer = agents_fruit_nav() ? "SELECT Retry · MENU Exit" :
+                           "SELECT Retry · LEFT Usage · MENU Exit";
+        else
+            list->footer = agents_fruit_nav() ? "Hold SEL / PLAY Voice" :
+                           !strcmp(space_tab, "all") ?
+                           "‹ Usage · › Active · Hold PLAY Voice" :
+                           "‹ Usage · › All · Hold PLAY Voice";
+    }
+    else if (view == VIEW_SPACES)
     {
         if (!model.nws && !model.nquestions)
         {
@@ -1072,7 +1120,21 @@ static void build_rows(struct gui_synclist *list)
         if (model.nquestions)
             add_row(ROW_ALERT, 0);
     }
-    if (view == VIEW_SPACES)
+    if (view == VIEW_SPACES && t3_flat())
+    {
+        if (agents_fruit_nav())
+            add_row(ROW_FILTER, 0);
+        bool loaded = model.agents_valid && !strcmp(model.agents_ws, space_id);
+        for (int i = 0; loaded && i < model.nagents; i++)
+            add_row(ROW_AGENT, i);
+        if (!list->empty_title && (!loaded || !model.nagents))
+            add_row(ROW_EMPTY, 0);
+        if (t3_unavailable() && agents_fruit_nav())
+            add_row(ROW_RETRY, 0);
+        if (agents_fruit_nav())
+            add_row(ROW_USAGE, 0);
+    }
+    else if (view == VIEW_SPACES)
     {
         bool legacy = false;
         for (int i = 0; i < model.nws; i++)
@@ -1214,6 +1276,10 @@ static const char *row_text(int item, char *buf, size_t size)
         case ROW_ACTION:
             return model.actions[r->index].label;
         default:
+            if (view == VIEW_SPACES && t3_flat())
+                return !model.agents_valid || strcmp(model.agents_ws, space_id) ?
+                       "Loading threads…" :
+                       !strcmp(space_tab, "all") ? "No threads" : "No active threads";
             if (view == VIEW_SPACES)
                 return t3_mode() ? "No T3 projects" : "No projects";
             if (view == VIEW_ACTIONS)
@@ -1238,8 +1304,12 @@ static const char *row_name(int item, void *data, char *buf, size_t size)
         return text;
     char value[64];
     const char *v = row_value(item, data, value, sizeof value);
-    return fit(buf, size, text, v[0] && v[1] && v[2] ? SHORT_CELL
-                                                     : TEXT_CELL);
+    /* Under a selection bar the list ends a cut label itself, so the label
+     * may run up to a short right-hand side */
+    bool bar = ui_theme_style(UI_STYLE_SELECTION) == UI_SELECTION_BAR;
+    int cell = !(v[0] && v[1] && v[2]) ? TEXT_CELL : !bar ? SHORT_CELL :
+               MAX(SHORT_CELL, TEXT_CELL - text_px_in(v + 2, agents_list_font) - 16);
+    return fit_in(buf, size, text, cell, agents_list_font);
 }
 
 /* %Lv: see the file header */
@@ -1279,7 +1349,7 @@ static const char *row_value(int item, void *data, char *buf, size_t size)
             snprintf(right, sizeof right, "%s", word);
             break;
         case ROW_FILTER:
-            snprintf(right, sizeof right, "SEL Switch");
+            snprintf(right, sizeof right, "Switch");
             break;
         case ROW_USAGE:
             snprintf(right, sizeof right, "7d stats ›");
@@ -1324,7 +1394,7 @@ static const char *row_value(int item, void *data, char *buf, size_t size)
             break;
     }
     snprintf(buf, size, "%c%c%s", style, icon,
-             fit(right, sizeof right, right, RIGHT_CELL));
+             fit_in(right, sizeof right, right, RIGHT_CELL, agents_list_font));
     return buf;
 }
 
@@ -1335,7 +1405,7 @@ static const char *row_description(int item, void *data, char *buf,
                                    size_t size)
 {
     (void)data;
-    if (view != VIEW_AGENTS || item < 0 || item >= nrows)
+    if ((view != VIEW_AGENTS && !threads_view()) || item < 0 || item >= nrows)
         return NULL;
     if (rows[item].kind == ROW_ALERT)
     {
@@ -1428,7 +1498,7 @@ static const char *view_title(void)
     }
     if (view == VIEW_USAGE)
         return "Usage";
-    return t3_mode() ? "T3 Projects" : "Agents";
+    return t3_flat() ? "T3 Threads" : t3_mode() ? "T3 Projects" : "Agents";
 }
 
 /* Semantic colours used by Usage and activity indicators. */
@@ -1437,7 +1507,6 @@ static const char *view_title(void)
 #define USE_FULL    LCD_RGBPACK(255, 110, 110)
 #define USE_WEEK    (7 * 86400)
 #define USE_LINE    21      /* pixels from one text line to the next */
-#define USE_BLOCK   40      /* pixels a service takes */
 
 struct panel_ink {
     unsigned text, muted, fill, warn;
@@ -1579,33 +1648,33 @@ static unsigned limit_colour(unsigned colour, unsigned bg, unsigned text)
     return text;
 }
 
-/* One limit in a cell w wide: its label, a bar, and the used percent and
- * reset time at the cell's right. A bar with no room is left out. */
-static void draw_limit(struct screen *d, const struct panel_ink *ink, int x, int y, int w,
-                       const char *label, int pct, int reset, int period,
-                       bool dim)
+/* One limit in a cell w wide: its label and the used percent with the
+ * reset time on a line of the small font, and its bar under them */
+#define USE_BAR     6       /* the bar's height */
+#define USE_MARGIN  10      /* the panel's inset from either side */
+#define USE_SPACE   12      /* between one service and the next */
+static int draw_limit(struct screen *d, struct viewport *vp,
+                      const struct panel_ink *ink, int x, int y, int w,
+                      const char *label, int pct, int reset, int period,
+                      bool dim)
 {
     char r[16], text[24];
     if (pct < 0)
         snprintf(text, sizeof text, "—");
     else
-        snprintf(text, sizeof text, "%d%% %s", pct,
+        snprintf(text, sizeof text, "%d%% · %s", pct,
                  fmt_reset(r, sizeof r, reset));
-    unsigned colour = dim ? ink->muted : ink->text;
-    int lw = text_w(d, label), tw = text_w(d, text);
+    vp->font = agents_small_font;
     text_at(d, x, y, ink->muted, label);
-    text_at(d, x + w - tw, y, colour, text);
-    int bx = x + lw + 5, bw = w - lw - tw - 11;
-    if (bw < 12)
-        return;
-    int by = y + 6, bh = 8;
-    int height = lcd_current_viewport->height;
-    if (by >= height || by + bh <= 0)
-        return;
-    int sample_y = MAX(0, MIN(by + bh / 2, height - 1));
-    unsigned bg = limit_background(bx, sample_y, bw, ink->text);
+    text_at(d, x + w - text_w(d, text), y, dim ? ink->muted : ink->text, text);
+    int by = y + font_get(agents_small_font)->height + 2;
+    int height = vp->height;
+    if (by >= height || by + USE_BAR <= 0)
+        return by + USE_BAR;
+    int sample_y = MAX(0, MIN(by + USE_BAR / 2, height - 1));
+    unsigned bg = limit_background(x, sample_y, w, ink->text);
     d->set_foreground(limit_colour(ink->muted, bg, ink->text));
-    d->drawrect(bx, by, bw, bh);
+    draw_round_rect(d, x, by, w, USE_BAR, USE_BAR / 2, 1);
     if (pct > 0)
     {
         /* Stale only greys a bar that is neither full nor ahead of its
@@ -1616,60 +1685,70 @@ static void draw_limit(struct screen *d, const struct panel_ink *ink, int x, int
                         hr_usage_over_pace(pct, left, period) ? USE_PACE :
                         dim ? ink->muted : ink->fill;
         d->set_foreground(limit_colour(fill, bg, ink->text));
-        d->fillrect(bx + 1, by + 1, MAX(1, (bw - 2) * pct / 100), bh - 2);
+        fill_round_rect(d, x, by, MAX(USE_BAR, w * MIN(pct, 100) / 100),
+                        USE_BAR, USE_BAR / 2);
     }
+    return by + USE_BAR;
 }
 
-/* A service: its name, tokens and cost, then its limits. A service
+/* A service: its name, with its tokens and cost on the right, then its
+ * limits side by side. A service with no limits stops after its name; one
  * with nothing to show, or whose figures could not be read, is greyed and
- * gives its note in place of the limits. */
-static void draw_service(struct screen *d, const struct panel_ink *ink, int y, int w,
-                         const struct hr_service *s, bool stale)
+ * gives its note on the right. Returns the y after it. */
+static int draw_service(struct screen *d, struct viewport *vp,
+                        const struct panel_ink *ink, int y,
+                        const struct hr_service *s, bool stale)
 {
     static const char *const names[HR_USAGE_SVCS] =
         { "Codex", "Claude", "Grok", "Gemini" };
-    char t[16], c[16], right[40];
+    char t[16], c[16], right[48];
     bool grey = s->state == 'n' || s->state == 'e';
     bool dim = stale || grey;
     int i = s - model.usage.svc;
-    text_at(d, 0, y, dim ? ink->muted : ink->text,
-            names[i]);
-    if (s->state == 'e' || (s->state == 'n' && s->tokens <= 0))
-        snprintf(right, sizeof right, "—");
+    int x = USE_MARGIN, w = vp->width - 2 * USE_MARGIN;
+    int name_h = font_get(agents_list_font)->height;
+    vp->font = agents_list_font;
+    text_at(d, x, y, dim ? ink->muted : ink->text, names[i]);
+    int name_w = text_w(d, names[i]);
+    if (grey)
+        snprintf(right, sizeof right, "%s", s->note[0] ? s->note :
+                 s->state == 'e' ? "Cannot read" : "Not used");
     else
-        snprintf(right, sizeof right, "%s  %s",
+        snprintf(right, sizeof right, "%s · %s",
                  fmt_tokens(t, sizeof t, s->tokens),
                  fmt_usd(c, sizeof c, s->usd_milli));
-    text_at(d, w - text_w(d, right), y, dim ? ink->muted : ink->text, right);
-    y += USE_LINE - 2;
-    if (grey)
-    {
-        char note[48];
-        text_at(d, 0, y, ink->muted, fit(note, sizeof note,
-                s->note[0] ? s->note : s->state == 'e' ? "Cannot read"
-                                                       : "Not used", w));
-        return;
-    }
+    vp->font = agents_small_font;
+    fit_in(right, sizeof right, right, w - name_w - 12, agents_small_font);
+    /* On the name's baseline */
+    int ry = y + font_get(agents_list_font)->ascent -
+             font_get(agents_small_font)->ascent;
+    text_at(d, x + w - text_w(d, right), ry, dim ? ink->muted : ink->text, right);
+    y += name_h + 2;
+    if (s->state != 'o')
+        return y + USE_SPACE - 2;
     /* A service with no 5h limit has one bar, the week's, the row wide */
     if (s->h5_pct < 0 && s->h5_reset < 0)
+        y = draw_limit(d, vp, ink, x, y, w, "Week", s->wk_pct, s->wk_reset,
+                       USE_WEEK, dim);
+    else
     {
-        draw_limit(d, ink, 0, y, w, "Week", s->wk_pct, s->wk_reset,
-                   USE_WEEK, dim);
-        return;
+        int half = (w - 16) / 2;
+        draw_limit(d, vp, ink, x, y, half, "5 hours", s->h5_pct, s->h5_reset,
+                   5 * 3600, dim);
+        y = draw_limit(d, vp, ink, x + w - half, y, half, "Week", s->wk_pct,
+                       s->wk_reset, USE_WEEK, dim);
     }
-    int half = (w - 12) / 2;
-    draw_limit(d, ink, 0, y, half, "5h", s->h5_pct, s->h5_reset, 5 * 3600,
-               dim);
-    draw_limit(d, ink, w - half, y, half, "wk", s->wk_pct, s->wk_reset, USE_WEEK,
-               dim);
+    return y + USE_SPACE;
 }
 
-/* Draw the usage figures and bar outlines directly over the list backdrop. */
+static int usage_height;    /* the panel's content, for its scroll */
+
+/* Draw the usage figures and bars directly over the list backdrop. */
 static void draw_usage(struct gui_synclist *list)
 {
     struct screen *d = &screens[SCREEN_MAIN];
     struct viewport canvas = panel_viewport(list);
-    const struct viewport *vp = &canvas;
+    struct viewport *vp = &canvas;
     struct panel_ink ink = list_panel_ink();
     const struct hr_usage *u = &model.usage;
     char buf[48], t[16], c[16];
@@ -1678,27 +1757,36 @@ static void draw_usage(struct gui_synclist *list)
     if (!u->have)
     {
         const char *msg = t_trouble ? t_trouble : "Waiting for usage…";
+        vp->font = agents_small_font;
         text_at(d, (vp->width - text_w(d, msg)) / 2,
-                (vp->height - USE_LINE) / 2, ink.muted, msg);
+                (vp->height - font_get(agents_small_font)->height) / 2,
+                ink.muted, msg);
+        usage_height = 0;
     }
     else
     {
         int age = usage_age();
         bool stale = t_trouble || !u->ok || age > 3 * USAGE_EVERY / HZ;
+        int y = 8 - usage_scroll;
         for (int i = 0; i < HR_USAGE_SVCS; i++)
-            draw_service(d, &ink, i * USE_BLOCK - usage_scroll, vp->width,
-                         &u->svc[i], stale);
-        int y = HR_USAGE_SVCS * USE_BLOCK - usage_scroll;
-        d->set_foreground(ink.muted);
-        d->hline(0, vp->width - 1, y);
-        y += 3;
-        snprintf(buf, sizeof buf, "%s  %s", fmt_tokens(t, sizeof t, u->tokens),
-                 fmt_usd(c, sizeof c, u->usd_milli));
-        text_at(d, 0, y, stale ? ink.muted : ink.text, "Total");
-        text_at(d, text_w(d, "Total") + 10, y, stale ? ink.muted : ink.text,
-                buf);
+            y = draw_service(d, vp, &ink, y, &u->svc[i], stale);
+        d->set_foreground(ui_theme_rgb565(UI_COLOR_SEPARATOR));
+        d->hline(USE_MARGIN, vp->width - USE_MARGIN - 1, y - USE_SPACE / 2);
+        y += 2;
+        vp->font = agents_list_font;
+        text_at(d, USE_MARGIN, y, stale ? ink.muted : ink.text, "Total");
+        int total_w = text_w(d, "Total");
+        int ry = y + font_get(agents_list_font)->ascent -
+                 font_get(agents_small_font)->ascent;
+        vp->font = agents_small_font;
         if (stale)
-            text_at(d, vp->width - text_w(d, "stale"), y, ink.warn, "stale");
+            text_at(d, USE_MARGIN + total_w + 8, ry, ink.warn, "stale");
+        snprintf(buf, sizeof buf, "%s · %s", fmt_tokens(t, sizeof t, u->tokens),
+                 fmt_usd(c, sizeof c, u->usd_milli));
+        text_at(d, vp->width - USE_MARGIN - text_w(d, buf), ry,
+                stale ? ink.muted : ink.text, buf);
+        y += font_get(agents_list_font)->height + 8;
+        usage_height = y + usage_scroll;
     }
     d->set_viewport(previous);
     ui_flush_dirty();
@@ -1874,111 +1962,280 @@ static int detail_measure(const char *text, int bytes, void *ctx)
     return font_getstringnsize(text, bytes, NULL, NULL, font);
 }
 
+/* The T3 detail: the thread's title and state stay at the top. Below them
+ * the latest reply in the list font, then the recent messages newest
+ * first, each a speaker over its text in the small font. The body scrolls
+ * by pixels: t3_step is one reply line, t3_page a screen of body. */
+#define T3_MARGIN   8       /* the text's inset from either side */
+#define T3_GAP      9       /* above each earlier message */
+enum t3_line { T3_REPLY, T3_SPEAKER, T3_MESSAGE };
+static unsigned char t3_kind[DETAIL_LAYOUT_LINES];
+static int t3_step = 1, t3_page = 1;
+
+static int t3_font(int kind)
+{
+    return kind == T3_REPLY ? agents_list_font : agents_small_font;
+}
+
+static int t3_pitch(int kind)
+{
+    return font_get(t3_font(kind))->height + (kind == T3_REPLY ? 3 : 1);
+}
+
+/* Append text to the layout as lines of one kind, wrapped to width */
+static void t3_wrap(struct detail_layout *body, const char *text, int kind,
+                    int width)
+{
+    int font = t3_font(kind);
+    struct font *pf = font_get(font);
+    font_lock(font, true);
+    for (const char *p = text; *p && body->count < DETAIL_LAYOUT_LINES; )
+    {
+        const char *end;
+        const char *next = text_wrap_next_punct(p, width, pf, &end);
+        int len = end - p;
+        if (body->used + len + 1 >= DETAIL_LAYOUT_BYTES || next <= p)
+            break;
+        int i = body->count++;
+        t3_kind[i] = kind;
+        body->start[i] = body->used;
+        memcpy(body->text + body->used, p, len);
+        body->used += len;
+        body->end[i] = body->used;
+        body->text[body->used++] = '\0';
+        p = next;
+    }
+    font_lock(font, false);
+}
+
+/* Lay out the reply and the steps, which the daemon sends as "You: …" or
+ * "Assistant: …". A step that repeats the reply is left out. */
+static void t3_layout(struct detail_layout *body, int width)
+{
+    body->width = width;
+    body->used = body->count = 0;
+    t3_wrap(body, body->wire, T3_REPLY, width);
+    for (int i = HR_DETAIL_STEPS - 1; i >= 0; i--)
+    {
+        const char *step = body->steps[i], *text = step;
+        const char *speaker = !strncmp(step, "You: ", 5) ? "You" :
+                              !strncmp(step, "Assistant: ", 11) ? "Assistant" : NULL;
+        if (speaker)
+            text += strlen(speaker) + 2;
+        size_t n = MIN(strlen(text), (size_t)40);
+        if (!*text || (speaker && speaker[0] == 'A' && !strncmp(body->wire, text, n)))
+            continue;
+        if (speaker)
+            t3_wrap(body, speaker, T3_SPEAKER, width);
+        t3_wrap(body, text, T3_MESSAGE, width);
+    }
+}
+
+/* The body's height in pixels, the gaps above each speaker included */
+static int t3_height(const struct detail_layout *body)
+{
+    int h = 0;
+    for (int i = 0; i < body->count; i++)
+        h += t3_pitch(t3_kind[i]) + (t3_kind[i] == T3_SPEAKER ? T3_GAP : 0);
+    return h;
+}
+
+static void draw_t3_body(struct screen *d, struct viewport *vp, int top,
+                         unsigned colour, unsigned muted)
+{
+    const struct hr_detail *det = &model.detail;
+    struct detail_layout *body = &detail_layout;
+    const int width = MAX(1, vp->width - 2 * T3_MARGIN);
+    bool changed = strcmp(body->wire, det->say) ||
+                   memcmp(body->steps, det->step, sizeof body->steps);
+    /* A reader scrolled down keeps the text in place; new text waits for
+     * the top */
+    detail_new = changed && body->used && detail_scroll > 0;
+    if (body->width != width || (changed && !detail_new))
+    {
+        hr_copy(body->wire, det->say, sizeof body->wire);
+        memcpy(body->steps, det->step, sizeof body->steps);
+        t3_layout(body, width);
+    }
+
+    struct viewport pane = *vp;
+    pane.y += top;
+    pane.height = MAX(1, vp->height - KEYBAR - top);
+    t3_step = t3_pitch(T3_REPLY);
+    t3_page = MAX(t3_step, pane.height - t3_step);
+    detail_scroll_max = MAX(0, t3_height(body) - pane.height);
+    detail_scroll = MIN(detail_scroll, detail_scroll_max);
+    d->set_viewport(&pane);
+    int y = -detail_scroll;
+    for (int i = 0; i < body->count && y < pane.height; i++)
+    {
+        int kind = t3_kind[i];
+        if (kind == T3_SPEAKER)
+            y += T3_GAP;
+        int pitch = t3_pitch(kind);
+        /* A line cut by the top edge shows; one cut by the bottom waits */
+        if (y + pitch > 0 && y + pitch <= pane.height)
+        {
+            pane.font = t3_font(kind);
+            text_at(d, T3_MARGIN, y, kind == T3_MESSAGE ? colour : kind == T3_REPLY ?
+                    colour : muted, body->text + body->start[i]);
+        }
+        y += pitch;
+    }
+    if (detail_scroll_max > 0)
+    {
+        int thumb = MAX(6, pane.height * pane.height / (pane.height + detail_scroll_max));
+        d->set_foreground(ui_theme_rgb565(UI_COLOR_SEPARATOR));
+        d->fillrect(vp->width - 3, 0, 2, pane.height);
+        d->set_foreground(ui_theme_rgb565(UI_COLOR_ACCENT));
+        d->fillrect(vp->width - 3, (pane.height - thumb) * detail_scroll / detail_scroll_max,
+                    2, thumb);
+    }
+    if (detail_new)
+    {
+        const char *note = "↑ New";
+        pane.font = agents_small_font;
+        int w = text_w(d, note) + 12, h = font_get(agents_small_font)->height + 4;
+        d->set_foreground(ui_theme_rgb565(UI_COLOR_MODAL_BG));
+        fill_round_rect(d, vp->width - w - T3_MARGIN, 2, w, h, h / 2);
+        text_at(d, vp->width - w - T3_MARGIN + 6, 4,
+                ui_theme_rgb565(UI_COLOR_MODAL_FG), note);
+    }
+    d->set_viewport(vp);
+}
+
+static void detail_keybar(struct screen *d, struct viewport *vp)
+{
+    int y = vp->height - KEYBAR;
+    const char *key = agents_fruit_nav() ?
+        "Wheel Scroll · SEL Actions · Hold SEL Voice" :
+        "SEL Actions · ‹ › Page · Hold PLAY Voice";
+    unsigned tint = ui_theme_rgb565(UI_COLOR_LIST_TINT);
+    d->set_foreground(tint);
+    d->fillrect(0, y, vp->width, KEYBAR);
+    d->set_foreground(ui_theme_rgb565(UI_COLOR_SEPARATOR));
+    d->hline(0, vp->width - 1, y);
+    int font = vp->font;
+    vp->font = agents_small_font;
+    char cut[88];
+    fit_in(cut, sizeof cut, key, vp->width - 2 * T3_MARGIN, agents_small_font);
+    text_at(d, (vp->width - text_w(d, cut)) / 2,
+            y + (KEYBAR - font_get(agents_small_font)->height) / 2 + 1,
+            color_fit_contrast(ui_theme_rgb565(UI_COLOR_MUTED), tint, 450), cut);
+    vp->font = font;
+}
+
+/* The T3 header: the thread's title, then a dot, its state, its model and
+ * the time in the state, over a rule. Returns where the body starts. */
+static int draw_t3_header(struct screen *d, struct viewport *vp,
+                          const struct panel_ink *ink, char state, int secs)
+{
+    const struct hr_detail *det = &model.detail;
+    bool have = model.detail_valid && !strcmp(model.detail_pane, detail_pane);
+    const int width = vp->width - 2 * T3_MARGIN;
+    char buf[128], age[16];
+    int font = vp->font, y = 6;
+
+    const char *title = have && det->task[0] ? det->task :
+                        detail_agent.name[0] ? detail_agent.name : "Thread";
+    vp->font = agents_title_font;
+    text_at(d, T3_MARGIN, y, ink->text,
+            fit_in(buf, sizeof buf, title, width, agents_title_font));
+    y += font_get(agents_title_font)->height + 3;
+
+    /* "Running · gpt-5.5", as the daemon words it, else the state alone */
+    static const char *const words[] = { "Running", "Waiting", "Failed",
+                                         "Completed", "Idle" };
+    const char *letters = "wbfdi", *at = strchr(letters, state);
+    const char *word = state && at ? words[at - letters] : "";
+    const char *rest = "";
+    char now[HR_DETAIL_TEXT];
+    if (have && det->now[0])
+    {
+        hr_copy(now, det->now, sizeof now);
+        char *dot = strstr(now, " · ");
+        if (dot)
+        {
+            *dot = '\0';
+            rest = dot;
+        }
+        word = now;
+    }
+    vp->font = agents_small_font;
+    int h = font_get(agents_small_font)->height;
+    unsigned colour = state == 'b' || state == 'f' ? ink->warn : ink->text;
+    draw_disc(d, T3_MARGIN, y + (h - DET_DOT) / 2,
+              state == 'b' ? DOT_RED : state == 'w' ? DOT_GREEN :
+              state == 'f' ? DOT_CORAL : state == 'd' ? DOT_TEAL : DOT_GREY);
+    int x = T3_MARGIN + DET_DOT + 6;
+    text_at(d, x, y, colour, word);
+    x += text_w(d, word);
+    snprintf(buf, sizeof buf, "%s%s%s", rest, secs >= 0 ? " · " : "",
+             secs >= 0 ? fmt_age(age, sizeof age, secs) : "");
+    text_at(d, x, y, ink->muted,
+            fit_in(buf, sizeof buf, buf, vp->width - T3_MARGIN - x, agents_small_font));
+    y += h + 6;
+    d->set_foreground(ui_theme_rgb565(UI_COLOR_SEPARATOR));
+    d->hline(T3_MARGIN, vp->width - T3_MARGIN - 1, y);
+    vp->font = font;
+    return y + 6;
+}
+
+/* A rounded band across the view with one line of small text in it */
+static int draw_t3_band(struct screen *d, struct viewport *vp, int y,
+                        unsigned fill, unsigned colour, const char *text)
+{
+    int font = vp->font;
+    int h = font_get(agents_small_font)->height + 8;
+    char cut[96];
+    d->set_foreground(fill);
+    fill_round_rect(d, T3_MARGIN, y, vp->width - 2 * T3_MARGIN, h, 5);
+    vp->font = agents_small_font;
+    text_at(d, T3_MARGIN + 8, y + 4, colour,
+            fit_in(cut, sizeof cut, text, vp->width - 2 * T3_MARGIN - 16,
+                   agents_small_font));
+    vp->font = font;
+    return y + h + 6;
+}
+
+static void draw_t3_detail(struct screen *d, struct viewport *vp,
+                           const struct panel_ink *ink, char state, int secs,
+                           const char *t_trouble)
+{
+    const struct hr_detail *det = &model.detail;
+    bool have = model.detail_valid && !strcmp(model.detail_pane, detail_pane);
+    unsigned bg = ui_theme_rgb565(UI_COLOR_BACKGROUND);
+    task_text[0] = '\0';
+    int y = draw_t3_header(d, vp, ink, state, secs);
+    detail_keybar(d, vp);
+    if (t_trouble)
+        y = draw_t3_band(d, vp, y, color_blend(bg, ink->warn, 48), ink->text,
+                         !model.hello ? "Computer disconnected" : t_trouble);
+    else if (hr_model_question_for(&model, detail_pane) || (have && det->input[0]))
+        y = draw_t3_band(d, vp, y, color_blend(bg, ink->warn, 64), ink->text,
+                         agents_fruit_nav() ? "Needs your answer · SEL for Actions" :
+                         "Needs your answer · Hold SEL to answer");
+    if (!have || (!det->say[0] && !det->step[0][0] && !det->step[1][0] &&
+                  !det->step[2][0] && !detail_layout.used))
+    {
+        const char *msg = have ? "Nothing in the thread yet" : "Loading the thread…";
+        int font = vp->font;
+        vp->font = agents_small_font;
+        text_at(d, (vp->width - text_w(d, msg)) / 2,
+                y + MAX(0, (vp->height - KEYBAR - y - font_get(agents_small_font)->height) / 2),
+                ink->muted, msg);
+        vp->font = font;
+    }
+    else
+        draw_t3_body(d, vp, y, t_trouble ? ink->muted : ink->text, ink->muted);
+}
+
 /* Draw the detail view over the empty list. The agent's name and kind head
  * it, with a dot, its state and the time in it on the right; below a rule
  * come the task, the working line (or the state when done, idle or
  * asking), the message, wrapped to as many lines as it needs, and the last
  * steps, the oldest dropped first when the message needs their lines. A
  * fallback detail is the pane's last lines in grey, with no time. */
-static void draw_t3_body(struct screen *d, struct viewport *vp, int y,
-                         unsigned colour, unsigned muted)
-{
-    const struct hr_detail *det = &model.detail;
-    struct detail_layout *body = &detail_layout;
-    const int pitch = MAX(17, font_get(vp->font)->height + 1);
-    const int width = MAX(1, vp->width - 8);
-    bool changed = strcmp(body->wire, det->say) ||
-                   memcmp(body->steps, det->step, sizeof body->steps);
-    detail_new = changed && body->used && !detail_follow && detail_scroll < detail_scroll_max;
-    if (body->width != width || (changed && !detail_new))
-    {
-        hr_copy(body->wire, det->say, sizeof body->wire);
-        memcpy(body->steps, det->step, sizeof body->steps);
-        body->width = width;
-        body->used = body->count = 0;
-        struct font *pf = font_get(vp->font);
-        font_lock(vp->font, true);
-        const char *p = body->wire;
-        while (*p && body->count < DETAIL_LAYOUT_LINES)
-        {
-            const char *end;
-            const char *next = text_wrap_next_punct(p, width, pf, &end);
-            int len = end - p;
-            if (body->used + len + 1 >= DETAIL_LAYOUT_BYTES || next <= p)
-                break;
-            int i = body->count++;
-            body->start[i] = body->used;
-            memcpy(body->text + body->used, p, len);
-            body->used += len;
-            body->end[i] = body->used;
-            body->text[body->used++] = '\0';
-            p = next;
-        }
-        font_lock(vp->font, false);
-    }
-
-    int count = body->count;
-    for (int i = 0; i < HR_DETAIL_STEPS; i++)
-        count += body->steps[i][0] != '\0';
-    detail_page_lines = MAX(1, (vp->height - KEYBAR - y) / pitch);
-    detail_scroll_max = MAX(0, count - detail_page_lines);
-    detail_scroll = detail_follow ? detail_scroll_max :
-                                   MIN(detail_scroll, detail_scroll_max);
-    if (!detail_scroll_max && !detail_new)
-        detail_follow = true;
-
-    int row = -detail_scroll;
-    for (int i = 0; i < body->count && row < detail_page_lines; i++, row++)
-        if (row >= 0)
-            text_at(d, 0, y + row * pitch, colour, body->text + body->start[i]);
-    for (int i = 0; i < HR_DETAIL_STEPS && row < detail_page_lines; i++)
-    {
-        if (!body->steps[i][0])
-            continue;
-        if (row >= 0)
-        {
-            char line[HR_DETAIL_TEXT + 8];
-            snprintf(line, sizeof line, "› %s", body->steps[i]);
-            text_at(d, 0, y + row * pitch, muted, fit(line, sizeof line, line, width));
-        }
-        row++;
-    }
-    if (detail_scroll_max > 0)
-    {
-        int track = MAX(1, vp->height - KEYBAR - y - 2);
-        int thumb = MAX(4, track * detail_page_lines / count);
-        d->set_foreground(ui_theme_rgb565(UI_COLOR_SEPARATOR));
-        d->fillrect(vp->width - 3, y, 3, track);
-        d->set_foreground(ui_theme_rgb565(UI_COLOR_ACCENT));
-        d->fillrect(vp->width - 3, y + (track - thumb) * detail_scroll / detail_scroll_max,
-                    3, thumb);
-    }
-    if (detail_new)
-    {
-        const char *note = "↓ New";
-        int w = text_w(d, note) + 8;
-        int py = vp->height - KEYBAR - pitch;
-        d->set_foreground(ui_theme_rgb565(UI_COLOR_MODAL_BG));
-        d->fillrect(vp->width - w - 6, py, w, pitch);
-        text_at(d, vp->width - w - 2, py, ui_theme_rgb565(UI_COLOR_MODAL_FG), note);
-    }
-}
-
-static void detail_keybar(struct screen *d, const struct viewport *vp)
-{
-    int y = vp->height - KEYBAR;
-    const char *key = agents_fruit_nav() ?
-        "Wheel Scroll · SEL Actions · Hold SEL Voice" :
-        "SEL Actions · ◀/▶ Page · Hold PLAY Voice";
-    d->set_foreground(ui_theme_rgb565(UI_COLOR_LIST_TINT));
-    d->fillrect(0, y, vp->width, KEYBAR);
-    d->set_foreground(ui_theme_rgb565(UI_COLOR_SEPARATOR));
-    d->hline(0, vp->width - 1, y);
-    char cut[88];
-    text_at(d, 4, y + 2, color_fit_contrast(ui_theme_rgb565(UI_COLOR_FOREGROUND),
-                  ui_theme_rgb565(UI_COLOR_LIST_TINT), 450), fit(cut, sizeof cut, key, vp->width - 8));
-}
-
 static void draw_detail(struct gui_synclist *list)
 {
     struct screen *d = &screens[SCREEN_MAIN];
@@ -1998,8 +2255,17 @@ static void draw_detail(struct gui_synclist *list)
     int secs = have ? detail_age() : -1;
     const char *t_trouble = trouble(trouble_buf, sizeof trouble_buf);
 
-    /* The header: name · kind, and the dot, state and time on the right */
     char state = agent_state(a);
+    detail_shown_age = secs >= 0 ? secs / 60 : -1;
+    if (t3)
+    {
+        draw_t3_detail(d, vp, &ink, state, secs, t_trouble);
+        d->set_viewport(previous);
+        ui_flush_dirty();
+        return;
+    }
+
+    /* The header: name · kind, and the dot, state and time on the right */
     snprintf(buf, sizeof buf, "%s%s", status_word(state),
              secs >= 0 ? " " : "");
     if (secs >= 0)
@@ -2007,7 +2273,6 @@ static void draw_detail(struct gui_synclist *list)
         size_t n = strlen(buf);
         snprintf(buf + n, sizeof buf - n, "%s", fmt_age(age, sizeof age, secs));
     }
-    detail_shown_age = secs >= 0 ? secs / 60 : -1;
     int sw = text_w(d, buf);
     int h = font_get(vp->font)->height;
     text_at(d, vp->width - sw, 0, state == 'b' ? ink.warn : ink.text, buf);
@@ -2016,50 +2281,11 @@ static void draw_detail(struct gui_synclist *list)
               state == 'f' ? DOT_CORAL : state == 'd' ? DOT_TEAL : DOT_GREY);
     snprintf(buf, sizeof buf, "%s%s%s", a->name[0] ? a->name : "",
              a->name[0] ? " · " : "", a->kind);
-    text_at(d, 0, 0, ink.muted,
-            fit(buf, sizeof buf, t3 ? a->title : buf, vp->width - sw - DET_DOT - 13));
+    text_at(d, 0, 0, ink.muted, fit(buf, sizeof buf, buf, vp->width - sw - DET_DOT - 13));
     int y = USE_LINE + 2;
     d->set_foreground(ink.muted);
     d->hline(0, vp->width - 1, y);
     y += DET_GAP;
-    if (t3)
-    {
-        task_text[0] = '\0';
-        detail_keybar(d, vp);
-        if (t_trouble)
-        {
-            const char *message = !model.hello ? "Computer disconnected" : t_trouble;
-            text_at(d, 0, y, ink.warn, fit(line, sizeof line, message, vp->width));
-            y += USE_LINE;
-        }
-        if (!t_trouble && (hr_model_question_for(&model, detail_pane) ||
-                           (have && det->input[0])))
-        {
-            d->set_foreground(ui_theme_rgb565(UI_COLOR_LIST_TINT));
-            d->fillrect(0, y, vp->width, 24);
-            text_at(d, 4, y + 2, ink.warn, "! Approval needed · Open Actions");
-            y += 24;
-        }
-        if (have && (state == 'w' || state == 'f') && det->now[0])
-        {
-            snprintf(line, sizeof line, "%s %s", state == 'f' ? "!" : "•", det->now);
-            text_at(d, 0, y, state == 'f' ? ink.warn : ink.text,
-                    fit(line, sizeof line, line, vp->width));
-            y += USE_LINE;
-        }
-        if (!have || (!det->say[0] && !det->step[0][0] && !det->step[1][0] && !det->step[2][0] &&
-                      (!detail_layout.used || detail_follow)))
-        {
-            const char *msg = have ? "Nothing in the thread" : "Waiting for the thread…";
-            text_at(d, (vp->width - text_w(d, msg)) / 2,
-                    y + MAX(0, (vp->height - KEYBAR - y - USE_LINE) / 2), ink.muted, msg);
-        }
-        else
-            draw_t3_body(d, vp, y, t_trouble ? ink.muted : ink.text, ink.muted);
-        d->set_viewport(previous);
-        ui_flush_dirty();
-        return;
-    }
 
     bool empty = have &&
                  !det->task[0] && !det->now[0] && !det->say[0] &&
@@ -2133,7 +2359,6 @@ static void draw_detail(struct gui_synclist *list)
     }
     y = detail_body_y;
     int avail = detail_body_avail, need = detail_layout.count;
-    detail_page_lines = MAX(1, avail);
     /* Tool rows consume spare space; starting/finishing a tool must never
      * push a message line off screen or change the scroll anchor. */
     int maximum = MAX(0, need - avail);
@@ -2845,16 +3070,16 @@ static int quick_choice(const struct hr_question *q, bool deny)
     return 0;
 }
 
-/* Focus herdr workspaces, panes and T3 threads as the wheel moves. */
+/* Focus herdr workspaces and panes as the wheel moves */
 static void want_focus(struct gui_synclist *list)
 {
     int sel = gui_synclist_get_sel_pos(list);
     const struct row *r = sel >= 0 && sel < nrows ? &rows[sel] : NULL;
-    bool focusable = r && ((view == VIEW_SPACES && r->kind == ROW_SPACE &&
-                            !is_t3(r->id)) ||
-                           (view == VIEW_AGENTS && r->kind == ROW_AGENT));
+    bool focusable = r && !is_t3(r->id) &&
+                     ((view == VIEW_SPACES && r->kind == ROW_SPACE) ||
+                      (view == VIEW_AGENTS && r->kind == ROW_AGENT));
     snprintf(focus_want, sizeof focus_want, "%s", focusable ? r->id : "");
-    focus_at = current_tick + (is_t3(focus_want) ? HZ / 10 : 0);
+    focus_at = current_tick;
 }
 
 /* Forget the wanted and the done focus: the view has changed */
@@ -3205,6 +3430,19 @@ static void enter_space(struct gui_synclist *list, const char *ws)
     show(list, -1);
 }
 
+/* Ask for the thread list across projects once the daemon offers it */
+static void subscribe_threads(struct gui_synclist *list)
+{
+    if (!t3_flat() || space_id[0] || view != VIEW_SPACES)
+        return;
+    strcpy(space_id, T3_THREADS);
+    strcpy(space_tab, "active");
+    model.agents_valid = false;
+    filter_loading = true;
+    subscribe(space_id, space_tab);
+    show(list, -1);
+}
+
 /* Back to the spaces view, on the workspace's row */
 static void close_space(struct gui_synclist *list)
 {
@@ -3265,9 +3503,11 @@ static void back_from_tab(struct gui_synclist *list)
  * once the computer has shown the pane */
 static void open_detail(struct gui_synclist *list, const struct hr_agent *a)
 {
-    slide(&tab_page[tab_index()], &detail_page, true);
+    detail_from = view == VIEW_SPACES ? VIEW_SPACES : VIEW_AGENTS;
+    slide(detail_from == VIEW_SPACES ? (const void *)&spaces_page :
+          (const void *)&tab_page[tab_index()], &detail_page, true);
     detail_scroll = detail_scroll_max = 0;
-    detail_follow = detail_new = false;
+    detail_new = false;
     detail_wheel_at = current_tick - HZ;
     memset(&detail_layout, 0, sizeof detail_layout);
     detail_body_avail = 0;
@@ -3289,10 +3529,11 @@ static void open_detail(struct gui_synclist *list, const struct hr_agent *a)
     show(list, 0);
 }
 
-/* Back to the agents view, on the agent's row */
+/* Back to the list the detail view opened from, on the agent's row */
 static void close_detail(struct gui_synclist *list)
 {
-    slide(&detail_page, &tab_page[tab_index()], false);
+    slide(&detail_page, detail_from == VIEW_SPACES ? (const void *)&spaces_page :
+          (const void *)&tab_page[tab_index()], false);
     struct row r = { .kind = ROW_AGENT };
     snprintf(r.id, sizeof r.id, "%s", detail_pane);
     subscribe_detail("");
@@ -3301,7 +3542,7 @@ static void close_detail(struct gui_synclist *list)
     detail_pane[0] = '\0';
     model.actions_target[0] = '\0';
     model.actions_valid = false;
-    view = VIEW_AGENTS;
+    view = detail_from;
     reset_focus();
     show_row(list, &r);
 }
@@ -3935,10 +4176,9 @@ static void scroll_panel(struct gui_synclist *list, int dir, bool page)
     if (view == VIEW_DETAIL && is_t3(detail_pane))
     {
         bool fast = TIME_BEFORE(current_tick, detail_wheel_at + WHEEL_FAST);
-        int step = page ? detail_page_lines : fast ? 3 : 1;
+        int step = page ? t3_page : fast ? 3 * t3_step : t3_step;
         detail_wheel_at = current_tick;
         int scroll = MAX(0, MIN(detail_scroll_max, detail_scroll + dir * step));
-        detail_follow = scroll == detail_scroll_max;
         if (scroll != detail_scroll)
         {
             detail_scroll = scroll;
@@ -3948,8 +4188,9 @@ static void scroll_panel(struct gui_synclist *list, int dir, bool page)
     else if (view == VIEW_USAGE && !usage_legacy_keys())
     {
         int height = list->parent[SCREEN_MAIN]->height;
-        int maximum = MAX(0, HR_USAGE_SVCS * USE_BLOCK + USE_LINE + 3 - height);
-        int scroll = MAX(0, MIN(maximum, usage_scroll + dir * (page ? height : USE_LINE)));
+        int maximum = MAX(0, usage_height - height);
+        int line = font_get(agents_list_font)->height;
+        int scroll = MAX(0, MIN(maximum, usage_scroll + dir * (page ? height - line : line)));
         if (scroll != usage_scroll)
         {
             usage_scroll = scroll;
@@ -3987,6 +4228,8 @@ static void horizontal_button(struct gui_synclist *list, int dir, bool held)
         case VIEW_SPACES:
             if (dir < 0 && !held)
                 open_usage(list);
+            else if (dir > 0 && !held && t3_flat() && !agents_fruit_nav())
+                select_tab(list, !tab_index());
             break;
         case VIEW_USAGE:
             if (dir > 0 && !held)
@@ -4004,7 +4247,6 @@ static void horizontal_button(struct gui_synclist *list, int dir, bool held)
                 if (held)
                 {
                     detail_scroll = dir < 0 ? 0 : detail_scroll_max;
-                    detail_follow = dir > 0;
                     draw_detail(list);
                 }
                 else
@@ -4109,7 +4351,6 @@ static int agents_run(void)
         usage_scroll = detail_scroll = detail_scroll_max = 0;
         memset(&detail_layout, 0, sizeof detail_layout);
         detail_body_avail = 0;
-        detail_page_lines = 1;
     }
     cache_generation = podlink_generation();
     if (was_connected)
@@ -4135,8 +4376,15 @@ static int agents_run(void)
     update_volume_mode();
 #endif
     push_current_activity(ACTIVITY_AGENTS);
-    int body_font = ui_theme_current_font_load(UI_FONT_BODY, global_settings.glyphs_to_cache);
+    int glyphs = global_settings.glyphs_to_cache;
+    int body_font = ui_theme_current_font_load(UI_FONT_BODY, glyphs);
+    int title_font = ui_theme_current_font_load(UI_FONT_TITLE, glyphs);
+    int list_font = ui_theme_current_font_load(UI_FONT_LIST, glyphs);
+    int small_font = ui_theme_current_font_load(UI_FONT_PANE_TEXT, glyphs);
     agents_body_font = body_font >= 0 ? body_font : FONT_UI;
+    agents_title_font = title_font >= 0 ? title_font : FONT_UI;
+    agents_list_font = list_font >= 0 ? list_font : FONT_UI;
+    agents_small_font = small_font >= 0 ? small_font : FONT_UI;
     /* Play is held to talk here, and held long enough it would power off */
     bool poweroff = button_get_sw_poweroff_state();
     button_set_sw_poweroff_state(false);
@@ -4174,7 +4422,8 @@ static int agents_run(void)
                 leave_question(&list);
             if (view == VIEW_USAGE)
                 close_usage(&list);
-            enter_space(&list, target.project);
+            if (!t3_flat())
+                enter_space(&list, target.project);
             struct hr_agent a = {0};
             hr_copy(a.pane, target.thread, sizeof a.pane);
             hr_copy(a.name, target.thread_title, sizeof a.name);
@@ -4215,7 +4464,8 @@ static int agents_run(void)
         advance_question(&list);
         bool first_projects = !received_projects && model.nws;
         received_projects |= first_projects;
-        if (view == VIEW_AGENTS && filter_loading && model.agents_valid &&
+        subscribe_threads(&list);
+        if (threads_view() && filter_loading && model.agents_valid &&
             !strcmp(model.agents_ws, space_id))
         {
             filter_loading = false;
@@ -4640,7 +4890,11 @@ static int agents_run(void)
     button_set_sw_poweroff_state(poweroff);
     pop_current_activity();
     font_unload(body_font);
-    agents_body_font = FONT_UI;
+    font_unload(title_font);
+    font_unload(list_font);
+    font_unload(small_font);
+    agents_body_font = agents_title_font = FONT_UI;
+    agents_list_font = agents_small_font = FONT_UI;
 #ifdef IPOD_ACCESSORY_PROTOCOL
     iap_agents_volume_enable(false);
     volume_paging = false;

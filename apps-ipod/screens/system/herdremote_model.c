@@ -648,7 +648,14 @@ int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
         if (number(f[1]) != 1)
             return 0;
         m->hello = true;
+        m->thread_list = false;
         return 'H';
+    }
+    if (!strcmp(type, "TL") && n == 2 && !strcmp(f[1], "1") &&
+        (!cursor || !*cursor))
+    {
+        m->thread_list = true;
+        return 'L';
     }
     if (!strcmp(type, "M") && n == 2 && (!cursor || !*cursor))
     {
@@ -658,9 +665,10 @@ int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
             return 0;
         if (mode != m->mode)
         {
-            bool hello = m->hello;
+            bool hello = m->hello, thread_list = m->thread_list;
             hr_model_reset(m);
             m->hello = hello;
+            m->thread_list = thread_list;
             m->mode = mode;
         }
         return 'M';

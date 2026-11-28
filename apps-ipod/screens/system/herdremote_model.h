@@ -141,6 +141,9 @@ struct hr_model {
     enum hr_mode mode;
     bool workspaces_seen;
     bool hello;             /* the daemon has introduced itself */
+    /* The daemon serves the T3 thread list across projects (TL): set after
+     * its hello, kept across a mode change */
+    bool thread_list;
     bool tick_seen;         /* at least one heartbeat from this session */
     bool herdr_ok;
     bool t3_health_known;   /* the last tick carried T3 health */
@@ -185,7 +188,7 @@ struct hr_model {
 
 /* Apply one message. Returns its type letter ('W', 'S', 'A', 'Q', 'X', 'R',
  * 'T', 'U', 'V', 'D', 'K', 'E', 'M', 'H' for the hello, 'B' for the seven-field T
- * that lists tabs), or 0 if it was not a HerdRemote v1 message, in which
+ * that lists tabs, 'L' for TL), or 0 if it was not a HerdRemote v1 message, in which
  * case the model is unchanged. */
 int hr_detail_scroll(int position, int old_max, int new_max);
 int hr_model_apply(struct hr_model *m, const char *data, unsigned int length);

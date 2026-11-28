@@ -177,7 +177,7 @@ static void yesno_measure(struct dialog *d, struct screen *s,
         int hfont = c->head_font >= 0 ? c->head_font : box->font;
         int hch = font_get(hfont)->height;
         int bch = font_get(box->font)->height;
-        int foot_h = DIALOG_POPUP_FOOTER_H;
+        int foot_h = DIALOG_POPUP_PAIR_FOOTER_H;
 
         d->style.box_margin = 0;
         c->head_count = 0;
@@ -296,7 +296,7 @@ static void yesno_draw(struct dialog *d, struct screen *s,
         int kfont = content->font;
         int hch = font_get(hfont)->height;
         int bch = font_get(content->font)->height;
-        int foot_h = DIALOG_POPUP_FOOTER_H;
+        int foot_h = DIALOG_POPUP_PAIR_FOOTER_H;
         int foot_y = content->height - foot_h;
         unsigned shadow = LCD_RGBPACK(4, 10, 24);
 

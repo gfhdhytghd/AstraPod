@@ -219,11 +219,11 @@ static void confirm_classic_draw(struct dialog *d, struct screen *s,
 
     int row_w = content->width - 24;
     dialog_draw_popup_action_row(s, 12, ry, row_w, DIALOG_POPUP_BUTTON_H,
-                                 "SELECT", false, "Connect",
+                                 "MENU", false, "Charge Only",
                                  kfont, lfont);
     ry += DIALOG_POPUP_BUTTON_H + USB_POPUP_ROW_GAP;
     dialog_draw_popup_action_row(s, 12, ry, row_w, DIALOG_POPUP_BUTTON_H,
-                                 "MENU", false, "Charge Only",
+                                 "SELECT", false, "Connect",
                                  kfont, lfont);
     if (remote)
     {

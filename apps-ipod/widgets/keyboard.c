@@ -54,7 +54,7 @@ static void kbd_measure(struct dialog *d, struct screen *display,
     {
         int line_h = edit_line_height(display);
         int field_h = line_h + 12;
-        int foot_h = DIALOG_POPUP_FOOTER_H;
+        int foot_h = DIALOG_POPUP_PAIR_FOOTER_H;
         int box_w = MIN(display->lcdwidth - 32, 282);
         int box_h = 16 + field_h + 14 + foot_h;
         d->style.box_margin = 0;
@@ -121,7 +121,7 @@ static void kbd_draw(struct dialog *d, struct screen *display,
         edit_line_draw(display, &s->ed, tvp.width);
 
         display->set_viewport(content);
-        int foot_h = DIALOG_POPUP_FOOTER_H;
+        int foot_h = DIALOG_POPUP_PAIR_FOOTER_H;
         int foot_y = content->height - foot_h;
         int bfont = s->btn_font >= 0 ? s->btn_font : content->font;
         int kfont = content->font;

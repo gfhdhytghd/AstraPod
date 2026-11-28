@@ -490,43 +490,54 @@ static void draw_capsule_key(struct screen *screen, int x, int y, int w, int h,
     screen->setfont(old_font);
 }
 
-#define CAPSULE_TEXT_PAD 6
-#define CAPSULE_TEXT_GAP 5
-
-struct capsule_widths {
-    int label;
-    int hint;
-};
-
-static struct capsule_widths measure_capsule(const char *label, const char *hint,
-                                             int arrow_dir, int label_font,
-                                             int hint_font)
+/* Keep the suffix in the measurement so kerning cannot push it into the rim.
+ * Walk back by UTF-8 character boundaries when the label runs out of room. */
+static const char *fit_capsule_text(const char *text, int font, int w,
+                                    char *buf, size_t size, int *width)
 {
-    struct capsule_widths size;
-    font_getstringsize((const unsigned char *)label, &size.label, NULL, label_font);
-    font_getstringsize((const unsigned char *)hint, &size.hint, NULL, hint_font);
-    if (arrow_dir)
-        size.hint += 8;
-    return size;
+    if (font_getstringsize((const unsigned char *)text, width, NULL, font) <= w)
+        return text;
+
+    const char ellipsis[] = "...";
+    const unsigned char *str = (const unsigned char *)text;
+    size_t end = font_measurestring(str, size - sizeof(ellipsis), w,
+                                   NULL, NULL, font);
+    memcpy(buf, str, end);
+    do
+    {
+        memcpy(buf + end, ellipsis, sizeof(ellipsis));
+        if (font_getstringsize((const unsigned char *)buf, width, NULL, font) <= w)
+            return buf;
+        if (!end)
+            break;
+        do
+            end--;
+        while (end && (str[end] & 0xc0) == 0x80);
+    } while (true);
+    *width = 0;
+    return "";
 }
 
-/* The action and its hardware legend share the capsule's centre line. */
-static void draw_footer_capsule(struct screen *screen, int x, int y, int w,
+static void draw_pair_capsule(struct screen *screen, int x, int y, int w,
                                const char *label, const char *hint,
-                               int arrow_dir, int label_font, int hint_font,
-                               struct capsule_widths size)
+                               int arrow_dir, int label_font, int hint_font)
 {
-    const int pad = CAPSULE_TEXT_PAD;
-    const int gap = CAPSULE_TEXT_GAP;
-    const int h = DIALOG_POPUP_BUTTON_H;
-    int lw = MAX(0, MIN(size.label, w - 2 * pad - gap - size.hint));
-    int start = x + MAX(pad, (w - (lw + gap + size.hint)) / 2);
+    const int inset = 10; /* 8 px padding plus room for glyph overhang */
+    const int arrow_w = arrow_dir ? 8 : 0;
+    int hw, lw;
+    char label_buf[96], hint_buf[32];
+    if (w <= 2 * inset + arrow_w)
+        return;
+    label = fit_capsule_text(label, label_font, w - 2 * inset,
+                            label_buf, sizeof(label_buf), &lw);
+    hint = fit_capsule_text(hint, hint_font, w - 2 * inset - arrow_w,
+                           hint_buf, sizeof(hint_buf), &hw);
+    hw += arrow_w;
 
-    draw_alert_capsule(screen, x, y, w, h, false);
-    int label_x = arrow_dir < 0 ? start + size.hint + gap : start;
-    int hint_x = arrow_dir < 0 ? start : start + lw + gap;
-    draw_capsule_label(screen, label_x, y, lw, h, label, label_font);
-    draw_capsule_key(screen, hint_x, y, size.hint, h, hint, arrow_dir, hint_font);
+    draw_alert_capsule(screen, x, y, w, DIALOG_POPUP_PAIR_BUTTON_H, false);
+    draw_capsule_label(screen, x + 8, y + 3, w - 16, 16, label, label_font);
+    draw_capsule_key(screen, x + (w - hw) / 2, y + 20, hw, 14, hint,
+                     arrow_dir, hint_font);
 }
 
 void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y, int w,
@@ -536,35 +547,16 @@ void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y, int w,
                                    const char *right_hint, bool right_arrow,
                                    int label_font, int hint_font)
 {
-    if (w <= 32)
-        return;
     const int pad = 12;
     const int gap = 8;
-    int available = w - 2 * pad - gap;
-    int lw = available / 2;
-    int rw = available - lw;
-    int left_dir = left_arrow ? -1 : 0;
-    int right_dir = right_arrow ? 1 : 0;
-    struct capsule_widths left = measure_capsule(left_label, left_hint, left_dir,
-                                                label_font, hint_font);
-    struct capsule_widths right = measure_capsule(right_label, right_hint, right_dir,
-                                                 label_font, hint_font);
-    int inset = 2 * CAPSULE_TEXT_PAD + CAPSULE_TEXT_GAP;
-    int extra_left = lw - (left.label + left.hint + inset);
-    int extra_right = rw - (right.label + right.hint + inset);
-    /* Let a longer label use spare space from the other capsule. */
-    if (extra_left < 0 && extra_right > 0)
-        lw += MIN(-extra_left, extra_right);
-    else if (extra_right < 0 && extra_left > 0)
-        lw -= MIN(-extra_right, extra_left);
-    rw = available - lw;
-    int lx = x + pad;
-    int rx = lx + lw + gap;
+    int bw = (w - 2 * pad - gap) / 2;
+    int lx = x + (w - (2 * bw + gap)) / 2;
+    int rx = lx + bw + gap;
 
-    draw_footer_capsule(screen, lx, y, lw, left_label, left_hint,
-                        left_dir, label_font, hint_font, left);
-    draw_footer_capsule(screen, rx, y, rw, right_label, right_hint,
-                        right_dir, label_font, hint_font, right);
+    draw_pair_capsule(screen, lx, y, bw, left_label, left_hint,
+                      left_arrow ? -1 : 0, label_font, hint_font);
+    draw_pair_capsule(screen, rx, y, bw, right_label, right_hint,
+                      right_arrow ? 1 : 0, label_font, hint_font);
 }
 
 void dialog_draw_popup_single_footer(struct screen *screen, int x, int y,
@@ -575,8 +567,15 @@ void dialog_draw_popup_single_footer(struct screen *screen, int x, int y,
         return;
     int bw = MIN(156, w - 24);
     int bx = x + (w - bw) / 2;
-    struct capsule_widths size = measure_capsule(label, hint, 0, label_font, hint_font);
-    draw_footer_capsule(screen, bx, y, bw, label, hint, 0, label_font, hint_font, size);
+    int hw, lw;
+    font_getstringsize((const unsigned char *)hint, &hw, NULL, hint_font);
+    font_getstringsize((const unsigned char *)label, &lw, NULL, label_font);
+    lw = MAX(0, MIN(lw, bw - 17 - hw));
+    int start = bx + MAX(6, (bw - (lw + 5 + hw)) / 2);
+    draw_alert_capsule(screen, bx, y, bw, DIALOG_POPUP_BUTTON_H, false);
+    draw_capsule_label(screen, start, y, lw, DIALOG_POPUP_BUTTON_H, label, label_font);
+    draw_capsule_key(screen, start + lw + 5, y, hw, DIALOG_POPUP_BUTTON_H,
+                     hint, 0, hint_font);
 
     if (scrollable)
     {

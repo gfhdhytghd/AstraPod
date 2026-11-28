@@ -89,7 +89,7 @@ static void prose_measure(struct dialog *d, struct screen *s,
         const int pad_bot = 10;
         int hfont = p->head_font >= 0 ? p->head_font : box->font;
         int hdr_h = p->title ? (font_get(hfont)->height + 8) : 0;
-        int foot_h = DIALOG_POPUP_FOOTER_H + (p->cancel ? 0 : 4 + fh);
+        int foot_h = p->cancel ? DIALOG_POPUP_PAIR_FOOTER_H : DIALOG_POPUP_FOOTER_H + 4 + fh;
         int box_w = MIN(sw - 32, 282);
         int text_w = box_w - 2 * pad_x - PROSE_BAR_W - PROSE_BAR_GAP;
         d->style.box_margin = 0;
@@ -163,7 +163,7 @@ static void prose_draw(struct dialog *d, struct screen *s,
         int kfont = content->font;
         int hch = font_get(hfont)->height;
         int hdr_h = p->title ? (hch + 8) : 0;
-        int foot_h = DIALOG_POPUP_FOOTER_H + (p->cancel ? 0 : 4 + fh);
+        int foot_h = p->cancel ? DIALOG_POPUP_PAIR_FOOTER_H : DIALOG_POPUP_FOOTER_H + 4 + fh;
         int foot_y = content->height - foot_h;
         int body_top = pad_top + hdr_h;
         int body_h = foot_y - body_top - pad_bot;

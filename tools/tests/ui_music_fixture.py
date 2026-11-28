@@ -137,7 +137,7 @@ def database_count(destination):
     return count
 
 
-def build_tagcache(simulator, destination, log_path=None):
+def build_tagcache(simulator, destination, log_path=None, min_tracks=TRACK_COUNT):
     """Build a database by opening the database screen in a private SDL root."""
     destination = Path(destination).resolve()
     config = destination / ".rockbox/config.cfg"
@@ -155,10 +155,10 @@ def build_tagcache(simulator, destination, log_path=None):
                     end = time.monotonic() + 45
                     while time.monotonic() < end and firmware.poll() is None:
                         count = database_count(destination)
-                        if count >= TRACK_COUNT:
+                        if count >= min_tracks:
                             return count
                         time.sleep(0.05)
-                    raise RuntimeError(f"Tagcache did not commit {TRACK_COUNT} tracks; log: {log_path}")
+                    raise RuntimeError(f"Tagcache did not commit {min_tracks} tracks; log: {log_path}")
                 finally:
                     if firmware.poll() is None:
                         firmware.terminate()

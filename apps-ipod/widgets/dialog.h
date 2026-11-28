@@ -72,6 +72,8 @@ void dialog_draw_popup_panel(struct screen *screen, int x, int y,
                              int w, int h, bool opaque);
 #define DIALOG_POPUP_BUTTON_H 28
 #define DIALOG_POPUP_FOOTER_H (DIALOG_POPUP_BUTTON_H + 8)
+#define DIALOG_POPUP_PAIR_BUTTON_H 38
+#define DIALOG_POPUP_PAIR_FOOTER_H (DIALOG_POPUP_PAIR_BUTTON_H + 8)
 
 void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y, int w,
                                    const char *left_label,

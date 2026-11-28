@@ -37,7 +37,8 @@ TREE = [
                ("Compilations", "empty"), ("Songs", "open"),
                ("Genres", "open"), ("Composers", "empty"),
                ("Audiobooks", "empty"), ("Search", "open")], [0]),
-    ("videos", [("Movies", "open"), ("Rentals", "empty"),
+    # The fixture has no videos, and stock leaves the Videos menu up
+    ("videos", [("Movies", "empty"), ("Rentals", "empty"),
                 ("TV Shows", "empty"), ("Music Videos", "empty"),
                 ("Video Playlists", "empty"), ("Settings", "open")], [1]),
     # The fixture has no pictures, and stock leaves the Photos menu up

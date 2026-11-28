@@ -1560,6 +1560,7 @@ static int show_list(struct contacts *cs, struct page *p,
 
 int extras_contacts(void)
 {
+    struct ui_scene scene = {0};
     size_t size = sizeof(struct contacts) + sizeof(struct page) +
                   sizeof(struct vcard_contact);
     int handle = core_alloc_free_space(size);
@@ -1575,7 +1576,10 @@ int extras_contacts(void)
     push_current_activity(ACTIVITY_TEXTVIEWER);
     sub_font = ui_theme_current_font_load(UI_FONT_BODY,
                                           global_settings.glyphs_to_cache);
+    if (ui_wheel_navigation())
+        ui_scene_open_page(&scene, "contacts-list-push");
     ret = show_list(cs, p, vc);
+    ui_scene_close_modal(&scene, ret != GO_TO_ROOT, "contacts-list-pop");
     if (sub_font >= 0)
         font_unload(sub_font);
     sub_font = -1;

@@ -189,6 +189,11 @@ bool menu_pane_take_screen(void)
     return split;
 }
 
+void menu_pane_restore_screen(bool split)
+{
+    page.on_screen = split;
+}
+
 struct ui_rect menu_pane_rect(void)
 {
     return (struct ui_rect){ MENU_PANE_X, 0, PANE_W, LCD_HEIGHT };

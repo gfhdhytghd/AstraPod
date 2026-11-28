@@ -441,6 +441,7 @@ static int play_video_rows(const char *type, int *selection)
 static int show_list(const char *type, char *title)
 {
     struct simplelist_info info;
+    struct ui_scene videos = {0};
     char all[64];
     int sel = -1, ret = GO_TO_PREVIOUS, choice;
 
@@ -465,6 +466,8 @@ static int show_list(const char *type, char *title)
         /* Opening on the first file, the rows above it off the top */
         if (sel < 0)
         {
+            if (loose_videos_only)
+                ui_scene_open_page(&videos, "loose-videos-push");
             sel = heads;
             info.top_item = heads;
         }
@@ -507,6 +510,7 @@ static int show_list(const char *type, char *title)
         if (ret != GO_TO_PREVIOUS)
             break;
     }
+    ui_scene_close_modal(&videos, ret == GO_TO_PREVIOUS, "loose-videos-pop");
     return ret;
 }
 

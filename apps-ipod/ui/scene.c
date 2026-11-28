@@ -76,11 +76,17 @@ static fb_data *surface(fb_data *data, bool front)
     return data + (front ? PAGE_PIXELS : 0);
 }
 
+static bool split_slide(const struct ui_scene *scene)
+{
+    return scene->slide && !scene->full_screen &&
+           (scene->back_split || scene->front_split);
+}
+
 static int position(const struct ui_scene *scene, unsigned frame)
 {
     const struct ui_tween *tween = &scene->tween;
     int offset;
-    if (scene->slide && ui_theme_ultra())
+    if (scene->slide && !split_slide(scene) && ui_theme_ultra())
         return ultra_scene_sample(tween, frame) & ~1;
     if (scene->pan_top && !scene->slide && frame < tween->frames)
     {
@@ -360,6 +366,11 @@ static void compose_pages(const struct ui_scene *scene, fb_data *out,
                           const fb_data *back, const fb_data *front, int offset,
                           const fb_data *still)
 {
+    if (split_slide(scene))
+    {
+        compose_split(scene, out, back, front, offset);
+        return;
+    }
     if (scene->slide && !still && ui_theme_ultra())
     {
         ultra_scene_compose(scene, out, back, front,
@@ -371,7 +382,8 @@ static void compose_pages(const struct ui_scene *scene, fb_data *out,
         compose(out, back, front, offset, still);
         return;
     }
-    if (scene->slide && (scene->back_split || scene->front_split))
+    if (scene->slide && !scene->backdrop_handle &&
+        (scene->back_split || scene->front_split))
     {
         compose_split(scene, out, back, front, offset);
         return;
@@ -944,9 +956,11 @@ static bool capture_panel(struct ui_scene *scene, bool vertical,
     core_put_data_pinned(backdrop);
     scene->vertical = vertical;
     scene->transform = NULL;
-    /* A panel page often hides the status bar, so the whole screen slides. */
+    /* A panel page may hide the status bar. Keep it in the snapshot. */
     scene->pan_top = 0;
     scene->slide = slide;
+    scene->back_split = slide && ui_wheel_navigation() && menu_pane_take_screen();
+    scene->front_split = false;
     scene->still_backdrop = false;
     scene->staggered = !vertical && !slide;
     scene->row_y = scene->row_count = 0;
@@ -1294,6 +1308,11 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     if (!scene->vertical)
         scene->still_backdrop = pages_on_backdrop(backdrop, front);
     memcpy(lcd_framebuffer_default.fb_ptr, backdrop, FRAMEBUFFER_SIZE);
+    if (scene->slide && ui_wheel_navigation())
+    {
+        scene->front_split = menu_pane_take_screen();
+        menu_pane_restore_screen(scene->back_split);
+    }
     core_put_data_pinned(backdrop);
     core_put_data_pinned(front);
     scene->target_front = false;
@@ -1420,6 +1439,21 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         return;
     }
 
+    bool panel = scene->backdrop_handle > 0;
+    if (target_changed && scene->slide &&
+        (!panel || (scene->target_front && ui_wheel_navigation())))
+    {
+        bool split = menu_pane_split() != 0;
+        if (scene->target_front)
+            scene->front_split = split;
+        else
+            scene->back_split = split;
+        /* The full page crosses a split menu at constant speed. */
+        bool mixed = scene->back_split != scene->front_split;
+        scene->tween.easing = panel || scene->full_screen || mixed
+                            ? UI_EASE_LINEAR : ui_theme_easing();
+    }
+
     int offset;
     if (scene->transform)
         offset = scene->target_front ? (int)frame
@@ -1431,7 +1465,6 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         return;
 
     fb_data *data = core_get_data_pinned(scene->handle);
-    bool panel = scene->backdrop_handle > 0;
     fb_data *out = data + (panel ? PAGE_PIXELS : 2 * PAGE_PIXELS);
     if (target_changed || scene->composed_offset != pose)
     {
@@ -1443,22 +1476,6 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
             (!panel || scene->target_front))
             memcpy(scene->target_front ? front : back, lcd_framebuffer_default.fb_ptr,
                    FRAMEBUFFER_SIZE);
-        if (target_changed && !panel)
-        {
-            bool split = menu_pane_split() != 0;
-            if (scene->target_front)
-            {
-                scene->front_split = split;
-            }
-            else
-            {
-                scene->back_split = split;
-            }
-            /* A full page passes a menu at constant speed. */
-            if (scene->slide && !scene->full_screen)
-                scene->tween.easing = scene->back_split != scene->front_split
-                                      ? UI_EASE_LINEAR : ui_theme_easing();
-        }
         if (target_changed && !scene->vertical)
             scene->still_backdrop = pages_on_backdrop(back, front);
         if (scene->transform)

@@ -113,9 +113,9 @@ int keypad_mode_name_get(unsigned int mode)
     return -1;
 }
 
-int get_hid_usb_action(void)
+int get_hid_usb_action(int timeout)
 {
-    return ACTION_NONE;
+    return get_action(CONTEXT_STD, timeout);
 }
 
 #endif /* SIMULATOR */

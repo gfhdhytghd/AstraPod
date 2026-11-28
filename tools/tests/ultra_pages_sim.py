@@ -22,9 +22,8 @@ than Fruit Company's by more than SLACK_MS, or for a motion Fruit Company
 does not have, no hitch and a p95 no worse than OWN_P95_MS. A motion ends
 at its last change outside the lists' scroll bars. Now Playing's
 clock ticks every 130 ms or so once it is in, so its motions settle after
-SETTLE_NP_MS without a change. Each must
-differ from Fruit Company's somewhere in its course, and with Animations
-off the two themes must end on the same frames.
+SETTLE_NP_MS without a change. Ultra-only motions must differ somewhere in
+their course. With Animations off the two themes must end on the same frames.
 
 Arguments: ROCKBOXUI ZIP OUTPUT_DIRECTORY [--fixture DIRECTORY]
 [--review DIRECTORY]. Writes result.json, both themes' frames and ui-perf
@@ -58,6 +57,9 @@ ATTEMPTS = 2
 OWN_P95_MS = {"pane-row": 36.0}
 # A frame differs from the other theme's whole motion by at least this.
 DISTINCT = 2.0
+# The fixed split pane's geometry is checked in ui_fruit_split_pages_sim.py.
+SHARED_GEOMETRY = {"home-music", "music-home", "music-artists", "artists-music",
+                   "menu-np", "np-menu"}
 # A page's motion has started once a frame differs from the one before the
 # key by this much.
 STARTED = 0.5
@@ -259,7 +261,7 @@ def main():
     for name in sorted(results[ULTRA]):
         frames = distinct(name, results[FRUIT][name], results[ULTRA][name])
         result["distinct"][name] = frames
-        if frames < 2:
+        if name not in SHARED_GEOMETRY and frames < 2:
             failed.append((name, "Ultra matches Fruit Company", frames))
     for name in off[FRUIT]:
         a, b = off[FRUIT][name][-1][1], off[ULTRA][name][-1][1]

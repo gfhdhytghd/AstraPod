@@ -179,3 +179,12 @@
 - **Photos slideshows** now start with the original iPod's settings: 3
   seconds a picture, Random transitions, and PAL for TV Signal. If you
   saved your own values, your player keeps them.
+
+- **Photos shows the pictures you copy to the player** as thumbnails, under
+  Classic, Fruit Company and Fruit Company Ultra. All Photos holds every
+  picture, and each folder of pictures is an album named after it. The
+  first visit makes the thumbnails in the background while you browse,
+  about 8 KB a picture, in `.rockbox/library/cache/photos`. A picture that
+  is slow to open full screen also keeps a 150 KB copy there, so it opens
+  at once the next time. Delete that folder to free the space; the
+  thumbnails are made again on the next visit.

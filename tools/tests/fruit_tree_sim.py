@@ -40,7 +40,8 @@ TREE = [
     ("videos", [("Movies", "open"), ("Rentals", "empty"),
                 ("TV Shows", "empty"), ("Music Videos", "empty"),
                 ("Video Playlists", "empty"), ("Settings", "open")], [1]),
-    ("photos", [("All Photos", "open"), ("Settings", "open")], [2]),
+    # The fixture has no pictures, and stock leaves the Photos menu up
+    ("photos", [("All Photos", "empty"), ("Settings", "open")], [2]),
     ("extras", [("Clocks", "open"), ("Calendars", "open"),
                 ("Contacts", "open"), ("Alarms", "open"), ("Games", "open"),
                 ("Notes", "open"), ("Screen Lock", "open"),

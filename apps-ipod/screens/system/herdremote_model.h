@@ -152,6 +152,7 @@ struct hr_model {
      * only moved the computer's focus, or an S that repeats the last,
      * leaves it false */
     bool ws_shown_changed;
+    bool ws_layout_changed; /* W added, moved or renamed a row */
     char agents_ws[16];     /* the workspace agents[] belongs to */
     bool agents_valid;
     int nagents;

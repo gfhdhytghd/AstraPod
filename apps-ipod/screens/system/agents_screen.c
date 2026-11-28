@@ -38,6 +38,7 @@
 #include "ui/frame.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/scene.h"
+#include "ui/motion_schedule.h"
 #include "ui/sheet.h"
 #include "ui/statusbar.h"
 #include "widgets/splash.h"
@@ -127,6 +128,8 @@ static enum view select_view;
 static long focus_at;
 static long detail_wheel_at;
 static bool filter_loading, received_projects;
+static bool dashboard_status_pending;
+static long dashboard_refresh_at;
 static bool detail_follow, detail_new;
 static volatile bool agents_foreground;
 static bool agents_visited, shortcut_entry;
@@ -2948,10 +2951,9 @@ static void update_volume_mode(void)
  * on. In the question view the rows above it stay in view as far as they
  * fit, so a question is read from its start; in a list the selection goes
  * to the middle. top, when not -1, is the row to keep at the top instead. */
-static void show_at(struct gui_synclist *list, int select, int top)
+static void show_rows(struct gui_synclist *list, int select, int top)
 {
     update_volume_mode();
-    build_rows(list);
     gui_synclist_set_nb_items(list, nrows);
     gui_synclist_set_title(list, view_title(), Icon_NOICON);
     if (select < 0)
@@ -2991,7 +2993,8 @@ static void show_at(struct gui_synclist *list, int select, int top)
 
 static void show(struct gui_synclist *list, int select)
 {
-    show_at(list, select, -1);
+    build_rows(list);
+    show_rows(list, select, -1);
 }
 
 /* Rebuild the rows, keeping the selection on the same row when it is still
@@ -3016,10 +3019,10 @@ static void show_same(struct gui_synclist *list)
         i++;
     /* A row that has not moved keeps the view where the reader left it */
     if (i < nrows)
-        show_at(list, i, i == sel ? top : -1);
+        show_rows(list, i, i == sel ? top : -1);
     else
-        show(list, view == VIEW_SPACES || view == VIEW_AGENTS ?
-             MIN(sel, nrows - 1) : 0);
+        show_rows(list, view == VIEW_SPACES || view == VIEW_AGENTS ?
+                  MIN(sel, nrows - 1) : 0, -1);
 }
 
 /* Rebuild and draw, selecting the row that stands for r when it is still
@@ -3031,7 +3034,7 @@ static void show_row(struct gui_synclist *list, const struct row *r)
     while (i < nrows && (rows[i].kind != r->kind ||
                          strcmp(rows[i].id, r->id)))
         i++;
-    show(list, i < nrows ? i : -1);
+    show_rows(list, i < nrows ? i : -1, -1);
 }
 
 static void enter_answer(struct gui_synclist *list);
@@ -3512,6 +3515,7 @@ static void reset_source_view(void)
     pending_req[0] = focus_req[0] = action_req[0] = '\0';
     pending_answer = question_resolving = question_custom = question_closing = false;
     detail_ready = filter_loading = received_projects = modal_open = false;
+    dashboard_status_pending = false;
     select_down = native_play_pending = false;
     talk_req[0] = talk_note[0] = t3_talk_start[0] = '\0';
     talk_held = talk_toggle = talk_select = false;
@@ -3578,7 +3582,11 @@ static bool poll_link(void)
         }
         changed = true;
     }
-    for (int i = 0; i < 16; i++)
+    /* Leave the next frame in the transport once this UI poll has spent
+     * its parse budget. Commands and snapshots still arrive in wire order. */
+    uint32_t started = USEC_TIMER;
+    int dashboard_type = 0;
+    for (int i = 0; i < 16 && (uint32_t)(USEC_TIMER - started) < 2000; i++)
     {
         struct podlink_message m;
         if (!podlink_poll(&m))
@@ -3601,13 +3609,30 @@ static bool poll_link(void)
             link_seen = true;
         if (type == 'M' && mode != model.mode)
             reset_source_view();
-        agents_background_update(&model, type, true);
+        if (type == 'W' || type == 'S')
+            dashboard_type = type;
+        else
+            agents_background_update(&model, type, true);
         if (type == 'T' && (health_known != model.t3_health_known ||
                             health_ok != model.t3_ok))
             changed = true;
         /* Only what alters a row, the title or a drawn view is a change */
         if (type == 'W' || type == 'S')
-            changed |= model.ws_shown_changed || workspaces_seen != model.workspaces_seen;
+        {
+            bool layout = type == 'W' &&
+                (model.ws_layout_changed || workspaces_seen != model.workspaces_seen);
+            if (view == VIEW_SPACES)
+            {
+                changed |= layout;
+                if (model.ws_shown_changed && !dashboard_status_pending)
+                {
+                    dashboard_status_pending = true;
+                    dashboard_refresh_at = current_tick + HZ / 4;
+                }
+            }
+            else if (view == VIEW_AGENTS || view == VIEW_QUESTION)
+                changed |= layout; /* The project name can appear in the title. */
+        }
         else if (type != 'T' && type != 'R' && type != 'V' && type != 'H')
             changed = true;
         if (type == 'Q' && model.nquestions > before && !had)
@@ -3635,6 +3660,8 @@ static bool poll_link(void)
             !take_focus_result() && !take_action_result())
             break;
     }
+    if (dashboard_type)
+        agents_background_update(&model, dashboard_type, true);
     flush_outbox();
     return changed;
 }
@@ -4149,6 +4176,8 @@ static int agents_run(void)
     }
 
     long frame_at = current_tick;
+    long wheel_idle_at = frame_at;
+    struct ui_motion panel_scroll = {0};
     long redraw_at = current_tick + HZ;
     const char *shown_trouble = NULL;
     bool done = false, left_held = false, right_held = false;
@@ -4163,6 +4192,15 @@ static int agents_run(void)
             break;
         }
         bool changed = poll_link();
+        bool wheel_busy = TIME_BEFORE(current_tick, wheel_idle_at);
+        if (!wheel_busy)
+            ui_motion_end(&panel_scroll);
+        if (dashboard_status_pending && view == VIEW_SPACES &&
+            (changed || !wheel_busy || TIME_AFTER(current_tick, dashboard_refresh_at)))
+        {
+            dashboard_status_pending = false;
+            changed = true;
+        }
         pump_keys();
         take_result(&list);
         advance_question(&list);
@@ -4328,12 +4366,22 @@ static int agents_run(void)
                 page = !agents_fruit_nav() &&
                        (raw & (BUTTON_RC_VOL_UP | BUTTON_RC_VOL_DOWN));
 #endif
+                if (view == VIEW_USAGE || view == VIEW_DETAIL)
+                {
+                    if (panel_scroll.lease || panel_scroll.trace)
+                        ui_motion_renew(&panel_scroll);
+                    else
+                        panel_scroll = ui_motion_begin("agents-panel-scroll");
+                    wheel_idle_at = current_tick + HZ / 10;
+                }
                 scroll_panel(&list, dir, page);
                 continue;
             }
         }
         else if (list_do_action(CONTEXT_AGENTS, timeout, &list, &action))
         {
+            if (action == ACTION_STD_PREV || action == ACTION_STD_NEXT)
+                wheel_idle_at = current_tick + HZ / 10;
             int sel = gui_synclist_get_sel_pos(&list);
             int lines = gui_synclist_get_nb_lines(&list, SCREEN_MAIN);
 
@@ -4546,6 +4594,7 @@ static int agents_run(void)
         }
     }
 
+    ui_motion_end(&panel_scroll);
     ui_scene_cancel(&page_scene);
     /* A hold ends with the screen */
     signal_usage_view(false, true);

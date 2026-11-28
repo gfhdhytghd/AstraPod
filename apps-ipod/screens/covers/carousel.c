@@ -840,6 +840,7 @@ static void carousel_submit(struct ui_dirty_rect dirty, bool still)
 
 /** code */
 static void pf_clear_band(int y, int h);
+static int slide_priority(int index);
 static bool free_slide_prio(int prio);
 static bool load_ultra_reflection(void);
 static inline bool load_and_prepare_surface(int slide_index,int cache_index,int prio);
@@ -1649,9 +1650,11 @@ static void thread(void)
                     break;
 
                 buf_ctx_lock();
+                bool slide_upgraded = false;
                 if (model->art_version)
                 {
                     const int radius = ALBUM_COVERS_NUM_SLIDES + CIDER_COVER_LEAD;
+                    int best_slot = -1, best_prio = 0;
                     for (int slot = 0; slot < SLIDE_CACHE_SIZE; slot++)
                     {
                         int index = pf_sldcache.cache[slot].index;
@@ -1664,12 +1667,24 @@ static void thread(void)
                             ((version >> 2) == (previous >> 2) &&
                              (version & 3) <= (previous & 3)))
                             continue;
-                        int old = pf_sldcache.cache[slot].hid;
-                        if (load_and_prepare_surface(index,slot,abs(center_index-index)))
+                        int prio = slide_priority(index);
+                        if (best_slot < 0 || prio < best_prio)
                         {
+                            best_slot = slot;
+                            best_prio = prio;
+                        }
+                    }
+                    if (best_slot >= 0)
+                    {
+                        int index = pf_sldcache.cache[best_slot].index;
+                        int old = pf_sldcache.cache[best_slot].hid;
+                        if (load_and_prepare_surface(index, best_slot,
+                                                     abs(center_index - index)))
+                        {
+                            slide_upgraded = true;
                             exhausted_center = -1;
                             if (old != empty_slide_hid)
-                                buflib_free(&buf_ctx,old);
+                                buflib_free(&buf_ctx, old);
                         }
                     }
                 }
@@ -1692,7 +1707,7 @@ static void thread(void)
                  * reflection before fetching another cover. */
                 bool reflection_loaded = load_ultra_reflection();
                 buf_ctx_unlock();
-                if (!slide_loaded && !reflection_loaded)
+                if (!slide_upgraded && !slide_loaded && !reflection_loaded)
                     break;
                 yield();
             }
@@ -2000,12 +2015,12 @@ static inline void free_slide(int i)
 
 
 /* Keep the nearest two covers on either side equally important. Beyond
- * those, give upcoming local covers four more slots of look-ahead. */
+ * those, give upcoming covers four more slots of look-ahead. */
 static int slide_priority(int index)
 {
     int offset = index - center_index;
     int distance = abs(offset);
-    if (!model->external && offset * prefetch_direction < 0 && distance > 2)
+    if (offset * prefetch_direction < 0 && distance > 2)
         distance += 4;
     return distance;
 }

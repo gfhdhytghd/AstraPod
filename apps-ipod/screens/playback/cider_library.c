@@ -151,6 +151,25 @@ static bool query_row(struct library_query *query, int index,
                     (query->wanted == index || query->wanted == end ||
                      contains(page, query->wanted)))
                     query->wanted = query->offset = end;
+                else if (query != &track_query && page->offset > 0 &&
+                         index < page->offset + 8 &&
+                         (query->wanted == index ||
+                          query->wanted == page->offset - 1 ||
+                          contains(page, query->wanted)))
+                {
+                    int prev = page->offset - 1;
+                    bool have_prev = false;
+                    for (int j = 0; j < PAGE_SLOTS; j++)
+                        if (pages[j].query == query && pages[j].count &&
+                            contains(&pages[j], prev))
+                            have_prev = true;
+                    if (!have_prev)
+                    {
+                        query->wanted = prev;
+                        query->offset = page->offset >= CIDER_PAGE_ROWS
+                                      ? page->offset - CIDER_PAGE_ROWS : 0;
+                    }
+                }
             }
             return true;
         }

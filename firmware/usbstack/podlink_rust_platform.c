@@ -60,9 +60,11 @@ bool pfu_init(void)
 }
 bool pfu_start(void)
 {
+    /* PodLink performs USB packet I/O only (storage stays on cider-cache).
+     * Keep it below motion UI (14) and art loaders (15), above background. */
     worker_id = create_thread(service_thread, worker.stack,
                               sizeof(worker.stack), 0, "podlink"
-                              IF_PRIO(, PRIORITY_BACKGROUND) IF_COP(, CPU));
+                              IF_PRIO(, PRIORITY_USER_INTERFACE) IF_COP(, CPU));
     return worker_id != 0;
 }
 bool pfu_lock(void)

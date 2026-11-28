@@ -66,6 +66,7 @@ static inline void cider_control(const char *c, int v) { (void)c; (void)v; }
 void cider_store_stats(struct cider_store_stats *out);
 void cider_store_build(bool enable);
 bool cider_store_building(void);
+void cider_set_art_notify(void (*fn)(void));
 void cider_init(void);
 bool cider_connected(void);
 const char *cider_remote_name(void);
@@ -104,6 +105,7 @@ static inline bool cider_spectrum_levels(unsigned char *levels)
 { (void)levels; return false; }
 static inline void cider_loading_drawn(bool loading) { (void)loading; }
 static inline void cider_local_play(void) { }
+static inline void cider_set_art_notify(void (*fn)(void)) { (void)fn; }
 static inline int cider_mode_get(int m) { (void)m; return 0; }
 static inline void cider_mode_set(int m, int v) { (void)m; (void)v; }
 #endif

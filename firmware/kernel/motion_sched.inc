@@ -41,9 +41,9 @@ bool motion_sched_background_io(void)
 bool motion_sched_defer_io(void)
 {
     struct thread_entry *self = __running_self_entry();
-    /* Keep dependencies of foreground and audio eligible. */
+    /* Keep dependencies of non-background I/O, foreground and audio eligible. */
     return motion_sched_active() && motion_sched_background_io() &&
-           self->priority > PRIORITY_MOTION_UI;
+           self->priority >= PRIORITY_BACKGROUND;
 }
 
 void motion_sched_set_disk_mutex(struct mutex *mutex)

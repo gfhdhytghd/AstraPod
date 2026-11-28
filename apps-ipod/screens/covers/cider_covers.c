@@ -250,11 +250,12 @@ static void tick(void)
         long elapsed = current_tick - moved_at;
         int distance = center_index - previous_center;
         travel = distance > 0 ? 1 : -1;
-        flicking = elapsed > 0 && abs(distance) * HZ >= 3 * elapsed;
+        flicking = elapsed >= 0 &&
+                   (elapsed == 0 || abs(distance) * HZ >= 3 * elapsed);
         previous_center = center_index;
         moved_at = current_tick;
     }
-    else if (!TIME_BEFORE(current_tick, moved_at + HZ / 3))
+    else if (!TIME_BEFORE(current_tick, moved_at + HZ / 5))
         flicking = false;
     enum { INNER = 4, NEAR = ALBUM_COVERS_NUM_SLIDES, REACH = NEAR + CIDER_COVER_LEAD,
            WINDOW = 2 * NEAR + 1 + CIDER_COVER_LEAD };
@@ -301,21 +302,38 @@ static void tick(void)
         struct cider_row row;
         cider_page_row(demand, &row);
     }
+    else if (albums > 0)
+    {
+        int lead = MAX(0, MIN(albums - 1, center_index + travel * REACH));
+        struct cider_row row;
+        cider_page_row(lead, &row);
+    }
+
+    unsigned order[WINDOW], ordered = 0;
+    const char *travel_keys[WINDOW];
+    for (unsigned i = 0; i < total; i++)
+        if (offsets[i] >= 0)
+        {
+            travel_keys[ordered] = ahead[i];
+            order[ordered++] = i;
+        }
+    for (unsigned i = 0; i < total; i++)
+        if (offsets[i] < 0)
+        {
+            travel_keys[ordered] = ahead[i];
+            order[ordered++] = i;
+        }
 
     /* Full covers share the same arena as the artwork for Now Playing.
-     * Use the disk worker's budget for M and keep a small XS lead beyond it. */
+     * Use the disk worker's budget for M and keep a small XS lead beyond it.
+     * While flicking, read XS previews ahead of travel first so 33 KiB M reads
+     * do not stall incoming cards. */
     unsigned full = MIN(total, visible + cider_read_ahead_count(61, visible));
-    cider_cover_read_ahead(ahead, total, full);
+    cider_cover_read_ahead(flicking ? travel_keys : ahead, total,
+                           flicking ? 0 : full);
     bool requested = false, center_ready = false;
     const char *batch[3];
     unsigned nbatch = 0;
-    unsigned order[WINDOW], ordered = 0;
-    for (unsigned i = 0; i < total; i++)
-        if (offsets[i] >= 0)
-            order[ordered++] = i;
-    for (unsigned i = 0; i < total; i++)
-        if (offsets[i] < 0)
-            order[ordered++] = i;
     for (unsigned pos = 0; pos < ordered; pos++)
     {
         unsigned i = order[pos];
@@ -506,7 +524,9 @@ int cider_covers(void)
     /* carousel_run joins the loader before it returns. Until then the handle
      * stays pinned across cache mutex waits and slide-buffer allocations. */
     panel_perf_art_session(true);
+    cider_set_art_notify(carousel_provider_changed);
     int ret = carousel_run(&model, NULL);
+    cider_set_art_notify(NULL);
     surface = NULL;
     core_unpin(scratch);
     core_free(scratch);

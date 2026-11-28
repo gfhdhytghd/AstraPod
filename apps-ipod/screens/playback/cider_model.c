@@ -399,6 +399,12 @@ bool cider_cache_put(struct cider_cache *c, const char *key, const char *tier,
     int slot = cider_cache_find(c, key, tier);
     bool was_pinned = slot >= 0 && c->slot[slot].pinned;
     if (slot >= 0) remove_slot(c, slot);
+    if (!strcmp(tier, "M"))
+    {
+        int preview = peek(c, key, "XS");
+        if (preview >= 0 && !c->slot[preview].dirty && !c->slot[preview].pinned)
+            remove_slot(c, preview);
+    }
     for (;;)
     {
         slot = -1;

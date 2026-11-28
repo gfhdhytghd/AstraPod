@@ -45,8 +45,8 @@ static uint32_t album_bg;
 static int center_index = 40, previous_center = 37, travel = 1;
 static long current_tick = 100, moved_at = 97, prefetch_at = 100;
 static bool flicking, lane_busy, preview_ready;
-static unsigned revision, single_count, batch_count;
-static int single_album, batch[3];
+static unsigned revision, single_count, batch_count, read_ahead_count, read_ahead_full;
+static int single_album, batch[3], read_ahead[32];
 
 static int count(void) { return 200; }
 static unsigned cider_art_revision(void) { return 0; }
@@ -111,6 +111,10 @@ static unsigned cider_read_ahead_count(unsigned speed, unsigned visible)
 static void cider_cover_read_ahead(const char *const *keys, unsigned n, unsigned full)
 {
     assert(n >= full && album(keys[0]) == center_index);
+    read_ahead_count = n;
+    read_ahead_full = full;
+    for (unsigned i = 0; i < n && i < ARRAYLEN(read_ahead); i++)
+        read_ahead[i] = album(keys[i]);
 }
 static bool cider_prefetch_art(const char *key, const char *tier)
 {
@@ -155,15 +159,20 @@ int main(void)
     tick();
     assert(flicking && single_count == 1 && single_album == 40);
     assert(batch_count == 3 && batch[0] == 41 && batch[2] == 43);
+    assert(read_ahead_full == 0 && read_ahead_count >= 5);
+    assert(read_ahead[0] == 40 && read_ahead[1] == 41 && read_ahead[2] == 42);
 
     reset(43, true, false);
     tick();
     assert(flicking && single_count == 0);
     assert(batch_count == 3 && batch[0] == 40 && batch[1] == 39 && batch[2] == 38);
+    assert(read_ahead_full == 0 && read_ahead_count >= 5);
+    assert(read_ahead[0] == 40 && read_ahead[1] == 39 && read_ahead[2] == 38);
 
     reset(40, false, false);
     tick();
     assert(!flicking && single_count == 1 && single_album == 40 && batch_count == 0);
+    assert(read_ahead_full > 0);
 
     reset(40, true, true);
     tick();

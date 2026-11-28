@@ -5008,10 +5008,17 @@ static bool frame_due(uint32_t deadline)
  * down to whole ticks, and the last part is slept rather than spun through. */
 static int frame_wait(uint32_t deadline)
 {
+#if defined(HAVE_LCD_VSYNC) && defined(HAVE_BUTTON_FRAME_DEADLINE)
     if (frame_due(deadline))
         return TIMEOUT_NOBLOCK;
     int timeout = ui_clock_wait_until(deadline);
     return timeout == TIMEOUT_NOBLOCK && !frame_due(deadline) ? 1 : timeout;
+#else
+    uint32_t ahead = deadline - (uint32_t)USEC_TIMER;
+    if (!ahead || ahead > PF_DEADLINE_AHEAD_US)
+        return TIMEOUT_NOBLOCK;
+    return MAX(1, ahead / (1000000 / HZ));
+#endif
 }
 
 /* The entrance chrome waits longer than PF_DEADLINE_AHEAD_US. */

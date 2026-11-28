@@ -399,8 +399,11 @@ uint32_t ui_theme_gradient_at(const struct ui_theme_gradient *gradient,
             return gradient->rows[last];
         if (height == 3 || last < 3)
             return gradient->rows[y < last ? y : last];
-        /* The inner rows stretched over the row's, each sampled at its
-         * centre and blended, as stock stretches its bar */
+        /* A bar no taller than the table keeps both ends of its inner rows;
+         * a taller one samples each row's centre and blends, as stock
+         * stretches its bar */
+        if (height <= gradient->nrows)
+            return gradient->rows[1 + (y - 1) * (last - 2) / (height - 3)];
         int inner = last - 1;
         int pos = (2 * (y - 1) + 1) * inner * 256 / (2 * (height - 2)) - 128;
         if (pos < 0)

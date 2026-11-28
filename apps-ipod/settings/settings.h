@@ -539,6 +539,9 @@ struct user_settings
 
 
     int  pause_rewind; /* time in s to rewind when pausing */
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702
+    bool piezo_fallback;
+#endif
     int  unplug_mode; /* pause on headphone unplug */
     bool unplug_autoresume; /* disable auto-resume if no phones */
 

@@ -40,6 +40,9 @@
 #include "backlight.h"
 #include "sound.h"
 #include "pcm_sink.h"
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702
+#include "piezo-pcm.h"
+#endif
 #include "pcm.h"
 #include "iap-usb.h"
 #include "settings.h"
@@ -1815,6 +1818,11 @@ const struct settings_list settings[] = {
                    ID2P(LANG_DISPLAY_FULL_PATH)),
 
 
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702
+    BOOL_SETTING(0, piezo_fallback, LANG_PIEZO_FALLBACK, false,
+                 "piezo without headphones", off_on,
+                 LANG_ON, LANG_OFF, piezo_pcm_enable),
+#endif
     CHOICE_SETTING(0, unplug_mode, LANG_HEADPHONE_UNPLUG, 2,
                    "pause on headphone unplug", "off,pause,pause and resume",
                    NULL, 3, ID2P(LANG_OFF), ID2P(LANG_PAUSE),

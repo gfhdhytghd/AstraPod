@@ -31,6 +31,9 @@
 #include "pcm-target.h"
 #include "dma-s5l8702.h"
 #include "pcm_sink.h"
+#ifdef IPOD_6G
+#include "ipod6g/piezo-pcm.h"
+#endif
 
 /* DMA configuration */
 
@@ -43,6 +46,7 @@ static struct dmac_lli volatile \
             dma_play_llibuf[DMA_PLAY_LLIBUF_SZ] CACHEALIGN_ATTR;
 
 static void dma_play_callback(void *data) ICODE_ATTR;
+static void sink_dma_stop(void);
 
 static struct dmac_ch dma_play_ch = {
     .dmac = &s5l8702_dmac0,
@@ -113,26 +117,52 @@ size_t pcm_remaining;
 static void sink_lock(void)
 {
     if (locked++ == 0)
+    {
+#ifdef IPOD_6G
+        piezo_pcm_lock(true);
+#endif
         dmac_ch_lock_int(&dma_play_ch);
+    }
 }
 
 /* Unmask the DMA interrupt if enabled */
 static void sink_unlock(void)
 {
     if (--locked == 0)
+    {
         dmac_ch_unlock_int(&dma_play_ch);
+#ifdef IPOD_6G
+        piezo_pcm_lock(false);
+#endif
+    }
 }
 
 #ifdef HAVE_HW_H264
 static volatile uint32_t play_dma_queued;
+#ifdef IPOD_6G
+static bool priming_codec;
+#endif
+
+/* Read with IRQs disabled so the DMA and piezo counters agree at handoff. */
+static uint32_t codec_played_bytes(void)
+{
+#ifdef IPOD_6G
+    if (priming_codec)
+        return play_dma_queued;
+#endif
+    size_t remaining = 0;
+    if (dmac_ch_running(&dma_play_ch))
+        dmac_ch_get_info(&dma_play_ch, NULL, &remaining);
+    return play_dma_queued - remaining;
+}
 
 uint32_t pcm_builtin_dma_bytes(void)
 {
     int flags = disable_irq_save();
-    size_t remaining = 0;
-    if (dmac_ch_running(&dma_play_ch))
-        dmac_ch_get_info(&dma_play_ch, NULL, &remaining);
-    uint32_t progress = play_dma_queued - remaining;
+    uint32_t progress = codec_played_bytes();
+#ifdef IPOD_6G
+    progress += piezo_pcm_played_bytes();
+#endif
     restore_irq(flags);
     return progress;
 }
@@ -141,7 +171,10 @@ uint32_t pcm_builtin_dma_bytes(void)
 static inline void play_queue_dma(void *addr, size_t size, void *cb_data)
 {
 #ifdef HAVE_HW_H264
-    play_dma_queued += size;
+#ifdef IPOD_6G
+    if (!priming_codec)
+#endif
+        play_dma_queued += size;
 #endif
     commit_dcache_range(addr, size);
     dmac_ch_queue(&dma_play_ch, addr,
@@ -164,6 +197,18 @@ static void dma_play_callback(void *cb_data)
         if (!pcm_play_dma_complete_callback(
                      PCM_DMAST_OK, &dataptr, &pcm_remaining))
             return;
+
+#ifdef IPOD_6G
+    if (fetched && piezo_pcm_selected())
+    {
+        /* The last codec DMA tail can still be draining during this IRQ. */
+        sink_dma_stop();
+        piezo_pcm_start(dataptr, pcm_remaining);
+        pcm_remaining = 0;
+        pcm_play_dma_status_callback(PCM_DMAST_STARTED);
+        return;
+    }
+#endif
 
     uint32_t lastsize = MIN(WATERMARK_BYTES, pcm_remaining >> 1);
     pcm_remaining -= lastsize;
@@ -193,7 +238,7 @@ static void sink_dma_stop(void)
 {
 #ifdef HAVE_HW_H264
     int flags = disable_irq_save();
-    play_dma_queued = pcm_builtin_dma_bytes();
+    play_dma_queued = codec_played_bytes();
 #endif
     dmac_ch_stop(&dma_play_ch);
     I2STXCOM = I2STXCOM_STOP;
@@ -210,6 +255,49 @@ static void sink_dma_start(const void* addr, size_t size)
     /* Queue the data before starting the transmitter, as Apple does */
     dma_play_callback((void*)addr);
     I2STXCOM = I2STXCOM_START;
+}
+
+#ifdef IPOD_6G
+void piezo_pcm_resume_codec(const void *addr, size_t size)
+{
+    /* Audiohw unmute uses the I2C mutex. Do it in sink_play(), never here. */
+    sink_dma_start(addr, size);
+}
+#endif
+
+static void sink_stop(void)
+{
+#ifdef IPOD_6G
+    piezo_pcm_stop();
+#endif
+    sink_dma_stop();
+}
+
+static void sink_play(const void *addr, size_t size)
+{
+#ifdef IPOD_6G
+    if (piezo_pcm_selected())
+    {
+        /* Clock silence through the codec before unmuting it. It can then
+         * take over from the Timer A IRQ without doing I2C in that IRQ. */
+        static unsigned char silence[WATERMARK_BYTES] CACHEALIGN_ATTR;
+        sink_stop();
+#ifdef HAVE_HW_H264
+        priming_codec = true;
+#endif
+        play_queue_dma(silence, sizeof(silence), NULL);
+        I2STXCOM = I2STXCOM_START;
+        audiohw_unmute();
+        sink_dma_stop();
+#ifdef HAVE_HW_H264
+        priming_codec = false;
+#endif
+        piezo_pcm_start(addr, size);
+        return;
+    }
+    piezo_pcm_stop();
+#endif
+    sink_dma_start(addr, size);
 #ifdef HAVE_CS42L55
     audiohw_unmute();
 #endif
@@ -227,6 +315,9 @@ static void sink_dma_start(const void* addr, size_t size)
 /* set the configured PCM frequency */
 static void sink_set_freq(uint16_t freq)
 {
+#ifdef IPOD_6G
+    piezo_pcm_set_rate(hw_freq_sampr[freq]);
+#endif
 #if CONFIG_CPU != S5L8720
 #ifdef HAVE_CS42L55
     static uint16_t last_clkcon3l = 0;
@@ -303,8 +394,8 @@ struct pcm_sink builtin_pcm_sink = {
         .set_freq = sink_set_freq,
         .lock     = sink_lock,
         .unlock   = sink_unlock,
-        .play     = sink_dma_start,
-        .stop     = sink_dma_stop,
+        .play     = sink_play,
+        .stop     = sink_stop,
     },
 };
 

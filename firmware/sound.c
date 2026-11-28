@@ -22,6 +22,9 @@
  /* Indicate it's the sound.c file which affects compilation of audiohw.h */
 #define AUDIOHW_IS_SOUND_C
 #include "config.h"
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702 && !defined(BOOTLOADER)
+#include "target/arm/s5l8702/ipod6g/piezo-pcm.h"
+#endif
 #include "system.h"
 #include "sound.h"
 
@@ -331,6 +334,9 @@ void sound_set_volume(int value)
 #endif
 
     sound_prescaler.volume = sound_value_to_cb(SOUND_VOLUME, value);
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702 && !defined(BOOTLOADER)
+    piezo_pcm_set_volume(sound_prescaler.volume);
+#endif
     set_prescaled_volume();
 }
 

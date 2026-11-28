@@ -155,6 +155,9 @@ MENUITEM_SETTING(cuesheet, &global_settings.cuesheet,
 MENUITEM_SETTING(chapter_marks, &global_settings.chapter_marks,
                  cuesheet_buffer_callback);
 
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702
+MENUITEM_SETTING(piezo_fallback, &global_settings.piezo_fallback, NULL);
+#endif
 MENUITEM_SETTING(unplug_mode, &global_settings.unplug_mode, NULL);
 MENUITEM_SETTING(unplug_autoresume, &global_settings.unplug_autoresume, NULL);
 MAKE_MENU(unplug_menu, ID2P(LANG_HEADPHONE_UNPLUG), 0, Icon_NOICON,
@@ -187,6 +190,9 @@ MAKE_MENU(playback_settings,ID2P(LANG_PLAYBACK),0,
           &replaygain_settings_menu, &beep,
 
           &next_folder, &cuesheet, &chapter_marks
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702
+         ,&piezo_fallback
+#endif
          ,&unplug_menu
          ,&skip_length, &spoken_skip_length, &spoken_speed, &prevent_skip
           ,&play_frequency

@@ -136,6 +136,11 @@ void output_pause_headphones(bool inserted)
     }
     else
     {
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702
+        /* Built-in playback follows the jack to the piezo. */
+        if (global_settings.piezo_fallback)
+            return;
+#endif
         if (pcm_current_sink() == PCM_SINK_BUILTIN && playing())
         {
             pause_action(false);

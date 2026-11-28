@@ -264,12 +264,14 @@ def run_roundtrips(s, root, out, fruit):
     frame.save(out / "month.png")
     if fruit:
         before_transport = frame
-        unchanged = {
-            key: same(before_transport, tap(s, key))
-            for key in ("back", "right", "play")
-        }
-        checks["transport_stays_on_month"] = {
-            "ok": all(unchanged.values()), **unchanged
+        next_month = tap(s, "right")
+        returned = tap(s, "back")
+        play_keeps_month = same(returned, tap(s, "play"))
+        moved = not same(before_transport, next_month)
+        restored = same(before_transport, returned)
+        checks["month_paging_preserves_playback_controls"] = {
+            "ok": moved and restored and play_keeps_month,
+            "right": moved, "back": restored, "play": play_keeps_month,
         }
 
     # 2. Short SELECT -> Day View (Jan 1, 2024)

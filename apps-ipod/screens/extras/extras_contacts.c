@@ -1475,7 +1475,6 @@ static int show_list(struct contacts *cs, struct page *p,
         for (;;)
         {
             extras_list_do_action(HZ, &list, &action);
-            list_do_action(CONTEXT_TREE, HZ, &list, &action);
             selection = gui_synclist_get_sel_pos(&list);
             if (action == ACTION_STD_OK)
             {

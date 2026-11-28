@@ -391,8 +391,9 @@ assert pc == RET
 prev = sym('crumbs_prev')
 valid, clean = u.mem_read(prev, 2)
 boot_no, = struct.unpack('<I', bytes(u.mem_read(prev + 4, 4)))
-n = rd(u, prev + 8 + 16 * 4)
-first_seq = rd(u, prev + 8 + 16 * 4 + 4)
+snapshot_count = prev + 8 + (16 + 8) * 4
+n = rd(u, snapshot_count)
+first_seq = rd(u, snapshot_count + 4)
 assert valid == 1 and clean == 0 and boot_no == 41 and n == 32, \
     (valid, clean, boot_no, n)
 assert first_seq == 69 and rd(u, prev + 8 + 4 * 4) == 0x55aa

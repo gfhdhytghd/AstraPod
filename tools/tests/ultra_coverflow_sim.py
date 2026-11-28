@@ -51,14 +51,11 @@ STEPS = ("entry", "scroll", "spin", "album-open", "album-close", "rise",
 DIFFERS = 2.0
 # Motion off: the end of each step under both themes, leaving out Now
 # Playing's title marquee, whose phase depends on when the frame was taken.
-# The art's lower edge and the progress bar on that page move with the
-# time the frame was taken, between two Fruit Company runs as well, hence
-# the page's larger allowance; an Ultra page (scaled, over dimmed covers)
-# differs by several units.
+# The Now Playing progress and text scroll depend on when playback paused.
 SAME = 0.05
 SAME_PAGE = 0.3
 WHOLE = [None]
-NOT_MARQUEE = [(0, 0, 320, 60), (0, 60, 155, 240), (155, 125, 320, 240)]
+STATIC_WPS = [(0, 0, 320, 60), (0, 60, 155, 195), (155, 125, 320, 195)]
 MENU_ROWS = [(0, 17, 150, 240)]
 SLACK_MS = 3.0
 # A busy host delays single frames by several ms; a step whose pacing fails
@@ -322,15 +319,15 @@ def main():
             failures += result["attempts"][-1]["slow"][name]
 
     off = compare(args.binary, fixture, args.output / "motion-off",
-                  "animations: off\n", script)
+                  "animations: off\nscrolling enabled: off\n", script)
     check_flow_path(args.output / "motion-off", animations=False)
     for name in STEPS:
         # The Music pane pans independently of the page animation.
-        boxes = MENU_ROWS if name == "exit" else NOT_MARQUEE if name == "rise" else WHOLE
+        boxes = MENU_ROWS if name == "exit" else STATIC_WPS if name == "rise" else WHOLE
         change = round(same(off[FRUIT][name][-1][1],
                             off[ULTRA][name][-1][1], boxes), 3)
         result["motion_off"][name] = change
-        if change > (SAME_PAGE if boxes is NOT_MARQUEE else SAME):
+        if change > (SAME_PAGE if boxes is STATIC_WPS else SAME):
             failures.append(f"{name}: motion off differs ({change})")
     write_review(off, args.review, prefix="off-")
 

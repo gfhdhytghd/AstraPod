@@ -9060,10 +9060,12 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
                 if (pf_state == pf_scrolling)
                 {
                     update_scroll_animation();
-                    /* Publish the complete framebuffer once on the final pose. */
                     if (pf_state == pf_idle && !leaving)
                     {
-                        full_flush_owed = true;
+                        /* The 3D renderer tracks changed rows, including at
+                         * rest. Only a flat view or fade needs the full flush. */
+                        if (flat_view() || fade)
+                            full_flush_owed = true;
                         drew_caption |= caption_owed || captioned_index != carousel_caption_index();
                         caption_owed = false;
                         captioned_index = carousel_caption_index();

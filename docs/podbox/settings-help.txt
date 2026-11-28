@@ -442,8 +442,8 @@ moment but overshoots a three-minute song.
 On, the Classic plays music, video sound and spoken menus through its click
 wheel beeper when the headphone jack is empty. Plugging in headphones switches
 the sound back to the jack. Unplugging switches to the beeper without pausing.
-The beeper is quiet and tinny. USB DAC and digital dock playback keep their
-own outputs.
+The beeper runs at full strength except at minimum volume, which mutes it.
+USB DAC and digital dock playback keep their own outputs.
 
 [pause on headphone unplug]
 Pauses when whatever is playing is unplugged -- headphones, a USB DAC, a dock

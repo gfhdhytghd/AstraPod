@@ -4,29 +4,29 @@
 #include "config.h"
 #include "system.h"
 #include "button.h"
-#include "fixedpoint.h"
 #include "pcm.h"
 #include "pcm-internal.h"
 #include "piezo.h"
 #include "piezo-pcm.h"
 
-/* ECLK/2 is 6 MHz. Timer A's 240 ticks give a 25 kHz PWM carrier.
- * TADATA0 latches at the next period match (S5L8700X DS, 11-18). */
-#define PWM_PERIOD 240
-#define SAMPLE_RATE ((TIMER_FREQ / 2) / PWM_PERIOD / 2)
+/* Timer A paces 1-bit samples. GPIO drives the same pin and mode as the
+ * Classic bootloader's square-wave tones in piezo-6g.c. */
+#define SAMPLE_RATE 12500
 #define SAMPLE_US (1000000 / SAMPLE_RATE)
-#define TIMER_MATCH1_EN (1 << 13)
+#define TIMER_PERIOD (TIMER_FREQ / 2 / SAMPLE_RATE)
+#define TIMER_MATCH0_EN (1 << 12)
 #define TIMER_ECLK_DIV2 (1 << 6)
-#define TIMER_PWM (1 << 4)
 #define TIMER_ACK_ALL (7 << 16)
-#define PWM_MID (PWM_PERIOD / 2)
-#define PWM_SWING (PWM_MID - 8)
-#define GAIN_BITS 12
+#define PIEZO_GPIO_LOW 0x0060e
+#define PIEZO_THRESHOLD (24 * 16) /* Q4, about -63 dBFS */
+#define QUIET_SAMPLES (SAMPLE_RATE / 100)
 
 static volatile bool enabled;
 static volatile bool active;
 static volatile bool locked;
-static volatile int gain = 1 << GAIN_BITS;
+static volatile bool muted;
+static bool output_high;
+static unsigned int quiet_samples;
 static unsigned int step, alpha;
 static unsigned int phase, next_sample;
 #ifdef HAVE_HW_H264
@@ -62,16 +62,14 @@ void piezo_pcm_lock(bool lock)
 
 void piezo_pcm_set_volume(int tenth_db)
 {
-    /* Match the codec's mute and use its default -25 dB as piezo unity. */
-    int db = MIN(tenth_db + 250, 60);
-    gain = tenth_db <= -600 ? 0 :
-           fp_factor(db * (1 << GAIN_BITS) / 10, GAIN_BITS);
+    /* This path uses full GPIO swing at every non-muted volume. */
+    muted = tenth_db <= -600;
 }
 
 void piezo_pcm_set_rate(unsigned int hz)
 {
-    /* Two one-pole low-pass stages. Approximate 1-exp(-2*pi*3500/hz). */
-    unsigned int coeff = (22000u << 8) / (hz + 11000u);
+    /* Two low-pass stages retain the presence band before decimation. */
+    unsigned int coeff = (30000u << 8) / (hz + 15000u);
     int irq = disable_irq_save();
     step = hz;
     alpha = MIN(coeff, 255u);
@@ -92,14 +90,15 @@ void piezo_pcm_start(const void *addr, size_t size)
     set_input(addr, size);
     phase = SAMPLE_RATE - 1;
     low1 = low2 = dc = 0;
+    quiet_samples = 0;
+    output_high = false;
+    GPIOCMD = PIEZO_GPIO_LOW;
 
     TACMD = 0;
-    TACON = TIMER_ECLK_DIV2 | TIMER_PWM | TIMER_MATCH1_EN | TIMER_ACK_ALL;
+    TACON = TIMER_ECLK_DIV2 | TIMER_MATCH0_EN | TIMER_ACK_ALL;
     TAPRE = 0;
-    TADATA0 = PWM_MID;
-    TADATA1 = PWM_PERIOD;
-    TACMD = 2; /* Clear and load the compare buffers */
-    PCON0 = (PCON0 & 0x00ffffff) | 0x53000000;
+    TADATA0 = TIMER_PERIOD;
+    TACMD = 2; /* Clear and load the compare buffer */
     next_sample = USEC_TIMER + SAMPLE_US;
     TACMD = 1;
     restore_irq(irq);
@@ -112,6 +111,7 @@ void piezo_pcm_stop(void)
 
     int irq = disable_irq_save();
     active = false;
+    GPIOCMD = PIEZO_GPIO_LOW;
     piezo_stop();
     restore_irq(irq);
 }
@@ -167,10 +167,26 @@ void piezo_pcm_irq(void)
 #endif
     }
 
-    /* Remove low bass and DC, then limit the duty away from the endpoints. */
-    dc += (low2 - dc) >> 3;
-    int sample = ((low2 - dc) >> 4) * gain >> GAIN_BITS;
-    sample = (sample * PWM_SWING) >> 15;
-    TADATA0 = selected ? PWM_MID + MIN(MAX(sample, -PWM_SWING), PWM_SWING)
-                       : PWM_MID;
+    /* Favor speech and other midrange content before hard limiting. A
+     * Schmitt trigger gives full swing for quiet signals and holds its
+     * last level across zero until the signal crosses the other threshold. */
+    dc += ((low2 - dc) * 13) >> 6;
+    int signal = low2 - dc;
+    bool high = output_high;
+
+    if (!selected || muted)
+        high = false;
+    else if (signal > PIEZO_THRESHOLD || signal < -PIEZO_THRESHOLD)
+    {
+        quiet_samples = 0;
+        high = signal > 0;
+    }
+    else if (quiet_samples < QUIET_SAMPLES && ++quiet_samples == QUIET_SAMPLES)
+        high = false;
+
+    if (high != output_high)
+    {
+        output_high = high;
+        GPIOCMD = PIEZO_GPIO_LOW | high;
+    }
 }

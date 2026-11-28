@@ -139,6 +139,8 @@
  * flash through the S5L crypto block. None of it exists in a simulator. */
 #if defined(IPOD_6G) && !defined(SIMULATOR)
 #include "norboot-target.h"
+#include "piezo.h"
+#include "pcm-internal.h"
 #endif
 
 #include "iap.h"
@@ -1367,6 +1369,45 @@ static bool dbg_disk_info(void)
 
 #endif /* CONFIG_PLATFORM & PLATFORM_NATIVE -- the disk screens */
 
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702
+
+static const unsigned short piezo_test_hz[] = {
+    440, 660, 880, 1000, 1250, 1500, 1750, 2000, 2273, 2500, 3000, 3500, 4000
+};
+
+static const char *piezo_test_name(int item, void *data, char *buf, size_t len)
+{
+    (void)data;
+    snprintf(buf, len, "%u Hz", (unsigned int)piezo_test_hz[item]);
+    return buf;
+}
+
+static int piezo_test_action(int action, struct gui_synclist *list)
+{
+    if (action != ACTION_STD_OK)
+        return action;
+
+    if (pcm_is_playing())
+        splash(HZ, "Stop playback to test");
+    else
+        piezo_play(piezo_test_hz[gui_synclist_get_sel_pos(list)], 400);
+
+    return ACTION_REDRAW;
+}
+
+static bool dbg_piezo_tones(void)
+{
+    struct simplelist_info info;
+    simplelist_info_init(&info, "Piezo tone sweep",
+                         ARRAYLEN(piezo_test_hz), NULL);
+    info.get_name = piezo_test_name;
+    info.action_callback = piezo_test_action;
+    bool ret = simplelist_show_list(&info);
+    piezo_stop();
+    return ret;
+}
+#endif
+
 static int dircache_callback(int btn, struct gui_synclist *lists)
 {
     (void)lists;
@@ -2550,6 +2591,9 @@ static const struct {
         { "Beat analysis", beat_debug_screen, false, NULL },
         { "Beat tap", spike_tap_screen, false, NULL },
         { "Sound probe", probe_debug_screen, false, NULL },
+#if defined(IPOD_6G) && CONFIG_CPU == S5L8702
+        { "Piezo tone sweep", dbg_piezo_tones, false, NULL },
+#endif
 #ifdef PM_DEBUG
         { "pm histogram", peak_meter_histogram, true, NULL },
 #endif /* PM_DEBUG */

@@ -84,6 +84,7 @@
 #include "disk.h"
 #include "sound.h"
 #include "screens/fruit_menu.h"
+#include "ui/native_theme_runtime.h"
 #ifdef USB_ENABLE_AUDIO
 #include "usbstack/usb_audio.h"
 #endif
@@ -1083,6 +1084,8 @@ static int images_scrn(void* param)
 static int videos_scrn(void* param)
 {
     (void)param;
+    if (ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC)
+        return menu_result(do_menu(fruit_menu_videos(), NULL, NULL, false));
     return browser_flat(FLAT_VIDEOS);
 }
 

@@ -1371,11 +1371,20 @@ static size_t rock_video_chapters(const char *path, uint32_t *offsets)
     return count >= MIN_CHAPTERS ? count : 0;
 }
 
+static int rock_video_resume_menu(void)
+{
+    MENUITEM_STRINGLIST(menu, ID2P(LANG_RESUME_PLAYBACK), NULL,
+                        ID2P(LANG_RESUME_PLAYBACK), ID2P(LANG_RESTART_PLAYBACK));
+    return rock_do_menu(&menu, NULL, NULL, false);
+}
+
 int rock_open_video(const char *path, const char *title, bool has_previous)
 {
     uint32_t chapters[MAX_TRACKS];
     if (audio_status())
         audio_stop();
+    bool themed = ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC ||
+                  ui_wheel_navigation();
     struct rock_video_request request = {
         .path = path,
         .title = title,
@@ -1384,6 +1393,9 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
         .chapter_count = rock_video_chapters(path, chapters),
         .has_previous = has_previous,
         .result = ROCK_VIDEO_FAILED,
+        .themed_controls = themed,
+        .accent = ui_theme_rgb565(UI_COLOR_WPS_ACCENT),
+        .resume_menu = themed ? rock_video_resume_menu : NULL,
     };
     int result = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, false,
                                       &request);

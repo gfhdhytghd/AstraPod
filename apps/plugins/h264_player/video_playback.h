@@ -46,6 +46,10 @@ struct video_play_options
     size_t chapter_count;
     int max_volume;
     bool has_previous;
+    bool themed_controls;
+    unsigned accent; /* RGB565 theme accent. */
+    /* Standard menu result: 0 resumes, 1 restarts, MENU_ATTACHED_USB exits. */
+    int (*resume_menu)(void);
 };
 
 int video_h264_play_named(const char *path, void *buffer, size_t size,

@@ -766,10 +766,100 @@ static void video_draw_status_icon(uint8_t * const *planes, int x, int y,
     }
 }
 
+/* Darken an even-aligned region without flattening the picture behind it. */
+static void video_dim_panel(uint8_t * const *planes, int x, int y,
+                            int width, int height)
+{
+    for (int plane = 0; plane < 3; plane++)
+    {
+        int shift = plane != 0;
+        int stride = LCD_WIDTH >> shift;
+        int black = plane ? 128 : 16;
+        uint8_t *row = planes[plane] + (y >> shift) * stride + (x >> shift);
+        for (int line = 0; line < (height >> shift); line++, row += stride)
+            for (int col = 0; col < (width >> shift); col++)
+                row[col] = (row[col] + 3 * black) / 4;
+    }
+}
+
+static void video_draw_themed_controls(uint8_t * const *planes, bool paused,
+                                       uint32_t position, uint32_t duration,
+                                       const struct video_osd *osd)
+{
+    const int left = 16, right = LCD_WIDTH - left;
+    const int panel = LCD_HEIGHT - 44;
+    const int rail = panel + 12, width = right - left;
+    if (osd->mode == VIDEO_OVERLAY_HIDDEN)
+    {
+        if (paused)
+        {
+            video_dim_panel(planes, LCD_WIDTH - 36, 8, 28, 22);
+            video_draw_status_icon(planes, LCD_WIDTH - 26, 15, true);
+        }
+        return;
+    }
+
+    unsigned accent = osd->options->accent;
+    int red = ((accent >> 11) & 31) * 255 / 31;
+    int green = ((accent >> 5) & 63) * 255 / 63;
+    int blue = (accent & 31) * 255 / 31;
+    int fill;
+    char left_text[20], right_text[20];
+
+    video_dim_panel(planes, 8, panel, LCD_WIDTH - 16, 36);
+    if (osd->mode == VIDEO_OVERLAY_VOLUME)
+    {
+        int min = rb->sound_min(SOUND_VOLUME);
+        int max = osd->options->max_volume;
+        int volume = MAX(min, MIN(max, rb->global_status->volume));
+        int percent = max > min ? (volume - min) * 100 / (max - min) : 0;
+        fill = percent * width / 100;
+        rb->snprintf(left_text, sizeof(left_text), "Volume");
+        rb->snprintf(right_text, sizeof(right_text), "%d%%", percent);
+    }
+    else
+    {
+        video_dim_panel(planes, 8, 8, LCD_WIDTH - 16, 22);
+        if (paused)
+            video_draw_status_icon(planes, left, 15, true);
+        int title_right = right;
+        int battery = osd->options->battery_level ?
+                      osd->options->battery_level() : -1;
+        if (battery >= 0)
+        {
+            title_right -= 24;
+            video_yuv_rect(planes, right - 18, 16, 16, 7, 122, 129, 136);
+            video_yuv_rect(planes, right - 2, 18, 2, 3, 122, 129, 136);
+            video_yuv_rect(planes, right - 18, 16, MIN(battery, 100) * 16 / 100,
+                           7, 255, 255, 255);
+        }
+        video_yuv_text(planes, paused ? left + 16 : left, 15, title_right,
+                       osd->title, 255, 255, 255);
+        position = MIN(osd->pending_seek ? osd->seek_ms : position, duration);
+        fill = (uint64_t)position * width / duration;
+        video_time_text(position, left_text, sizeof(left_text));
+        right_text[0] = '-';
+        video_time_text(duration - position, right_text + 1,
+                        sizeof(right_text) - 1);
+    }
+    video_yuv_rect(planes, left, rail, width, 4, 122, 129, 136);
+    video_yuv_rect(planes, left, rail, fill, 4, red, green, blue);
+    if (osd->mode == VIDEO_OVERLAY_SCRUB)
+        video_yuv_rect(planes, left + fill - 2, rail - 4, 4, 12, 255, 255, 255);
+    video_yuv_text(planes, left, panel + 23, right, left_text, 255, 255, 255);
+    video_yuv_text(planes, right - video_yuv_text_width(right_text), panel + 23,
+                   right, right_text, 255, 255, 255);
+}
+
 static void video_draw_overlay(uint8_t * const *planes, bool paused,
                                uint32_t position_ms, uint32_t duration_ms,
                                const struct video_osd *osd)
 {
+    if (osd->options && osd->options->themed_controls)
+    {
+        video_draw_themed_controls(planes, paused, position_ms, duration_ms, osd);
+        return;
+    }
     if (osd->mode == VIDEO_OVERLAY_HIDDEN)
         return;
 
@@ -1045,6 +1135,17 @@ int video_h264_play_named(const char *filepath, void *buffer,
         goto cleanup;
     }
     show_sample = video_resume_load(filepath, demux.num_samples);
+    if (show_sample && options && options->resume_menu)
+    {
+        int choice = options->resume_menu();
+        if (choice == 1)
+            show_sample = 0;
+        else if (choice != 0)
+        {
+            result = choice == MENU_ATTACHED_USB ? VIDEO_USB : VIDEO_EXIT;
+            goto cleanup;
+        }
+    }
     last_sample = show_sample;
     video_timing_for_sample(&demux, show_sample, &timing);
     play_ms = video_pts_ms(&demux, &timing);

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Videos on the main menu, its list, and films opening in the video player.
 
-Drives a built ipod6g simulator headless (SDL dummy video) through the main
-menu's Videos row and the file browser, with generated films and a song:
+Drives a built ipod6g simulator headless (SDL dummy video) with generated
+loose media and an indexed movie:
 
     python3 tools/tests/videos_sim.py build-sim-ipod6g EVIDENCE_DIR
 
@@ -23,6 +23,8 @@ import subprocess
 import time
 
 from PIL import Image, ImageOps
+
+from coverflow_back_stack_sim import prepare_ultra
 
 LCD = (320, 240)
 FRAME_BYTES = LCD[0] * LCD[1] * 3
@@ -47,7 +49,35 @@ def media(disk):
            "-c:a", "aac", music / "song.mp4")
 
 
-def player(build, disk):
+def indexed_movie(disk):
+    def record(kind, header, body, fields):
+        data = bytearray(header)
+        struct.pack_into("<4sII", data, 0, kind, header, header + len(body))
+        for offset, value in fields.items():
+            struct.pack_into("<I", data, offset, value)
+        return data + body
+
+    def text(kind, value):
+        encoded = value.encode("utf-16le")
+        return record(b"mhod", 24,
+                      struct.pack("<IIII", 1, len(encoded), 0, 0) + encoded,
+                      {12: kind})
+
+    control = disk / "iPod_Control"
+    film = control / "Music/F00/TEST.m4v"
+    film.parent.mkdir(parents=True)
+    shutil.copyfile(disk / "Movies/clip.m4v", film)
+    track = record(b"mhit", 212, text(1, "Indexed Film") +
+                   text(2, ":iPod_Control:Music:F00:TEST.m4v"),
+                   {16: 1, 40: 3000, 208: 2})
+    tracks = record(b"mhlt", 12, track, {8: 1})
+    section = record(b"mhsd", 16, tracks, {12: 1})
+    database = control / "iTunes/iTunesDB"
+    database.parent.mkdir()
+    database.write_bytes(record(b"mhbd", 12, section, {}))
+
+
+def player(build, disk, theme):
     """The built player's .rockbox, linked rather than copied"""
     def link(src, dst):
         try:
@@ -58,8 +88,10 @@ def player(build, disk):
                     copy_function=link,
                     ignore=shutil.ignore_patterns("library", "logs", "config.cfg"))
     config = (disk / ".rockbox/default-config.cfg").read_text()
+    if theme == "fruit-company-ultra":
+        prepare_ultra(disk)
     (disk / ".rockbox/config.cfg").write_text(
-        config + "\nstart in screen: root\n"
+        config + f"\nnative theme: {theme}\nstart in screen: root\n"
         "root menu order: videos,files,settings\n"
         "animations: off\nbacklight timeout: off\nvoice menus: off\n"
         "volume: -24\n")
@@ -136,11 +168,13 @@ class Sim:
 
 
 @contextmanager
-def session(build, case):
+def session(build, case, theme="scrim"):
     disk = case / "disk"
     disk.mkdir(parents=True)
-    player(build, disk)
+    player(build, disk, theme)
     media(disk)
+    if theme != "scrim":
+        indexed_movie(disk)
     state_path = case / "state.bin"
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
                SDL_RENDER_DRIVER="software", PODBOX_UI_WALK_STATE=str(state_path))
@@ -164,37 +198,68 @@ def session(build, case):
                     proc.wait(timeout=5)
 
 
+def stock_navigation(sim, theme):
+    if theme == "classic":
+        sim.text("home", ["videos", "files"])
+    else:
+        sim.text("home", ["music", "videos", "photos"])
+        sim.tap("down")
+    sim.go("select", "videos-menu", ["movies", "rentals", "tv shows",
+                                   "music videos", "playlists", "settings"])
+    sim.go("select", "movies", ["indexed film", "3 s", "loose"])
+    sim.go("select", "movies-open", ["ipod video"])
+    sim.text("movies-back", ["indexed film", "loose"])
+    sim.go("menu", "videos-back", ["rentals", "tv shows", "music videos"])
+    for label in ("rentals", "tv-shows", "music-videos", "video-playlists"):
+        sim.tap("down")
+        sim.go("select", label, ["rentals", "tv shows", "music videos"])
+    sim.tap("down")
+    sim.go("select", "settings", ["tv out", "tv signal", "tv screen",
+                                 "fit to screen", "alternate audio",
+                                 "captions", "subtitles"])
+    sim.go("menu", "settings-back", ["rentals", "tv shows", "music videos"])
+
+
+def loose_navigation(sim):
+    sim.text("home", ["videos", "files"])
+    # The list is the file index's, from a walk that starts at boot.
+    # Until it has run, the row says there is nothing yet.
+    time.sleep(4)
+    sim.go("select", "videos-list", ["clip", "film"], ["song"])
+    sim.go("select", "videos-open-m4v", ["ipod video"])
+    sim.text("videos-back", ["clip", "film"])
+    sim.go("menu", "home-again", ["videos", "files"], ["clip"])
+
+    sim.tap("down")
+    sim.go("select", "files", ["movies", "music"])
+    sim.go("select", "movies", ["clip", "film"])
+    sim.tap("down")
+    sim.go("select", "files-open-mp4", ["ipod video"])
+    sim.text("movies-back", ["movies", "clip"])
+    sim.go("menu", "files-back", ["movies", "music"], ["clip"])
+    sim.tap("down")
+    sim.go("select", "music", ["song"], ["movies"])
+    sim.go("select", "song-playing", ["song"], ["ipod video", "music"])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build", type=lambda p: Path(p).resolve())
     parser.add_argument("evidence", type=lambda p: Path(p).resolve())
+    parser.add_argument("--theme", action="append",
+                        choices=("scrim", "classic", "fruit-company",
+                                 "fruit-company-ultra"))
     args = parser.parse_args()
-    case = args.evidence
-    if case.exists():
-        shutil.rmtree(case)
-    case.mkdir(parents=True)
-
-    with session(args.build, case) as sim:
-        sim.text("home", ["videos", "files"])
-        # The list is the file index's, from a walk that starts at boot.
-        # Until it has run, the row says there is nothing yet.
-        time.sleep(4)
-        sim.go("select", "videos-list", ["clip", "film"], ["song"])
-        sim.go("select", "videos-open-m4v", ["ipod video"])
-        sim.text("videos-back", ["clip", "film"])
-        sim.go("menu", "home-again", ["videos", "files"], ["clip"])
-
-        sim.tap("down")
-        sim.go("select", "files", ["movies", "music"])
-        sim.go("select", "movies", ["clip", "film"])
-        sim.tap("down")
-        sim.go("select", "files-open-mp4", ["ipod video"])
-        sim.text("movies-back", ["movies", "clip"])
-        sim.go("menu", "files-back", ["movies", "music"], ["clip"])
-        sim.tap("down")
-        sim.go("select", "music", ["song"], ["movies"])
-        sim.go("select", "song-playing", ["song"], ["ipod video", "music"])
-    print("PASS Videos row, list, and films opening in the video player")
+    for theme in args.theme or ["scrim"]:
+        case = args.evidence / theme
+        case.mkdir(parents=True)
+        with session(args.build, case, theme) as sim:
+            if theme != "scrim":
+                stock_navigation(sim, theme)
+            else:
+                loose_navigation(sim)
+        print(f"PASS {theme} video navigation, list and player dispatch",
+              flush=True)
 
 
 if __name__ == "__main__":

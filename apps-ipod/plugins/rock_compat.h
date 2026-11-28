@@ -34,6 +34,9 @@ struct rock_video_request {
     size_t chapter_count;
     bool has_previous;
     int result;
+    bool themed_controls;
+    unsigned accent;
+    int (*resume_menu)(void);
 };
 int rock_open_video(const char *path, const char *title, bool has_previous);
 int rock_run_from_shell(const char *path);

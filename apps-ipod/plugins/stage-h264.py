@@ -79,6 +79,9 @@ enum plugin_status plugin_start""")
         .chapter_count = request->chapter_count,
         .has_previous = request->has_previous,
         .max_volume = rb->sound_max(SOUND_VOLUME),
+        .themed_controls = request->themed_controls,
+        .accent = request->accent,
+        .resume_menu = request->resume_menu,
     };
     result = video_h264_play_named(path, buffer, buffer_size, &options);
     switch (result)

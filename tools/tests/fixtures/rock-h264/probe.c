@@ -19,6 +19,11 @@ static int open_files, boosted, backlight;
 static bool sent_menu, sent_seek;
 static unsigned scrub_actions;
 static uint8_t picture[16 * 16 * 3 / 2];
+static unsigned control_action, resume_calls;
+static int resume_choice;
+static long paused_at;
+static bool exercise_controls;
+static bool saw_timeout;
 
 static unsigned audio_opens, audio_closes, audio_seeks;
 static bool audio_active;
@@ -104,7 +109,8 @@ static void frame(const struct vpu_h264 *decoder, const uint8_t **y,
     *y = picture;
     *cb = &picture[256];
     *cr = &picture[320];
-    *w = *h = *stride = 16;
+    *w = *stride = 16;
+    *h = 12;
 }
 
 static void close_video(struct vpu_h264 *v)
@@ -154,6 +160,24 @@ static int action(int context, int timeout)
     assert(context == CONTEXT_VIDEO_PLAYBACK && timeout == TIMEOUT_NOBLOCK);
     if (decoded < 4)
         return ACTION_NONE;
+    if (exercise_controls)
+    {
+        switch (control_action)
+        {
+        case 0: control_action++; return ACTION_WPS_BROWSE;
+        case 1: control_action++; return ACTION_WPS_BROWSE;
+        case 2: control_action++; return ACTION_WPS_BROWSE;
+        case 3: control_action++; return ACTION_WPS_VOLUP;
+        case 4:
+            paused_at = current_tick;
+            control_action++;
+            return ACTION_WPS_PLAY;
+        case 5:
+            if (current_tick > paused_at + 4 * HZ)
+                return ACTION_WPS_MENU;
+            break;
+        }
+    }
     if ((mode == SEEK_MENU || mode == SEEK_INIT_ERROR) && !sent_seek)
     {
         seeks++;
@@ -209,7 +233,40 @@ static void draw(unsigned char * const src[3], int sx, int sy, int stride,
     assert(active && src[0] && src[1] && src[2]);
     assert(!x && !y && !sx && !sy &&
            stride == LCD_WIDTH && w == LCD_WIDTH && h == LCD_HEIGHT);
+    if (exercise_controls)
+    {
+        /* The uniform source remains visible through the inset panels. */
+        int rail = src[0][208 * stride + 300];
+        int header = src[0][10 * stride + 12];
+        int handle_pixels = 0;
+        for (int col = 14; col < 306; col++)
+            handle_pixels += src[0][204 * stride + col] == 235;
+        int badge = src[0][18 * stride + 292];
+        switch (control_action)
+        {
+        case 0:
+        case 3: assert(rail == 112 && header == 112); break;
+        case 1: assert(rail != 112 && header == 40 && handle_pixels == 0); break;
+        case 2: assert(rail != 112 && header == 40 && handle_pixels == 4); break;
+        case 4: assert(rail != 112 && header == 112); break;
+        case 5:
+            if (current_tick == paused_at + 4 * HZ)
+            {
+                assert(rail == 112 && header == 112 && badge == 40);
+                saw_timeout = true;
+            }
+            else
+                assert(rail != 112 && header == 40);
+            break;
+        }
+    }
     drawn++;
+}
+
+static int resume_menu(void)
+{
+    resume_calls++;
+    return resume_choice;
 }
 
 static void adjust_volume(int delta) { (void)delta; }
@@ -265,6 +322,9 @@ static void reset(enum mode next)
     opens = closes = configured = decoded = drawn = seeks = 0;
     current_tick = 0;
     sent_menu = sent_seek = false;
+    control_action = 0;
+    exercise_controls = false;
+    saw_timeout = false;
     mode = next;
     rock_h264_begin(scratch, sizeof(scratch));
 }
@@ -344,6 +404,51 @@ int main(int argc, char **argv)
     assert(video_h264_play(argv[3], scratch, sizeof(scratch)) == 2);
     assert(audio_opens == 2 && audio_closes == 2 && !audio_active);
 
+    memset(picture, 112, 256);
+    memset(picture + 256, 128, sizeof(picture) - 256);
+    const struct video_play_options options = {
+        .title = "Test clip",
+        .themed_controls = true,
+        .accent = 0x041f,
+        .resume_menu = resume_menu,
+    };
+    reset(FINISH);
+    assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == VIDEO_FINISHED);
+    reset(FINISH);
+    exercise_controls = true;
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
+           VIDEO_EXIT);
+    assert(!resume_calls && saw_timeout);
+
+    reset(FINISH);
+    resume_choice = -1;
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
+           VIDEO_EXIT);
+    assert(resume_calls == 1 && !opens);
+
+    reset(FINISH);
+    resume_choice = MENU_ATTACHED_USB;
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
+           VIDEO_USB);
+    assert(resume_calls == 2 && !opens);
+
+    reset(FINISH);
+    resume_choice = 1;
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
+           VIDEO_FINISHED);
+    assert(resume_calls == 3 && decoded == 336);
+
+    reset(FINISH);
+    exercise_controls = true;
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
+           VIDEO_EXIT);
+    assert(resume_calls == 3);
+    reset(FINISH);
+    resume_choice = 0;
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
+           VIDEO_FINISHED);
+    assert(resume_calls == 4 && drawn < 336);
+
     rock_h264_end();
-    puts("PASS H.264 demux, complete playback, seek, resume, Menu, USB, errors, workspace");
+    puts("PASS H.264 lifecycle, timed video controls, resume choices and USB");
 }

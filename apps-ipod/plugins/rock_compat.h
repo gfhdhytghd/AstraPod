@@ -35,6 +35,9 @@ struct rock_video_request {
     bool has_previous;
     bool probe;
     int result;
+    bool themed_controls;
+    unsigned accent;
+    int (*resume_menu)(void);
 };
 #ifdef HAVE_HW_H264
 int rock_probe_video(const char *path);

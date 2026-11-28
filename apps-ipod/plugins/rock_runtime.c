@@ -681,6 +681,19 @@ static int rock_do_menu(const struct menu_item_ex *menu, int *selected,
     return result;
 }
 
+static int rock_video_resume_menu(void)
+{
+    MENUITEM_STRINGLIST(menu, ID2P(LANG_RESUME_PLAYBACK), NULL,
+                        ID2P(LANG_RESUME_PLAYBACK), ID2P(LANG_RESTART_PLAYBACK));
+    return rock_do_menu(&menu, NULL, NULL, false);
+}
+
+static bool rock_video_themed_controls(void)
+{
+    return ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC ||
+           ui_wheel_navigation();
+}
+
 static bool rock_set_int(const unsigned char *title, const char *unit, int voice_unit,
                          const int *value, void (*changed)(int), int step, int min,
                          int max, const char *(*format)(char *, size_t, int, const char *))
@@ -1138,10 +1151,14 @@ static int invoke_module(void *opaque)
     (void)call->shell;
 #endif
     push_activity_without_refresh(ACTIVITY_PLUGIN);
+    bool themed_video = video && !call->video && rock_video_themed_controls();
     struct rock_video_request fallback = {
         .path = call->file,
         .battery_level = battery_level,
         .result = ROCK_VIDEO_FAILED,
+        .themed_controls = themed_video,
+        .accent = themed_video ? ui_theme_rgb565(UI_COLOR_WPS_ACCENT) : 0,
+        .resume_menu = themed_video ? rock_video_resume_menu : NULL,
     };
     const void *parameter = call->file;
     if (video)
@@ -1416,6 +1433,7 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
     uint32_t chapters[MAX_TRACKS];
     if (audio_status())
         audio_stop();
+    bool themed = rock_video_themed_controls();
     struct rock_video_request request = {
         .path = path,
         .title = title,
@@ -1424,6 +1442,9 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
         .chapter_count = rock_video_chapters(path, chapters),
         .has_previous = has_previous,
         .result = ROCK_VIDEO_FAILED,
+        .themed_controls = themed,
+        .accent = ui_theme_rgb565(UI_COLOR_WPS_ACCENT),
+        .resume_menu = themed ? rock_video_resume_menu : NULL,
     };
     int result = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, false,
                                       &request);

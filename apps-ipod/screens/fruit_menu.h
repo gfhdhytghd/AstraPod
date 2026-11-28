@@ -15,6 +15,8 @@
 bool fruit_menu_active(void);
 /* The stock main menu. */
 const struct menu_item_ex *fruit_menu_root(void);
+/* The shared category menu for themes with the Classic video controls. */
+const struct menu_item_ex *fruit_menu_videos(void);
 /* Whether `menu` is one of the stock tree's menus with a pane of its own,
  * and what that pane shows beside its row `item` there. */
 bool fruit_menu_owns(const struct menu_item_ex *menu);

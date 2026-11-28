@@ -323,6 +323,11 @@ static const struct menu_item_ex *const videos_rows[] = {
 
 MENU(videos_menu, LANG_FRUIT_VIDEOS, home_callback, videos_rows);
 
+const struct menu_item_ex *fruit_menu_videos(void)
+{
+    return &videos_menu;
+}
+
 /** Photos **/
 
 ROW(photos_menu, LANG_FRUIT_PHOTOS, photos, home_callback);

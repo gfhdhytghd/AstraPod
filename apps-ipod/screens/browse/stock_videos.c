@@ -16,6 +16,8 @@
 #include "widgets/splash.h"
 #include "root_menu.h"
 #include "settings/settings.h"
+#include "speech/talk.h"
+#include "system/format_time.h"
 #include "files/filetypes.h"
 #include "plugins/rock_compat.h"
 #include "input/action.h"
@@ -43,6 +45,7 @@ struct video_track {
     uint64_t dbid;
     uint32_t season;
     uint32_t episode;
+    uint32_t duration_ms;
 };
 
 struct videos {
@@ -168,6 +171,7 @@ static void read_tracks(struct videos *v, const struct stock_record *list,
             !stock_db_u32(&v->db, at + 16, &item.id))
             continue;
         read_dbid(&v->db, at + 112, &item.dbid);
+        stock_db_u32(&v->db, at + 40, &item.duration_ms);
         if (track.body - at >= 220)
         {
             stock_db_u32(&v->db, at + 212, &item.season);
@@ -288,6 +292,18 @@ static enum themable_icons video_icon(int row, void *data)
     return filetype_get_icon(FILE_ATTR_VIDEO);
 }
 
+static const char *video_duration(int row, void *data, char *buf, size_t size)
+{
+    const struct videos *v = data;
+    if (row >= v->row_count)
+        return NULL;
+    uint32_t duration = v->tracks[v->rows[row]].duration_ms;
+    if (!duration)
+        return NULL;
+    return format_time_auto(buf, size, duration / 1000,
+                            UNIT_SEC | UNIT_TRIM_ZERO, false);
+}
+
 static const struct bitmap *video_cover(int row, void *data, struct dim *size)
 {
     struct videos *v = data;
@@ -333,6 +349,7 @@ static int show_tracks(struct videos *v, char *title)
     info.action_callback = stock_media_list_action;
     info.get_icon = video_icon;
     info.get_albumart = video_cover;
+    info.get_subtitle = video_duration;
     info.row_height = 54;
     info.selection = 0;
     while (true)
@@ -385,9 +402,6 @@ static enum list_row_kind video_folder_kind(int row, void *data)
 
 static int show_playlists(struct videos *v, char *title)
 {
-    read_playlists(v);
-    if (!v->playlist_count)
-        return 0;
     struct simplelist_info info;
     simplelist_info_init(&info, title, v->playlist_count, v);
     info.get_name = playlist_title;
@@ -544,7 +558,6 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
     bool menu_back = action_set_menu_back(true);
     int rc = 0, handle = -1;
     struct ui_scene scene = {0};
-    ui_scene_open_page(&scene, "videos-push");
     if (!stock_db_open(&v.db, false) ||
         !stock_db_list(&v.db, 1, "mhlt", &list) || !list.count)
         goto leave;
@@ -562,7 +575,14 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
     read_artwork(&v);
     qsort(v.tracks, v.count, sizeof(*v.tracks), compare_id);
     if (kind == STOCK_VIDEO_PLAYLISTS)
-        rc = show_playlists(&v, str(title));
+    {
+        read_playlists(&v);
+        if (v.playlist_count)
+        {
+            ui_scene_open_page(&scene, "videos-push");
+            rc = show_playlists(&v, str(title));
+        }
+    }
     else
     {
         for (int i = 0; i < v.count; i++)
@@ -574,10 +594,14 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
             if (category == kind)
                 v.rows[v.row_count++] = i;
         }
-        if (v.row_count && kind != STOCK_MOVIE)
-            rc = show_groups(&v, str(title), kind == STOCK_TV_SHOW);
-        else if (v.row_count)
-            rc = show_tracks(&v, str(title));
+        if (v.row_count)
+        {
+            ui_scene_open_page(&scene, "videos-push");
+            if (kind == STOCK_MOVIE)
+                rc = show_tracks(&v, str(title));
+            else
+                rc = show_groups(&v, str(title), kind == STOCK_TV_SHOW);
+        }
     }
 
 leave:

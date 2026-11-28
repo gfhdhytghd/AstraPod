@@ -422,7 +422,7 @@ enum sl_result { SL_DONE, SL_MENU, SL_USB };
 static int next_action(int timeout, bool locked)
 {
     int action = locked ? extras_get_action_locked(timeout)
-                        : extras_get_action(timeout, true);
+                        : extras_get_action(timeout, false);
     if (default_event_handler(action) == SYS_USB_CONNECTED)
         return -1;
     return action;

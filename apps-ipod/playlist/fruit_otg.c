@@ -442,7 +442,7 @@ static int fruit_info(int title, int message, int art, int y, bool dark)
             lcd_update();
         }
 
-        int action = fruit_list_action(get_action(CONTEXT_STD, HZ / 5), NULL);
+        int action = fruit_list_action(get_action(CONTEXT_STD | CONTEXT_FRUIT_NAV, HZ / 5), NULL);
         if (action == ACTION_STD_CANCEL || (dark && action == ACTION_STD_OK))
             break;
         if (default_event_handler(action) == SYS_USB_CONNECTED)

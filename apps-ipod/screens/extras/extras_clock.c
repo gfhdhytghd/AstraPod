@@ -867,7 +867,7 @@ int extras_clock(void)
             ui_page_invalidate(&page, bounds);
             ui_page_draw(&page);
         }
-        int action = extras_get_action(HZ / 2, true);
+        int action = extras_get_action(HZ / 2, false);
         if (screen.dialog)
         {
             switch (action)

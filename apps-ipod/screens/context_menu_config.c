@@ -89,6 +89,7 @@ int context_menu_config(void *param)
 
     simplelist_info_init(&info, str(context_menu_kind_label(edit_kind)),
                          edit_count, NULL);
+    info.fruit_nav = true;
     info.get_name = row_get_name;
     info.get_icon = row_get_icon;
     info.action_callback = row_action_callback;

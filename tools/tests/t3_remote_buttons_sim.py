@@ -18,7 +18,6 @@ import time
 import wave
 
 from PIL import Image
-from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
 from ui_stock_transitions_sim import HEADER, RING, STATE, WORD, PIXELS
 
 REPO = Path(__file__).resolve().parents[2]
@@ -77,6 +76,9 @@ def instrument(source):
             "#include \"t3-test-observe.inc\"\n        bool changed = poll_link();")
     replace(source, "apps-ipod/system/shutdown.c", "    switch(event)\n",
             "    extern void t3_test_media(long);\n    t3_test_media(event);\n    switch(event)\n")
+    transport = "void wps_wheel_transport(int action)\n{\n"
+    replace(source, "apps-ipod/screens/playback/wps.c", transport, transport +
+            "    extern void t3_test_transport(int);\n    t3_test_transport(action);\n")
     seek = "void audio_ff_rewind(long time)\n{\n"
     replace(source, "apps-ipod/audio/playback.c", seek, seek +
             "    extern void t3_test_seek(long);\n    t3_test_seek(time);\n")
@@ -131,13 +133,10 @@ def prepare_disk(directory, build, resources, theme):
     (codecs / "wav.codec").symlink_to(build / "lib/rbcodec/codecs/wav.codec")
     themes = rockbox / "native-themes"
     themes.mkdir()
-    if theme != "scrim":
-        original = resources / "native-themes" / f"{theme}.podtheme"
-        # Supply the stock navigation style when Ultra is a custom theme.
-        if original.exists():
-            (themes / original.name).write_text(original.read_text())
-        elif theme == "fruit-company-ultra":
-            (themes / original.name).write_text(ULTRA_FALLBACK_THEME)
+    art = resources / "themes/stock-art.bin"
+    if art.exists():
+        (rockbox / "themes").mkdir()
+        (rockbox / "themes/stock-art.bin").symlink_to(art.resolve())
     (rockbox / "config.cfg").write_text(
         f"native theme: {theme}\nanimations: off\nbacklight timeout: off\n"
         "idle poweroff: off\nrepeat: all\n")
@@ -168,7 +167,7 @@ class State:
 
 
 class Player:
-    def __init__(self, binary, directory, disk, frame_state=None):
+    def __init__(self, binary, directory, disk, frame_state=None, start="agents"):
         self.binary = binary
         self.directory = directory
         self.disk = disk
@@ -178,13 +177,15 @@ class Player:
         self.tick_at = 0
         self.respond = True
         self.frame_state = frame_state
+        self.start = start
 
     def __enter__(self):
         self.peer, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
         self.log = (self.directory / "sim.log").open("wb")
         self.trace = (self.directory / "wire.log").open("w", buffering=1)
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
-                   SDL_RENDER_DRIVER="software", T3_TEST_FD=str(child.fileno()))
+                   SDL_RENDER_DRIVER="software", T3_TEST_FD=str(child.fileno()),
+                   T3_TEST_START=self.start)
         if self.frame_state is not None:
             env["PODBOX_UI_WALK_STATE"] = str(self.frame_state)
         try:
@@ -235,6 +236,7 @@ class Player:
             return
         elif key == "hr":
             self.send("HR\t1\tFixture computer")
+            self.send("M\tt3")
         elif key == "tc":
             self.send(PROJECTS)
             self.send("S\t1\nt3p1\tw\t-")
@@ -305,26 +307,6 @@ class Player:
             self.tap(direction)
         raise AssertionError(("Row not selectable", label, self.state))
 
-    def playback_only(self):
-        state = self.state
-        for key, action in (("back", "prev"), ("right", "next"), ("play", "play")):
-            mark = len(self.messages)
-            self.tap(key)
-            self.expect_wire(mark, ":playback", action)
-            assert self.state == state, (key, state, self.state)
-            self.no_wire(mark, "a", "act", "k", "ks", "sub", "vd", "vu", "vc")
-        for key, action in (("back", "rew"), ("right", "ffwd")):
-            mark = len(self.messages)
-            self.tap(key, .48)
-            self.expect_wire(mark, ":seek", action)
-            self.no_wire(mark, ":playback", "a", "act", "k", "ks", "sub", "vd")
-            assert self.state == state, (key, state, self.state)
-        mark = len(self.messages)
-        self.tap("play", .48)
-        self.expect_wire(mark, ":playback", "play")
-        self.no_wire(mark, "vd", "vu", "vc")
-        assert self.state == state, (state, self.state)
-
     def voice_hold(self, key, target, duration):
         state = self.state
         mark = len(self.messages)
@@ -352,7 +334,7 @@ def run_theme(binary, output, resources, theme):
     disk = prepare_disk(directory, binary.parent, resources, theme)
     fruit = theme.startswith("fruit-company")
     with Player(binary, directory, disk) as player:
-        player.expect_wire(0, "tc", "2")
+        player.expect(lambda: ["tc", "2"] in player.messages, "Agents handshake", timeout=10)
         player.wait(.2)
         if fruit and player.state.label == "Usage":
             player.tap("up")
@@ -362,22 +344,11 @@ def run_theme(binary, output, resources, theme):
         theme_log = disk / ".rockbox/native-theme.log"
         assert not theme_log.exists(), theme_log.read_text() if theme_log.exists() else ""
         assert player.state.view == "projects" and player.state.rows == (2 if fruit else 1)
+        assert player.messages.index(["tc", "1"]) == player.messages.index(["hr", "1"]) + 1
         mark = len(player.messages)
-        if fruit:
-            player.playback_only()
-            player.choose("Usage")
-        else:
-            player.tap("right")
-            player.expect_view("projects")
-            player.tap("select", .55)
-            player.expect_view("projects")
-            player.no_wire(mark, "vd", "sub")
-            player.tap("play")
-            player.expect_wire(mark, ":playback", "play")
-            player.no_wire(mark, "vu")
-            if any(fields[0] == "vd" for fields in player.messages[mark:]):
-                player.expect_wire(mark, "vc")
-            player.tap("back")
+        player.tap("right")
+        player.expect_view("projects")
+        player.tap("back")
         player.expect_view("usage")
         player.no_wire(mark, "fw", "k")
         mark = len(player.messages)
@@ -385,66 +356,41 @@ def run_theme(binary, output, resources, theme):
         player.expect_wire(mark, "us")
         player.tap("down")
         player.no_wire(mark, "k")
+        player.voice_hold("play", "-", .23)
         if fruit:
-            player.playback_only()
             player.voice_hold("select", "-", .5)
-            player.tap("menu")
-        else:
-            player.voice_hold("play", "-", .23)
-            player.tap("right")
+        player.tap("right")
         player.expect_view("projects")
         player.choose("Fixture project", direction="up")
         player.expect(lambda: player.state.view == "threads" and player.state.label.endswith("Fixture thread"),
                       "initial Active thread")
         player.wait(.15)
         mark = len(player.messages)
-        if fruit:
-            player.playback_only()
-            player.tap("up")
-            player.tap("select")
-        else:
-            player.tap("right")
+        player.tap("right")
         player.expect_wire(mark, "sub", "t3p1", "all")
         player.expect(lambda: player.state.rows == (3 if fruit else 2), "All snapshot loaded")
         mark = len(player.messages)
-        if fruit:
-            player.choose("Active   [All]", direction="up")
-        else:
-            player.tap("back")
+        player.tap("back")
         player.expect_wire(mark, "sub", "t3p1", "active")
         player.expect(lambda: player.state.rows == (2 if fruit else 1) and
                       player.state.label.endswith("Fixture thread"), "Active snapshot loaded")
         player.choose("Fixture thread")
         player.expect(lambda: player.state.view == "detail" and player.state.scroll_max > 1,
                       "scrollable thread detail")
+        player.tap("right", .55)
+        player.expect(lambda: player.state.scroll == player.state.scroll_max,
+                      "RIGHT hold jumps to the bottom")
+        player.tap("back")
+        player.expect(lambda: player.state.scroll < player.state.scroll_max, "LEFT pages up")
+        player.tap("back", .55)
+        player.expect(lambda: player.state.scroll == 0, "LEFT hold jumps to the top")
+        player.voice_hold("play", "t3t1", .22)
         if fruit:
-            player.playback_only()
-            scroll = player.state.scroll
-            direction = "up" if scroll > 0 else "down"
-            player.tap(direction)
-            player.expect(lambda: player.state.scroll != scroll, "wheel scrolls thread detail")
             player.voice_hold("select", "t3t1", .5)
-        else:
-            player.tap("right", .55)
-            player.expect(lambda: player.state.scroll == player.state.scroll_max,
-                          "RIGHT hold jumps to the bottom")
-            player.tap("back")
-            player.expect(lambda: player.state.scroll < player.state.scroll_max, "LEFT pages up")
-            player.tap("right", .55)
-            player.expect(lambda: player.state.scroll == player.state.scroll_max,
-                          "RIGHT hold returns to the bottom")
-            player.tap("back", .55)
-            player.expect(lambda: player.state.scroll == 0, "LEFT hold jumps to the top")
-            player.voice_hold("play", "t3t1", .22)
-            player.tap("select", .5)
-            player.expect_view("actions")
-            player.tap("menu")
-            player.expect_view("detail")
         player.tap("select")
         player.expect_view("actions")
         assert player.state.rows == (4 if fruit else 3), player.state
         if fruit:
-            player.playback_only()
             mark = len(player.messages)
             player.choose("Voice reply")
             player.expect_wire(mark, "vd", "t3t1")
@@ -463,15 +409,13 @@ def run_theme(binary, output, resources, theme):
             player.expect_view("actions")
         player.choose("Interrupt turn")
         player.expect_view("confirm")
-        if fruit:
-            player.playback_only()
         mark = len(player.messages)
         player.tap("select")
         player.expect_view("actions")
         player.no_wire(mark, "act")
         player.tap("select")
         player.expect_view("confirm")
-        player.tap("down" if fruit else "right")
+        player.tap("right")
         player.tap("select")
         player.expect_wire(mark, "act", "t3t1", "interrupt")
         player.expect_view("detail")
@@ -482,22 +426,16 @@ def run_theme(binary, output, resources, theme):
         player.expect_view("approval")
         player.no_wire(mark, "a")
         player.wait(.25)
-        if fruit:
-            player.playback_only()
-        else:
-            mark = len(player.messages)
-            player.tap("back", .45)
-            player.expect_view("approval")
-            player.no_wire(mark, "a")
+        mark = len(player.messages)
+        player.tap("back", .45)
+        player.expect_view("approval")
+        player.no_wire(mark, "a")
         mark = len(player.messages)
         player.tap("select")
         player.expect_view("question")
         player.no_wire(mark, "a")
-        if fruit:
-            player.playback_only()
-        else:
-            player.tap("right")
-            player.tap("back")
+        player.tap("right")
+        player.tap("back")
         player.tap("menu")
         player.expect_view("detail")
         assert player.state.questions == 1, player.state
@@ -507,11 +445,7 @@ def run_theme(binary, output, resources, theme):
         player.expect_view("approval")
         mark = len(player.messages)
         player.wait(.28)
-        if fruit:
-            player.tap("up")  # All options -> Deny
-            player.tap("select")
-        else:
-            player.tap("right")
+        player.tap("right")
         player.expect_wire(mark, "a", "t3a2", "2")
         player.expect_view("detail")
         player.send("Q\tt3q1\tt3t1\tt3p1\t-\tFixture project\t0\t0\tFixture thread\n"
@@ -527,6 +461,110 @@ def run_theme(binary, output, resources, theme):
         player.chord("agents")
         player.expect_view("detail")
     return f"{theme}: Projects, Threads, Detail, Approval, All Options, Actions, Confirm, Usage, WPS chord PASS"
+
+
+def run_navigation(binary, output, resources, theme):
+    directory = output / f"{theme}-navigation"
+    disk = prepare_disk(directory, binary.parent, resources, theme)
+    with Player(binary, directory, disk, start="menu") as player:
+        player.wait(2)
+        for key, name in (("back", "prev"), ("right", "next"), ("play", "play")):
+            mark = len(player.messages)
+            player.tap(key)
+            player.expect_wire(mark, ":transport", name)
+            player.no_wire(mark, ":entry", "hr")
+    return f"{theme}: Home LEFT/RIGHT/PLAY transport PASS"
+
+
+def run_mode_handshake(binary, output, resources):
+    directory = output / "mode"
+    disk = prepare_disk(directory, binary.parent, resources, "fruit-company")
+    with Player(binary, directory, disk) as player:
+        player.respond = False
+        player.expect(lambda: ["tc", "2"] in player.messages, "initial handshake", timeout=10)
+        player.send("HR\t1\tFixture")
+        player.send("M\therdr")
+        player.send("W\t1\nw1\t-\t0\t0\t0\t1\tHerd workspace")
+        player.expect(lambda: player.state and player.state.label == "Herd workspace",
+                      "explicit herdr snapshot")
+        player.chord("wps")
+        mark = len(player.messages)
+        player.chord("agents")
+        player.expect_wire(mark, "tc", "1")
+        handshake = player.messages.index(["hr", "1"], mark)
+        assert player.messages[handshake + 1] == ["tc", "1"], player.messages[mark:]
+        assert not any("Herd workspace" in fields for fields in player.messages[mark:])
+        player.send("HR\t1\tFixture")
+        player.send("M\tt3")
+        player.expect(lambda: player.state.issue == "Connecting to T3…" and
+                      player.state.label == "Usage", "T3 connecting without stale herdr rows")
+        player.send("W\t0")
+        player.expect(lambda: not player.state.issue and player.state.label == "Usage",
+                      "empty explicit T3 snapshot")
+        player.send(PROJECTS)
+        player.expect(lambda: player.state.label == "Fixture project", "late T3 snapshot")
+        player.send("M\therdr")
+        player.send("W\t1\nw1\t-\t0\t0\t0\t1\tHerd workspace")
+        player.expect(lambda: player.state.label == "Herd workspace",
+                      "live mode change back to herdr")
+    return "Explicit mode, empty T3 snapshot, resident reattach and live source change PASS"
+
+
+def agents_frames(binary, output, resources, theme):
+    directory = output / theme
+    disk = prepare_disk(directory, binary.parent, resources, theme)
+    config = disk / ".rockbox/config.cfg"
+    config.write_text(config.read_text().replace("animations: off", "animations: on"))
+    path = directory / "frames.bin"
+    frames = {}
+    with path.open("w+b") as file:
+        file.truncate(STATE)
+        with mmap.mmap(file.fileno(), STATE, access=mmap.ACCESS_READ) as state, \
+                Player(binary, directory, disk, path) as player:
+            def capture(view):
+                player.expect_view(view)
+                player.wait(.6)
+                _, sequence, _ = HEADER.unpack_from(state)
+                start = HEADER.size + ((sequence - 1) % RING) * (WORD.size + PIXELS)
+                assert sequence and WORD.unpack_from(state, start)[0] == sequence
+                raw = bytes(state[start + WORD.size:start + WORD.size + PIXELS])
+                assert WORD.unpack_from(state, start)[0] == sequence
+                # The clock belongs to the simulator's host. Compare the app
+                # viewport including the Agents status-bar title.
+                frame = Image.frombytes("RGB", (320, 240), raw)
+                frame.paste((0, 0, 0), (255, 0, 320, 20))
+                frame.save(directory / f"{view}.png")
+                frames[view] = frame.tobytes()
+
+            player.expect(lambda: player.state and player.state.label == "Fixture project",
+                          "opening projects", timeout=10)
+            player.tick = "T\t0\t1\t1"
+            player.send("S\t1\nt3p1\ti\t-")
+            capture("projects")
+            player.tap("back")
+            capture("usage")
+            player.tap("right")
+            player.choose("Fixture project", direction="up")
+            player.expect_view("threads")
+            player.send("A\tt3p1\t1\n" + THREAD.replace("\tw\t0\t", "\ti\t0\t"))
+            capture("threads")
+            player.send("A\tt3p1\t1\n" + THREAD)
+            player.wait(.18)
+            player.choose("Fixture thread")
+            capture("detail")
+            player.tap("select")
+            capture("actions")
+            player.choose("Interrupt turn")
+            capture("confirm")
+    return frames
+
+
+def compare_agents_motion(binary, output, resources):
+    fruit = agents_frames(binary, output, resources, "fruit-company")
+    ultra = agents_frames(binary, output, resources, "fruit-company-ultra")
+    for view in fruit:
+        assert fruit[view] == ultra[view], (view, output)
+    return "Fruit Company and Ultra: six Agents view frames match pixel for pixel"
 
 
 def run_outage(binary, output, resources):
@@ -639,6 +677,8 @@ def main():
     parser.add_argument("--simulator", type=Path, help="reuse an instrumented binary from a previous run")
     parser.add_argument("--theme", choices=THEMES, action="append")
     parser.add_argument("--outage", action="store_true")
+    parser.add_argument("--mode", action="store_true")
+    parser.add_argument("--compare-motion", action="store_true")
     parser.add_argument("--wps-badge", action="store_true")
     args = parser.parse_args()
     args.output = args.output.resolve()
@@ -647,9 +687,17 @@ def main():
     if args.outage:
         print(run_outage(binary, args.output, args.resources.resolve()), flush=True)
         return
+    if args.mode:
+        print(run_mode_handshake(binary, args.output, args.resources.resolve()), flush=True)
+        return
+    if args.compare_motion:
+        print(compare_agents_motion(binary, args.output, args.resources.resolve()), flush=True)
+        return
     run = run_wps_badge if args.wps_badge else run_theme
     for theme in args.theme or THEMES:
         print(run(binary, args.output, args.resources.resolve(), theme), flush=True)
+        if run == run_theme and theme.startswith("fruit-company"):
+            print(run_navigation(binary, args.output, args.resources.resolve(), theme), flush=True)
 
 
 if __name__ == "__main__":

@@ -776,7 +776,7 @@ int fruit_about_screen(void)
         if (frame < TURN_FRAMES)
             timeout = MAX(0, turn_tick(start, frame + 1) - current_tick);
         int action = get_custom_action(
-            CONTEXT_PLUGIN | CONTEXT_LOCAL_LEFT_RIGHT, timeout, about_keymap);
+            CONTEXT_PLUGIN, timeout, about_keymap);
         if (action == ACTION_STD_CANCEL)
             break;
 

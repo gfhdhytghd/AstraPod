@@ -1058,6 +1058,7 @@ bool book_shelf_pick_mark(const char *book, bool *to_root)
             return false;
 
         simplelist_info_init(&info, str(LANG_BOOKMARK_MENU), shown_ct, NULL);
+        info.fruit_nav = true;
         info.get_name = marks_get_name;
         info.action_callback = marks_action_cb;
         info.selection = MIN(selection, shown_ct - 1);
@@ -1515,6 +1516,7 @@ int book_shelf_run(void)
 
         simplelist_info_init(&info, str(shelf_title(shelf_kind)), row_ct,
                              NULL);
+        info.fruit_nav = true;
         info.get_name = shelf_get_name;
         info.get_kind = shelf_get_kind;
         info.get_range = shelf_get_range;

@@ -618,6 +618,7 @@ static bool book_info(int b)
              names + e->path);
 
     simplelist_info_init(&info, str(LANG_BOOK_INFO), n, NULL);
+    info.fruit_nav = true;
     info.get_name = info_name;
     return !simplelist_show_list(&info);
 }
@@ -749,6 +750,7 @@ static int show(char *path, size_t size, int *selection, int *list)
         }
         simplelist_info_init(&info, (char *)list_title(),
                              top_rows() + row_ct, NULL);
+        info.fruit_nav = true;
         info.get_name = get_name;
         info.get_kind = get_kind;
         info.get_range = get_range;

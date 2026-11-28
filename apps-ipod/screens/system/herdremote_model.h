@@ -131,7 +131,15 @@ struct hr_event {
     char project_label[41], thread_title[61], summary[91];
 };
 
+enum hr_mode {
+    HR_MODE_UNKNOWN,
+    HR_MODE_HERDR,
+    HR_MODE_T3,
+};
+
 struct hr_model {
+    enum hr_mode mode;
+    bool workspaces_seen;
     bool hello;             /* the daemon has introduced itself */
     bool tick_seen;         /* at least one heartbeat from this session */
     bool herdr_ok;
@@ -144,6 +152,7 @@ struct hr_model {
      * only moved the computer's focus, or an S that repeats the last,
      * leaves it false */
     bool ws_shown_changed;
+    bool ws_layout_changed; /* W added, moved or renamed a row */
     char agents_ws[16];     /* the workspace agents[] belongs to */
     bool agents_valid;
     int nagents;
@@ -175,7 +184,7 @@ struct hr_model {
 };
 
 /* Apply one message. Returns its type letter ('W', 'S', 'A', 'Q', 'X', 'R',
- * 'T', 'U', 'V', 'D', 'K', 'E', 'H' for the hello, 'B' for the seven-field T
+ * 'T', 'U', 'V', 'D', 'K', 'E', 'M', 'H' for the hello, 'B' for the seven-field T
  * that lists tabs), or 0 if it was not a HerdRemote v1 message, in which
  * case the model is unchanged. */
 int hr_detail_scroll(int position, int old_max, int new_max);

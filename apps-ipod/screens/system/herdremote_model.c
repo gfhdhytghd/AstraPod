@@ -95,7 +95,7 @@ static int apply_workspaces(struct hr_model *m, const char *count_text,
 {
     char *f[HR_MAX_FIELDS], *record;
     int n = 0;
-    bool same = true;
+    bool same = true, same_layout = true;
     int t3_start = -1;
     while ((record = next_record(cursor)) && n < HR_MAX_WS)
     {
@@ -117,15 +117,16 @@ static int apply_workspaces(struct hr_model *m, const char *count_text,
         w->done = number(f[4]);
         w->idle = number(f[5]);
         hr_copy(w->label, f[6], sizeof w->label);
-        const struct hr_workspace *old = find_ws(m, w->id);
+        const struct hr_workspace *old = n <= m->nws &&
+            !strcmp(m->ws[n - 1].id, w->id) ? &m->ws[n - 1] : find_ws(m, w->id);
+        if (old != &m->ws[n - 1] || strcmp(old->label, w->label))
+            same_layout = false;
         if (old && old->working == w->working &&
             old->waiting == w->waiting && old->done == w->done &&
             old->idle == w->idle)
         {
             w->tab1 = old->tab1;
             w->other = old->other;
-            if (old != &m->ws[n - 1] || strcmp(old->label, w->label))
-                same = false;
         }
         else
         {
@@ -143,9 +144,11 @@ static int apply_workspaces(struct hr_model *m, const char *count_text,
             declared != n)
             return 0;
     }
-    m->ws_shown_changed = !same || n != m->nws;
+    m->ws_layout_changed = !same_layout || n != m->nws;
+    m->ws_shown_changed = !same || m->ws_layout_changed;
     memcpy(m->ws, new_ws, n * sizeof new_ws[0]);
     m->nws = n;
+    m->workspaces_seen = true;
     return 'W';
 }
 
@@ -172,15 +175,26 @@ static int apply_status(struct hr_model *m, char **cursor)
     }
     m->ws_shown_changed = false;
     for (int i = 0; i < n; i++)
-        for (int j = 0; j < m->nws; j++)
-            if (!strcmp(m->ws[j].id, new_ws[i].id))
-            {
-                if (m->ws[j].tab1 != new_ws[i].tab1 ||
-                    m->ws[j].other != new_ws[i].other)
-                    m->ws_shown_changed = true;
-                m->ws[j].tab1 = new_ws[i].tab1;
-                m->ws[j].other = new_ws[i].other;
-            }
+    {
+        struct hr_workspace *w = i < m->nws &&
+            !strcmp(m->ws[i].id, new_ws[i].id) ? &m->ws[i] : NULL;
+        if (!w)
+        {
+            for (int j = 0; j < m->nws; j++)
+                if (!strcmp(m->ws[j].id, new_ws[i].id))
+                {
+                    w = &m->ws[j];
+                    break;
+                }
+        }
+        if (w)
+        {
+            m->ws_shown_changed |= w->tab1 != new_ws[i].tab1 ||
+                                   w->other != new_ws[i].other;
+            w->tab1 = new_ws[i].tab1;
+            w->other = new_ws[i].other;
+        }
+    }
     return 'S';
 }
 
@@ -635,6 +649,21 @@ int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
             return 0;
         m->hello = true;
         return 'H';
+    }
+    if (!strcmp(type, "M") && n == 2 && (!cursor || !*cursor))
+    {
+        enum hr_mode mode = !strcmp(f[1], "t3") ? HR_MODE_T3 :
+                            !strcmp(f[1], "herdr") ? HR_MODE_HERDR : HR_MODE_UNKNOWN;
+        if (mode == HR_MODE_UNKNOWN)
+            return 0;
+        if (mode != m->mode)
+        {
+            bool hello = m->hello;
+            hr_model_reset(m);
+            m->hello = hello;
+            m->mode = mode;
+        }
+        return 'M';
     }
     if (!strcmp(type, "W") && n == 2)
         return apply_workspaces(m, f[1], &cursor);

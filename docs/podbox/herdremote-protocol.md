@@ -26,8 +26,9 @@ carries it back.
 ## Session
 
 1. The player opens a PodLink session and sends `hr`.
-2. The computer sends `HR` and then everything the screen lacks: `W` and
-   `S`, every current `Q`, and `T`.
+2. The computer sends `HR` and `M`. In T3 mode, it waits for `tc<TAB>1`
+   before sending the Agents snapshot. The snapshot contains `W`, `S`,
+   every current `Q`, and `T`.
 3. From then on the computer sends only changes, plus `T` every 2 seconds.
 4. When the player sends `hr` again (it reopened the screen), the computer
    forgets what it sent and starts again at step 2.
@@ -45,6 +46,18 @@ HR <version> <program>
 
 `version` is `1`. A player that does not know the version ignores
 everything else.
+
+### `M` — Agents mode
+
+```text
+M<TAB>herdr
+M<TAB>t3
+```
+
+The computer sends its configured `AGENT_CONTROL` mode at link open, in
+response to each `hr`, and on a live mode change. A mode change clears
+the player's previous workspace, tab, detail and question data. The
+player uses this record for the page mode, including an empty snapshot.
 
 ### `W` — workspaces
 
@@ -1133,9 +1146,10 @@ In `t3` mode, a capable player receives only T3 records. A nonempty T3
 `W` starts with the two-field section record `#<TAB>T3` immediately
 before the first project. The count includes up to 32 projects and
 excludes the section record. `S` covers the same project IDs. A client
-without `tc` receives an empty Agents picture in `t3` mode.
-A live settings reload withdraws the previous source's questions with `X`
-and publishes the selected source without reopening PodLink.
+without `tc` receives no Agents snapshot in `t3` mode. After one second
+the daemon logs that T3 needs newer firmware. A late `tc` still starts
+the snapshot. A live settings reload announces `M` and publishes the
+selected source without reopening PodLink.
 
 Project IDs are `t3p<n>` and thread IDs are `t3t<n>`. Both are stable for
 the daemon's lifetime. Send `sub <project> active` or `sub <project> all`.

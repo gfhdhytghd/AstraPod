@@ -9,12 +9,16 @@
 #include "usb_core.h"
 #include "button.h"
 #include "audio.h"
+#include "input/action.h"
+#include "ui/perf.h"
 #include "metadata.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+
+void t3_test_observe(const char *state);
 
 static int wire = -1;
 static bool foreground;
@@ -31,7 +35,8 @@ int t3_test_start(void)
     assert(playlist_insert_track(NULL, "/one.wav", PLAYLIST_INSERT_LAST, false, true) >= 0);
     assert(playlist_insert_track(NULL, "/two.wav", PLAYLIST_INSERT_LAST, false, true) >= 0);
     playlist_start(0, 0, 0);
-    return GO_TO_AGENTS;
+    const char *start = getenv("T3_TEST_START");
+    return start && !strcmp(start, "menu") ? GO_TO_ROOT : GO_TO_AGENTS;
 }
 
 bool podlink_host_connected(void) { return wire >= 0 && connected; }
@@ -69,10 +74,19 @@ int podlink_poll(struct podlink_message *m)
     int size = recv(wire, text, sizeof text, MSG_DONTWAIT);
     if (size <= 0)
         return 0;
+    static unsigned perf;
+    if (size > 2 && size < 32 && text[0] == '!' && text[1] == 'p')
+    {
+        text[size] = '\0';
+        perf = ui_perf_begin((const char *)text + 2);
+        t3_test_observe(perf ? "perf\tstarted" : "perf\tunavailable");
+        return 0;
+    }
     if (size == 2 && text[0] == '!')
     {
         switch (text[1])
         {
+            case 'q': ui_perf_end(perf); perf = 0; break;
             case 'b': busy = true; break;
             case 'd': connected = false; generation++; break;
             case 'r': connected = true; busy = false; generation++; break;
@@ -140,6 +154,16 @@ void t3_test_media(long action)
 
 void usb_core_control_response(enum usb_control_response response, const void *data, size_t size)
 { (void)response; (void)data; (void)size; }
+
+void t3_test_transport(int action)
+{
+    switch (action)
+    {
+        case ACTION_WPS_SKIPPREV: t3_test_observe("transport\tprev"); break;
+        case ACTION_WPS_SKIPNEXT: t3_test_observe("transport\tnext"); break;
+        case ACTION_WPS_PLAY: t3_test_observe("transport\tplay"); break;
+    }
+}
 
 void t3_test_seek(long time)
 {

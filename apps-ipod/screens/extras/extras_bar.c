@@ -211,7 +211,7 @@ void extras_bar_release(void)
     title_font = -1;
 }
 
-/* Pure wheel + SELECT + MENU map; LEFT/RIGHT/PLAY are playback controls. */
+/* Common Extras controls. Stopwatch handles PLAY in its own event loop. */
 static const struct button_mapping extras_nav_map[] = {
     { ACTION_STD_PREV,       BUTTON_SCROLL_BACK,                BUTTON_NONE },
     { ACTION_STD_PREVREPEAT, BUTTON_SCROLL_BACK|BUTTON_REPEAT,  BUTTON_NONE },
@@ -222,9 +222,7 @@ static const struct button_mapping extras_nav_map[] = {
     { ACTION_NONE,           BUTTON_SELECT|BUTTON_REPEAT,       BUTTON_NONE },
     { ACTION_STD_CANCEL,     BUTTON_MENU|BUTTON_REL,            BUTTON_MENU },
     { ACTION_NONE,           BUTTON_MENU|BUTTON_REPEAT,         BUTTON_NONE },
-    { ACTION_WPS_SKIPPREV,   BUTTON_LEFT|BUTTON_REL,            BUTTON_LEFT },
     { ACTION_NONE,           BUTTON_LEFT|BUTTON_REPEAT,         BUTTON_NONE },
-    { ACTION_WPS_SKIPNEXT,   BUTTON_RIGHT|BUTTON_REL,           BUTTON_RIGHT },
     { ACTION_NONE,           BUTTON_RIGHT|BUTTON_REPEAT,        BUTTON_NONE },
     { ACTION_WPS_PLAY,       BUTTON_PLAY|BUTTON_REL,            BUTTON_PLAY },
     { ACTION_NONE,           BUTTON_PLAY|BUTTON_REPEAT,         BUTTON_NONE },
@@ -264,28 +262,12 @@ static const struct button_mapping *get_extras_locked_map(int context)
     return extras_locked_map;
 }
 
-int extras_get_action(int timeout, bool play_is_playback)
+int extras_get_action(int timeout, bool local_play)
 {
     int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_CUSTOM, timeout,
                                    get_extras_nav_map);
-    if (action == ACTION_WPS_SKIPPREV)
-    {
-        if (audio_status() & AUDIO_STATUS_PLAY)
-            wps_lyrics_skip(-1);
+    if (action == ACTION_WPS_PLAY && !local_play)
         return ACTION_NONE;
-    }
-    if (action == ACTION_WPS_SKIPNEXT)
-    {
-        if (audio_status() & AUDIO_STATUS_PLAY)
-            wps_lyrics_skip(1);
-        return ACTION_NONE;
-    }
-    if (action == ACTION_WPS_PLAY && play_is_playback)
-    {
-        if (audio_status() & AUDIO_STATUS_PLAY)
-            wps_do_playpause(false);
-        return ACTION_NONE;
-    }
     return action;
 }
 
@@ -301,7 +283,7 @@ bool extras_list_do_action(int timeout, struct gui_synclist *lists,
     timeout = list_do_action_timeout(lists, timeout);
     bool inhibited = ui_flush_inhibited();
     ui_inhibit_flush(true);
-    *action = extras_get_action(timeout, true);
+    *action = extras_get_action(timeout, false);
     ui_inhibit_flush(inhibited);
     bool handled = gui_synclist_do_button(lists, action);
     if (!inhibited)

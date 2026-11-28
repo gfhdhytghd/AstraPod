@@ -1083,7 +1083,9 @@ bool simplelist_show_list(struct simplelist_info *info)
         gui_synclist_speak_item(&lists);
 
     int context = info->page_with_left_right
-        ? CONTEXT_PAGED_LIST | CONTEXT_LOCAL_LEFT_RIGHT : CONTEXT_TREE;
+        ? CONTEXT_PAGED_LIST : CONTEXT_TREE;
+    if (info->fruit_nav && !info->page_with_left_right)
+        context |= CONTEXT_FRUIT_NAV;
     while(1)
     {
         list_do_action(context, info->timeout, &lists, &action);
@@ -1178,6 +1180,7 @@ void simplelist_info_init(struct simplelist_info *info, char* title,
     info->hide_theme = false;
     info->speak_onshow = true;
     info->page_with_left_right = false;
+    info->fruit_nav = false;
     info->wps_on_play = false;
     info->timeout = HZ/10;
     info->selection = 0;

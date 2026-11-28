@@ -1293,7 +1293,7 @@ static int page_show(struct vcard_contact *vc, struct page *p)
             ui_page_draw(&page);
             dirty = false;
         }
-        int action = extras_get_action(TIMEOUT_BLOCK, true);
+        int action = extras_get_action(TIMEOUT_BLOCK, false);
         int to = p->scroll;
         if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
             to = MIN(p->scroll + PG_PITCH, p->scroll_max);

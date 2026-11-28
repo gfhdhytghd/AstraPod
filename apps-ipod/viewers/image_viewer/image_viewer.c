@@ -597,7 +597,7 @@ static int iv_get_button(int timeout)
     while (true)
     {
         int wait = ui_scene_poll(timeout);
-        int button = action_get_raw_button(CONTEXT_LOCAL_LEFT_RIGHT, wait);
+        int button = agents_shortcut_get_button(wait);
         if (button != BUTTON_NONE || wait == timeout)
             return button;
         if (timeout > 0)

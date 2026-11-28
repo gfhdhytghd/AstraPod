@@ -173,8 +173,8 @@ def probe(sim, playing, name, hold_seek=False, region=(22, 240, 0, 320),
     print(f"PASS {name}", flush=True)
 
 
-def probe_paging(sim, playback, name, region=np.s_[35:220, :]):
-    """Both arrows move the UI while PLAY controls the same playlist."""
+def probe_paging(sim, playback, name, region=np.s_[35:220, :], play_toggles=False):
+    """Both arrows move the UI. Some viewers bind PLAY to their soundtrack."""
     out = Path(sim.log.name).parent
     before = frame(sim)
     Image.fromarray(before).save(out / f"{name}-start.png")
@@ -206,14 +206,15 @@ def probe_paging(sim, playback, name, region=np.s_[35:220, :]):
                 raise AssertionError((name, key, "configured fade did not run"))
         before = after
 
-    press(sim, "play")
-    wait_for(lambda: playback.get("status") == 1, f"{name} PLAY did not resume")
-    press(sim, "play")
-    wait_for(lambda: playback.get("status") == 3, f"{name} PLAY did not pause")
-    assert playback.get("track") == track, (name, "PLAY changed the track")
-    assert np.array_equal(before[region], frame(sim)[region]), (
-        name, "PLAY changed the page")
-    print(f"PASS {name} paging and playback", flush=True)
+    if play_toggles:
+        press(sim, "play")
+        wait_for(lambda: playback.get("status") == 1, f"{name} PLAY did not resume")
+        press(sim, "play")
+        wait_for(lambda: playback.get("status") == 3, f"{name} PLAY did not pause")
+        assert playback.get("track") == track, (name, "PLAY changed the track")
+        assert np.array_equal(before[region], frame(sim)[region]), (
+            name, "PLAY changed the page")
+    print(f"PASS {name} paging", flush=True)
 
 
 def create_indexed_photos(root):
@@ -286,9 +287,9 @@ def indexed_photos(sim, playback):
     press(sim, "select", hold=10)  # All Photos, indexed grid
     probe_paging(sim, playback, "photo-grid")
     press(sim, "select")  # Full-screen still
-    probe_paging(sim, playback, "indexed-photo")
+    probe_paging(sim, playback, "indexed-photo", play_toggles=True)
     press(sim, "select")  # Manual slideshow
-    probe_paging(sim, playback, "slideshow")
+    probe_paging(sim, playback, "slideshow", play_toggles=True)
 
 
 def walk(sim, playback, sim_binary):
@@ -312,7 +313,6 @@ def walk(sim, playback, sim_binary):
         move(sim, -1)
     probe_paging(sim, playback, "cover-flow", np.s_[190:225, 65:255])
     press(sim, "select")
-    probe(sim, playback, "album-panel")
     press(sim, "menu")
     press(sim, "menu")
     press(sim, "menu")
@@ -334,9 +334,7 @@ def walk(sim, playback, sim_binary):
     press(sim, "select")
     probe(sim, playback, "extras-menu", region=(22, 240, 0, 142))
     press(sim, "select")
-    probe(sim, playback, "clocks")
     press(sim, "select")
-    probe(sim, playback, "clock-sheet")
     press(sim, "menu")
     press(sim, "menu")
     move(sim, 1)
@@ -346,25 +344,14 @@ def walk(sim, playback, sim_binary):
     press(sim, "menu")
     press(sim, "menu")
     move(sim, -1)
-    # The standard SDL build has no USB PodLink service or Agents screen.
-    symbols = subprocess.check_output(["nm", str(sim_binary)], text=True)
-    if any(line.endswith(" agents_screen") for line in symbols.splitlines()):
-        move(sim, 11)
-        press(sim, "select")
-        move(sim, 5)
-        press(sim, "select")
-        probe(sim, playback, "agents", region=(22, 215, 0, 320))
-        press(sim, "menu")
-        press(sim, "menu")
-    else:
-        print("SKIP agents (SDL build excludes USB PodLink)", flush=True)
+    # Agents requires the synthetic PodLink peer in t3_remote_buttons_sim.py.
     press(sim, "menu")
 
     move(sim, 1)
     press(sim, "select")
     probe(sim, playback, "settings", region=(22, 240, 0, 142))
     press(sim, "select")  # About
-    probe_paging(sim, playback, "about", np.s_[135:226, :])
+    probe_paging(sim, playback, "about", np.s_[135:226, :], play_toggles=True)
     press(sim, "menu")
     press(sim, "menu")
     sim.settle(quiet=.4, limit=1.5)

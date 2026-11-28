@@ -1381,11 +1381,11 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
         if (viewer.fruit_saved)
         {
             int timeout = list_do_action_timeout(&playlist_lists, HZ / 2);
-            button = fruit_list_action(get_action(CONTEXT_TREE, timeout), NULL);
+            button = fruit_list_action(get_action(CONTEXT_TREE | CONTEXT_FRUIT_NAV, timeout), NULL);
             res = gui_synclist_do_button(&playlist_lists, &button);
         }
         else
-            res = list_do_action(list_select_context(CONTEXT_TREE), HZ/2,
+            res = list_do_action(list_select_context(CONTEXT_TREE | CONTEXT_FRUIT_NAV), HZ/2,
                                  &playlist_lists, &button);
         /* during moving, another redraw is going to be needed,
          * since viewer.selected_track is updated too late (after the first draw)
@@ -1745,7 +1745,7 @@ bool search_playlist(void)
     gui_synclist_speak_item(&playlist_lists);
     while (!exit)
     {
-        if (list_do_action(CONTEXT_LIST, HZ/4, &playlist_lists, &button))
+        if (list_do_action(CONTEXT_LIST | CONTEXT_FRUIT_NAV, HZ/4, &playlist_lists, &button))
             continue;
         switch (button)
         {

@@ -631,7 +631,7 @@ bool option_screen(const struct settings_list *setting,
             lists.wraparound = false;
 
         /* HZ so the status bar redraws */
-        bool handled = list_do_action(CONTEXT_LIST, ui_scene_timeout(&modal, HZ), &lists, &action);
+        bool handled = list_do_action(CONTEXT_LIST | CONTEXT_FRUIT_NAV, ui_scene_timeout(&modal, HZ), &lists, &action);
         ui_scene_update(&modal, handled);
         if (handled
             && (action == ACTION_LIST_VOLUP || action == ACTION_LIST_VOLDOWN))

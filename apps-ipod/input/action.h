@@ -23,9 +23,8 @@
 #define CONTEXT_CUSTOM  0x40000000 /* | this against anything to get your context number */
 #define CONTEXT_CUSTOM2 0x20000000 /* as above */
 #define CONTEXT_PLUGIN  0x10000000 /* for plugins using get_custom_action */
-/* Let the screen's keymap handle LEFT/RIGHT under wheel navigation.
- * PLAY still goes through global transport. */
-#define CONTEXT_LOCAL_LEFT_RIGHT 0x01000000
+/* Physical LEFT/RIGHT/PLAY are transport keys on Fruit navigation pages. */
+#define CONTEXT_FRUIT_NAV 0x01000000
 
 #define CONTEXT_WHEEL_DETENTS 0x02000000 /* physical wheel steps for this input context */
 #define CONTEXT_REMAPPED 0x08000000 /* marker for key remap context table */
@@ -383,7 +382,6 @@ bool action_set_menu_back(bool enabled);
 bool action_menu_back(void);
 
 /* Raw UI polling with the same LEFT/RIGHT ownership and global PLAY. */
-int action_get_raw_button(int context, int timeout);
 
 int get_action(int context, int timeout);
 

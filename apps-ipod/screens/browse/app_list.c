@@ -719,7 +719,7 @@ static int show_game_error(const char *heading, const char *body)
     int ret = GO_TO_PREVIOUS;
     while (true)
     {
-        int action = extras_get_action(TIMEOUT_BLOCK, true);
+        int action = extras_get_action(TIMEOUT_BLOCK, false);
         if (action == ACTION_STD_CANCEL || action == ACTION_STD_OK)
             break;
         if (default_event_handler(action) == SYS_USB_CONNECTED)
@@ -769,7 +769,7 @@ static int fruit_games_screen(void)
 
         for (;;)
         {
-            extras_list_do_action(HZ, &list, &action);
+            list_do_action(CONTEXT_LIST | CONTEXT_FRUIT_NAV, HZ, &list, &action);
             if (action == ACTION_STD_OK)
             {
                 selection = gui_synclist_get_sel_pos(&list);
@@ -862,6 +862,7 @@ int app_list_screen(enum app_list_kind kind)
     {
         simplelist_info_init(&info, (char *)str(titles[kind]), rows.count,
                              NULL);
+        info.fruit_nav = true;
         info.get_name = get_name;
         info.get_talk = get_talk;
         info.get_kind = get_kind;

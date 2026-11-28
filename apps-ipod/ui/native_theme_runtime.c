@@ -12,6 +12,9 @@
 #include "lcd.h"
 #include "metadata/album_palette.h"
 #include "settings/settings.h"
+#ifdef HAVE_USB_PODLINK
+#include "screens/system/agents_background.h"
+#endif
 #include "widgets/list.h"
 #include "widgets/yesno.h"
 #include "native_theme_runtime.h"
@@ -278,6 +281,10 @@ unsigned ui_theme_style(enum ui_style_role role)
 
 bool ui_theme_ultra(void)
 {
+#ifdef HAVE_USB_PODLINK
+    if (agents_background_foreground())
+        return false;
+#endif
     return ui_theme_style(UI_STYLE_MOTION) == UI_MOTION_ULTRA &&
            ui_theme_duration(UI_THEME_MOTION_ONE) > 0;
 }
@@ -389,6 +396,7 @@ int ui_theme_choose(void)
     struct simplelist_info info;
     simplelist_info_init(&info, str(LANG_NATIVE_THEME),
                          count + UI_THEME_BUILTIN_COUNT, files);
+    info.fruit_nav = true;
     info.get_name = theme_name;
     if (current_theme > 0)
     {

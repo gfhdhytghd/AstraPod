@@ -345,6 +345,7 @@ static int show_tracks(struct videos *v, char *title)
         return 0;
     struct simplelist_info info;
     simplelist_info_init(&info, title, v->row_count + v->loose, v);
+    info.fruit_nav = true;
     info.get_name = video_title;
     info.action_callback = stock_media_list_action;
     info.get_icon = video_icon;
@@ -404,6 +405,7 @@ static int show_playlists(struct videos *v, char *title)
 {
     struct simplelist_info info;
     simplelist_info_init(&info, title, v->playlist_count, v);
+    info.fruit_nav = true;
     info.get_name = playlist_title;
     info.get_kind = video_folder_kind;
     info.action_callback = stock_media_list_action;
@@ -521,6 +523,7 @@ static int show_groups(struct videos *v, char *title, bool television)
 
     struct simplelist_info info;
     simplelist_info_init(&info, title, ngroups + groups.all, &groups);
+    info.fruit_nav = true;
     info.get_name = group_title;
     info.get_kind = video_folder_kind;
     info.action_callback = stock_media_list_action;

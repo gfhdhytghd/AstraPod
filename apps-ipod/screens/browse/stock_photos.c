@@ -475,7 +475,7 @@ static bool photo_view(const struct albums *a, int *sel)
     for (;;)
     {
         int action = get_custom_action(
-            CONTEXT_PLUGIN | CONTEXT_LOCAL_LEFT_RIGHT,
+            CONTEXT_PLUGIN,
             playing && interval ? MAX(1, due - current_tick) : TIMEOUT_BLOCK,
             photo_view_keys);
         int step = 0;
@@ -565,7 +565,7 @@ static bool photo_grid(const struct albums *a, const char *title)
         draw_grid(a, title, sel);
     while (a->slide_count)
     {
-        int action = get_action(CONTEXT_PAGED_LIST | CONTEXT_LOCAL_LEFT_RIGHT,
+        int action = get_action(CONTEXT_PAGED_LIST,
                                 TIMEOUT_BLOCK);
         int button;
         get_action_statuscode(&button);
@@ -641,6 +641,7 @@ int stock_photos_screen(void)
     struct simplelist_info info;
     simplelist_info_init(&info, str(LANG_FRUIT_PHOTOS),
                          a.indexed ? a.album_count + 2 : 2, &a);
+    info.fruit_nav = true;
     info.get_name = album_name;
     info.action_callback = stock_media_list_action;
     while (true)
@@ -783,6 +784,7 @@ static bool media_picker(const struct settings_list *setting)
     struct ui_scene scene = {0};
     ui_scene_open_page(&scene, "media-choices-push");
     simplelist_info_init(&info, title, count, (void *)choices);
+    info.fruit_nav = true;
     info.get_name = choice_name;
     info.action_callback = stock_media_list_action;
     for (int i = 0; i < count; i++)
@@ -801,6 +803,7 @@ static int media_settings(const struct media_option *options, int count)
     struct ui_scene scene = {0};
     ui_scene_open_page(&scene, "media-settings-push");
     simplelist_info_init(&info, str(LANG_SETTINGS), count, (void *)options);
+    info.fruit_nav = true;
     info.get_name = setting_name;
     info.get_kind = setting_kind;
     info.get_value = setting_value;

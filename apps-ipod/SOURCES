@@ -225,9 +225,13 @@ screens/extras/calendar_ics.c
 screens/extras/extras_clock.c
 screens/extras/extras_contacts.c
 screens/extras/extras_font.c
+screens/extras/extras_ical.c
 screens/extras/extras_notes.c
+screens/extras/extras_picker.c
 screens/extras/extras_screen_lock.c
 screens/extras/extras_stopwatch.c
+screens/extras/extras_store.c
+screens/extras/extras_vcard.c
 screens/context_menu.c
 screens/system/about.c
 screens/system/fruit_about.c

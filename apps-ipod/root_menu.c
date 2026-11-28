@@ -86,6 +86,9 @@
 #include "sound.h"
 #include "screens/fruit_menu.h"
 #include "ui/native_theme_runtime.h"
+#include "screens/extras/extras.h"
+#include "screens/extras/extras_calendars.h"
+#include "ui/menu_pane.h"
 #ifdef USB_ENABLE_AUDIO
 #include "usbstack/usb_audio.h"
 #endif
@@ -1092,6 +1095,20 @@ static int videos_scrn(void* param)
     return browser_flat(FLAT_VIDEOS);
 }
 
+static int calendars_scrn(void *param)
+{
+    (void)param;
+    int r = extras_calendars();
+    return r ? r : GO_TO_PREVIOUS;
+}
+
+static int contacts_scrn(void *param)
+{
+    (void)param;
+    int r = extras_contacts();
+    return r ? r : GO_TO_PREVIOUS;
+}
+
 static int books_scrn(void* param)
 {
     (void)param;
@@ -1300,6 +1317,8 @@ static const struct root_items items[] = {
     [GO_TO_DOCUMENTS] = { documents_scrn, NULL, &text_viewer_menu },
     [GO_TO_IMAGES] = { images_scrn, NULL, NULL },
     [GO_TO_VIDEOS] = { videos_scrn, NULL, NULL },
+    [GO_TO_CALENDARS] = { calendars_scrn, NULL, NULL },
+    [GO_TO_CONTACTS] = { contacts_scrn, NULL, NULL },
     [GO_TO_BOOKS] = { books_scrn, NULL, &text_viewer_menu },
     [GO_TO_PODCASTS] = { browser, (void*)GO_TO_PODCASTS, &tagcache_menu },
     [GO_TO_LIBRARY_ROW] = { browser, (void*)GO_TO_LIBRARY_ROW, &tagcache_menu },
@@ -1370,6 +1389,10 @@ MENUITEM_RETURNVALUE(images_item, ID2P(LANG_IMAGES), GO_TO_IMAGES,
 MENUITEM_RETURNVALUE(videos_item, ID2P(LANG_VIDEOS), GO_TO_VIDEOS,
                         NULL, Icon_Font);
 #endif
+MENUITEM_RETURNVALUE(calendars_item, ID2P(LANG_FRUIT_CALENDARS),
+                        GO_TO_CALENDARS, NULL, Icon_Font);
+MENUITEM_RETURNVALUE(contacts_item, ID2P(LANG_FRUIT_CONTACTS),
+                        GO_TO_CONTACTS, NULL, Icon_Font);
 MENUITEM_RETURNVALUE(books_item, ID2P(LANG_EBOOKS), GO_TO_BOOKS,
                         NULL, Icon_Font);
 MENUITEM_RETURNVALUE(spun_item, ID2P(LANG_SPUN), GO_TO_SPUN,
@@ -1503,6 +1526,8 @@ static struct menu_table menu_table[] = {
 #ifdef HAVE_VIDEO_PLAYER
     { "videos", &videos_item },
 #endif
+    { "calendars", &calendars_item },
+    { "contacts", &contacts_item },
     { "books", &books_item },
     { "spun", &spun_item },
     { "podcasts", &podcasts_item },
@@ -1582,6 +1607,7 @@ static void root_menu_apply_canonical_order(void)
 #ifdef HAVE_VIDEO_PLAYER
         &videos_item,
 #endif
+        &calendars_item, &contacts_item,
         &shortcut_menu, &quiz_item,
 #ifdef ASTRAPOD_ROCK_COMPAT
         &plugins_item,
@@ -1714,6 +1740,8 @@ static const struct {
 #ifdef HAVE_VIDEO_PLAYER
     { &videos_item,       { &images_item, &books_item, &file_browser } },
 #endif
+    { &calendars_item,    { &images_item, &books_item, &file_browser } },
+    { &contacts_item,     { &calendars_item, &images_item, &file_browser } },
     { &random_album_item, { &db_browser, NULL } },
     { &db_search_item,    { &db_browser, NULL } },
     { &current_playlist,  { &playlists, NULL } },
@@ -1740,6 +1768,8 @@ static bool root_menu_new_on(const struct menu_item_ex *item)
     if (item == &videos_item)
         return true;
 #endif
+    if (item == &calendars_item || item == &contacts_item)
+        return true;
     (void)item;
     return false;
 }
@@ -1982,6 +2012,16 @@ enum list_pane_kind root_menu_item_pane(const struct menu_item_ex *item,
             break;
         case GO_TO_VIDEOS:
             *art = STOCK_ART_NO_CONTENT_MOVIES_PREVIEW;
+            break;
+        case GO_TO_CALENDARS:
+        {
+            struct menu_pane_content pane;
+            extras_calendars_pane(&pane);
+            menu_pane_set_picture(&pane);
+            return LIST_PANE_PICTURE;
+        }
+        case GO_TO_CONTACTS:
+            *art = STOCK_ART_ADDRESSVIEWER_PREVIEW;
             break;
         case GO_TO_PODCASTS:
             *art = STOCK_ART_NO_CONTENT_PODCAST_PREVIEW;

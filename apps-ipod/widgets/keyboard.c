@@ -259,7 +259,7 @@ static int kbd_on_action(struct dialog *d, int action, void *data)
 
 /* Click-wheel single-line text editor. Returns 0 on accept (buffer updated),
  * -1 on cancel or USB (buffer left unchanged). */
-static int dialog_input_mode(char* text, int buflen, bool trim)
+static int dialog_input_mode(char* text, int buflen, bool trim, bool extended)
 {
     static const struct dialog_callbacks cb = {
         .measure   = kbd_measure,
@@ -278,7 +278,10 @@ static int dialog_input_mode(char* text, int buflen, bool trim)
         .btn_font = dialog_is_classic()
                   ? ui_theme_current_font_load(UI_FONT_LIST_VALUE, 32) : -1,
     };
-    edit_line_init(&state->ed, text, buflen - 1);
+    if (extended)
+        edit_line_init_extended(&state->ed, text, buflen - 1);
+    else
+        edit_line_init(&state->ed, text, buflen - 1);
 
     dialog_init(&d, CONTEXT_KEYBOARD, NULL, NULL, &cb, state);
     edit_line_speak(&state->ed);
@@ -294,12 +297,17 @@ static int dialog_input_mode(char* text, int buflen, bool trim)
 
 int dialog_input(char* text, int buflen)
 {
-    return dialog_input_mode(text, buflen, true);
+    return dialog_input_mode(text, buflen, true, false);
 }
 
 int dialog_input_raw(char* text, int buflen)
 {
-    return dialog_input_mode(text, buflen, false);
+    return dialog_input_mode(text, buflen, false, false);
+}
+
+int dialog_input_extended(char* text, int buflen)
+{
+    return dialog_input_mode(text, buflen, true, true);
 }
 
 /* Plugin-ABI wrapper: the loadable-layout `kbd` argument is ignored. */

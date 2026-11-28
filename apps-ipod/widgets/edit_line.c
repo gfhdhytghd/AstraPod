@@ -23,7 +23,8 @@
 #include "edit_line.h"
 
 #define CARET_W 2            /* width of the bar caret drawn at the gap */
-#define CHARSET_MAX 64
+#define CHARSET_DEFAULT_MAX 64
+#define CHARSET_MAX 128
 
 /* wheel acceleration: shorter gaps between wheel steps skip more characters */
 #define WHEEL_FAST   (HZ/15)
@@ -61,7 +62,7 @@ static void build_charset(void)
      * translations can supply their own; fall back to the built-in set. */
     const unsigned char *p = (const unsigned char *)str(LANG_KBD_CLICKWHEEL_CHARSET);
     charset_len = 0;
-    while (p && *p && charset_len < CHARSET_MAX)
+    while (p && *p && charset_len < CHARSET_DEFAULT_MAX)
     {
         ucschar_t ch;
         p = utf8decode(p, &ch);
@@ -202,6 +203,15 @@ void edit_line_init(struct edit_line *s, const char *utf8, int max_len)
     s->scroll = 0;
     s->last_wheel_tick = current_tick;
     s->last_del_tick = 0;
+}
+
+void edit_line_init_extended(struct edit_line *s, const char *utf8, int max_len)
+{
+    static const char extra[] = "abcdefghijklmnopqrstuvwxyz()/:;,!?#%+=@";
+    edit_line_init(s, utf8, max_len);
+    for (const char *p = extra; *p; p++)
+        if (charset_len < CHARSET_MAX && charset_index(*p) < 0)
+            charset[charset_len++] = *p;
 }
 
 int edit_line_get(const struct edit_line *s, char *out, int outlen, bool trim)

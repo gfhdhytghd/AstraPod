@@ -1,22 +1,14 @@
 /***************************************************************************
  * GNU General Public License (version 2+)
  *
- * Extras > Calendars as stock iPod Classic 2.0.5 draws it:
- *   - Top menu: All Calendars, each /Calendars .ics calendar (X-WR-CALNAME
- *     or filename stem), To Do's, and Alarms (Beep / None / Off, persisted).
- *   - Month grid: 6x7 stock cells with bottom-right event flags and bell
- *     indicator for events with VALARM; wheel moves day by day across month
- *     boundaries, SELECT opens the day, MENU exits.
- *   - Day view: selectable list of the day's events (SELECT opens Event
- *     Detail), or "No events for this day" when empty.
- *   - To Do's: selectable list of VTODO items ("List of To Do's", SELECT
- *     opens To Do Detail), or stock's Instructions page when none exist.
- *   - Calendar VALARM reminders feed extras_alarm_ring_poll().
- *   - Rockbox calendar plugin .memo entries are still included in All
- *     Calendars as a fallback.
+ * Extras > Calendars and To Do's: reads and edits RFC 5545 VEVENT and
+ * VTODO components across /Calendars .ics files, creating new items in
+ * /Calendars/AstraPod.ics with atomic writes and byte-for-byte preservation
+ * of unknown properties.
+ *
+ * Draws the stock 2.0.5 look in Classic / Fruit Company / Fruit Company
+ * Ultra and uses Scrim's native theme palette in Scrim.
  ****************************************************************************/
-#include <ctype.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +16,6 @@
 #include "config.h"
 #include "kernel.h"
 #include "core_alloc.h"
-#include "dir.h"
 #include "file.h"
 #include "font.h"
 #include "lang.h"
@@ -32,6 +23,8 @@
 #include "rbpaths.h"
 #include "timefuncs.h"
 #include "input/action.h"
+#include "button.h"
+#include "draw/screen_access.h"
 #include "draw/text_wrap.h"
 #include "draw/viewport.h"
 #include "settings/settings.h"
@@ -43,80 +36,73 @@
 #include "ui/scene.h"
 #include "ui/statusbar.h"
 #include "ui/stock_art.h"
+#include "ui/theme_art.h"
+#include "widgets/keyboard.h"
 #include "widgets/list.h"
+#include "widgets/splash.h"
+#include "widgets/yesno.h"
 #include "root_menu.h"
-#include "extras_bar.h"
 #include "extras_calendars.h"
-#include "screens/extras/calendar_ics.h"
+#include "extras_ical.h"
+#include "extras_picker.h"
+#include "extras_store.h"
 #include "extras.h"
 #include "extras_font.h"
+#include "extras_bar.h"
+#include "calendar_ics.h"
+#include "dir.h"
+#include "system/time_zone.h"
 
-#define MEMO_FILE PLUGIN_APPS_DATA_DIR "/.memo"
-#define CAL_STATE_FILE ROCKBOX_DIR "/calendars.dat"
-#define CAL_STATE_MAGIC 0x31444c43u  /* "CLD1" */
-#define MEMO_MAX 128
 #define CAL_FONT FONT_DIR "/14-helvetica-bold-calendar.pbf"
-
-#define CAL_MAX_FILES 16
-#define CAL_MAX_EVENTS 128
-#define CAL_MAX_TODOS 64
-#define CAL_MAX_REMINDERS 32
-#define CAL_DAY_MAX 32
 
 #define WHITE 0xffffff
 #define BLACK 0x000000
-#define GREY 0x666666                /* weekday heads, labels, other months */
-#define BODY_GREY 0x474747           /* To Do's instructions paragraphs */
-#define SCROLL_TRACK 0xe2e2e2
-#define SCROLL_THUMB 0x999999
-#define BELL_GOLD 0xf0b820
-#define BELL_EDGE 0x9a6a00
+#define GREY  0x666666
 
-/* The calendar page: its size, the month's baseline and the day's origin
- * and baseline below its top-left. */
-#define ICON_W 130
-#define MONTH_BASE 36
-#define DAY_X 40
-#define DAY_BASE 90
-/* AstraPod_CalendarDigits_Image: ten cells, the strip's top this far above
- * the baseline. */
-#define DIGIT_W 27
-#define DIGIT_TOP 35
-/* The pane: the page's top-left and the time's and weekday's baselines. */
+/* The calendar page: its size, month baseline, and day origin. */
+#define ICON_W      130
+#define MONTH_BASE  36
+#define DAY_X       40
+#define DAY_BASE    90
+#define DIGIT_W     27
+#define DIGIT_TOP   35
 #define PANE_ICON_X 176
 #define PANE_ICON_Y 56
-#define PANE_MID (MENU_PANE_X + (LCD_WIDTH - MENU_PANE_X) / 2)
-#define TIME_BASE 34
+#define PANE_MID    (MENU_PANE_X + (LCD_WIDTH - MENU_PANE_X) / 2)
+#define TIME_BASE   34
 #define WEEKDAY_BASE 221
-/* The month: six rows of seven 41x30 cells under the weekday heads, each
- * number's origin and baseline inside its cell, and its event flag. */
-#define CELL_X 4
-#define CELL_Y 38
-#define CELL_DX 45
-#define CELL_DY 34
-#define CELL_W 41
-#define HEAD_BASE 34
-#define NUM_X 4
-#define NUM_BASE 15
-#define FLAG_X 26
-#define FLAG_Y 16
-#define BELL_X 27
-#define BELL_Y 3
-/* Day / Detail / To Do pages. */
-#define NO_EVENTS_BASE 114
-#define TODO_X 24
-#define TODO_W 280
-#define TODO_HEAD_BASE 71
-#define TODO_BODY_BASE 93
-#define TODO_PARA_GAP 31
-#define DETAIL_LABEL_RIGHT 86
-#define DETAIL_VALUE_X 92
-#define DETAIL_VALUE_R 308
-#define DETAIL_TOP_BASE 36
-#define DETAIL_ROW_STEP 18
-#define DETAIL_NOTES_GAP 4
-#define DETAIL_SCROLL_STEP 24
-#define BAND_ROWS 16
+
+/* Month grid geometry. */
+#define CELL_X      4
+#define CELL_Y      38
+#define CELL_DX     45
+#define CELL_DY     34
+#define CELL_W      41
+#define CELL_H      30
+#define HEAD_BASE   34
+#define NUM_X       4
+#define NUM_BASE    15
+#define FLAG_X      26
+#define FLAG_Y      4
+#define BAND_ROWS   16
+
+/* Tall two-line rows (stock 2.0.5 Day and To Do lists). */
+#define TALL_ROW_H      44
+#define TALL_TEXT_X     8
+#define TALL_TITLE_BASE 18
+#define TALL_SUB_BASE   35
+#define TALL_CHEVRON_R  16
+#define TALL_CHEVRON_Y  15
+#define SUB_RGB         LCD_RGBPACK(107, 109, 107)
+#define ROW_RULE_RGB    LCD_RGBPACK(222, 223, 222)
+
+#define DAY_EVENTS_MAX  64
+
+#define MEMO_FILE PLUGIN_APPS_DATA_DIR "/.memo"
+#define CAL_STATE_FILE ROCKBOX_DIR "/calendars.dat"
+#define CAL_STATE_MAGIC 0x31444c43u
+#define MEMO_MAX 128
+#define CAL_MAX_REMINDERS 32
 
 enum {
     RRULE_NONE = 0,
@@ -125,34 +111,6 @@ enum {
     RRULE_MONTHLY,
     RRULE_YEARLY,
 };
-
-enum {
-    TODO_STATUS_NONE = 0,
-    TODO_STATUS_NEEDS_ACTION,
-    TODO_STATUS_COMPLETED,
-    TODO_STATUS_IN_PROCESS,
-    TODO_STATUS_CANCELLED,
-};
-
-/* ---- dates ---- */
-
-struct cal_date {
-    int year, month, day;            /* month 1-12, day 1-31 */
-};
-
-static bool leap_year(int year)
-{
-    return (!(year % 4) && (year % 100)) || !(year % 400);
-}
-
-static int month_days(int year, int month)
-{
-    static const unsigned char days[12] = {
-        31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    if (month < 1 || month > 12)
-        return 30;
-    return days[month - 1] + (month == 2 && leap_year(year));
-}
 
 /* Days since 2000-01-01 (matches extras_alarm_ring.c). */
 static long days_from_civil(int y, int m, int d)
@@ -163,95 +121,6 @@ static long days_from_civil(int y, int m, int d)
     unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
     unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     return era * 146097 + (long)doe - 730425;
-}
-
-static void civil_from_days(long z, struct cal_date *out)
-{
-    z += 730425;
-    long era = z / 146097;
-    unsigned doe = z - era * 146097;
-    unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    unsigned mp = (5 * doy + 2) / 153;
-    out->day = (int)(doy - (153 * mp + 2) / 5 + 1);
-    out->month = (int)(mp < 10 ? mp + 3 : mp - 9);
-    out->year = (int)(yoe + era * 400) + (out->month <= 2);
-}
-
-/* 0 for Sunday. */
-static int week_day(const struct cal_date *d)
-{
-    static const unsigned char shift[12] = {
-        0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
-    int y = d->year - (d->month < 3);
-    return (y + y / 4 - y / 100 + y / 400 + shift[d->month - 1] + d->day) % 7;
-}
-
-static void step_days(struct cal_date *d, int days)
-{
-    d->day += days;
-    while (d->day < 1)
-    {
-        if (--d->month < 1)
-        {
-            d->month = 12;
-            d->year--;
-        }
-        d->day += month_days(d->year, d->month);
-    }
-    while (d->day > month_days(d->year, d->month))
-    {
-        d->day -= month_days(d->year, d->month);
-        if (++d->month > 12)
-        {
-            d->month = 1;
-            d->year++;
-        }
-    }
-}
-
-static struct cal_date today(void)
-{
-    const struct tm *tm = get_time();
-    return (struct cal_date){ tm->tm_year + 1900, tm->tm_mon + 1,
-                              tm->tm_mday };
-}
-
-/* `lang` with M, D and Y replaced by `month`, `day` and `year`. */
-static void format_date(char *buf, size_t size, int lang, const char *month,
-                        int day, int year)
-{
-    size_t used = 0;
-    buf[0] = '\0';
-    for (const char *f = str(lang); *f && used < size; f++)
-    {
-        if (*f == 'M')
-            used += snprintf(buf + used, size - used, "%s", month);
-        else if (*f == 'D')
-            used += snprintf(buf + used, size - used, "%d", day);
-        else if (*f == 'Y')
-            used += snprintf(buf + used, size - used, "%d", year);
-        else
-            used += snprintf(buf + used, size - used, "%c", *f);
-    }
-}
-
-static void format_long_date(char *buf, size_t size, const struct cal_date *d)
-{
-    char month[24];
-    int m = MIN(MAX(d->month, 1), 12);
-    strlcpy(month, str(LANG_EXTRAS_CALENDARS_JANUARY + m - 1), sizeof(month));
-    format_date(buf, size, LANG_EXTRAS_CALENDARS_DAY_TITLE, month,
-                d->day, d->year);
-}
-
-static void format_clock_hm(char *buf, size_t size, int hour, int minute)
-{
-    if (global_settings.timeformat == 0)
-        snprintf(buf, size, "%02d:%02d", hour, minute);
-    else
-        snprintf(buf, size, "%d:%02d %s", (hour + 11) % 12 + 1, minute,
-                 hour < 12 ? "AM" : "PM");
 }
 
 /* ---- persistent alarm state ---- */
@@ -296,11 +165,6 @@ static void cal_state_save(void)
 
 /* ---- .ics data model & reminder cache ---- */
 
-struct cal_file {
-    char name[40];
-    char path[80];
-};
-
 struct cal_rrule {
     uint8_t freq;
     uint8_t interval;
@@ -308,28 +172,6 @@ struct cal_rrule {
     uint16_t until_year;
     uint8_t until_month;
     uint8_t until_day;
-};
-
-struct cal_event {
-    uint16_t year, end_year;
-    uint8_t month, day, hour, minute;      /* hour == 255 -> all-day */
-    uint8_t end_month, end_day, end_hour, end_minute;
-    int8_t cal_idx;                        /* -1 for .memo */
-    uint8_t has_alarm;
-    struct cal_rrule rrule;
-    char summary[64];
-    char location[48];
-    char attendees[64];
-    char notes[128];
-};
-
-struct cal_todo {
-    uint16_t due_year;
-    uint8_t due_month, due_day;
-    uint8_t status;
-    uint8_t priority;
-    char summary[64];
-    char notes[128];
 };
 
 /* Compact reminder cache kept in static RAM for extras_alarm_ring_poll(). */
@@ -341,21 +183,9 @@ struct cal_reminder {
     char summary[48];
 };
 
-struct cal_store {
-    struct cal_event events[CAL_MAX_EVENTS];
-    int event_count;
-    struct cal_todo todos[CAL_MAX_TODOS];
-    int todo_count;
-};
-
-static struct cal_file cal_files[CAL_MAX_FILES];
-static int cal_file_count;
-
 static struct cal_reminder cal_reminders[CAL_MAX_REMINDERS];
 static int cal_reminder_count;
 static bool reminders_loaded;
-
-static struct cal_store *active_store;
 
 /* ---- .memo fallback ---- */
 
@@ -382,12 +212,12 @@ static bool memo_parse(const char *line, struct memo *m)
            m->wday <= 6 && m->type <= 3;
 }
 
-static bool memo_on(const struct memo *m, const struct cal_date *d)
+static bool memo_on(const struct memo *m, const struct extras_date *d)
 {
     switch (m->type)
     {
         case 0:
-            return m->wday == (week_day(d) + 6) % 7;
+            return m->wday == (extras_week_day(d) + 6) % 7;
         case 1:
             return m->day == d->day;
         case 2:
@@ -398,7 +228,7 @@ static bool memo_on(const struct memo *m, const struct cal_date *d)
     }
 }
 
-static void memo_scan(const struct cal_date *d,
+static void memo_scan(const struct extras_date *d,
                       void (*found)(const char *text, void *data), void *data)
 {
     char line[96];
@@ -419,7 +249,7 @@ static void memo_scan(const struct cal_date *d,
         close(fd);
 }
 
-static bool has_memo(const struct cal_date *d)
+static bool has_memo(const struct extras_date *d)
 {
     for (int i = 0; i < memo_count; i++)
         if (memo_on(&memos[i], d))
@@ -432,7 +262,7 @@ static bool has_memo(const struct cal_date *d)
 static bool date_matches_rrule(int sy, int sm, int sd,
                                int ey, int em, int ed, bool all_day,
                                const struct cal_rrule *r,
-                               const struct cal_date *d)
+                               const struct extras_date *d)
 {
     if (sy == 0 || sm < 1 || sm > 12 || sd < 1 || sd > 31)
         return false;
@@ -490,13 +320,6 @@ static bool date_matches_rrule(int sy, int sm, int sd,
         return !r->count || ydiff / iv < r->count;
     }
     return false;
-}
-
-static bool event_on_date(const struct cal_event *ev, const struct cal_date *d)
-{
-    return date_matches_rrule(ev->year, ev->month, ev->day,
-                              ev->end_year, ev->end_month, ev->end_day,
-                              ev->hour == 255, &ev->rrule, d);
 }
 
 /* ---- iCalendar (.ics) parser ---- */
@@ -670,53 +493,6 @@ static void ics_unescape(const char *src, char *dst, size_t size,
 }
 
 /* Extract CN= parameter or strip mailto: from ATTENDEE. */
-static void ics_append_attendee(const char *params, const char *val,
-                                char *dst, size_t size)
-{
-    char name[48];
-    name[0] = '\0';
-    if (params)
-    {
-        const char *p = params;
-        while (*p)
-        {
-            if (strncasecmp(p, "CN=", 3) == 0)
-            {
-                p += 3;
-                bool quoted = (*p == '"');
-                if (quoted)
-                    p++;
-                size_t k = 0;
-                while (*p && k + 1 < sizeof(name))
-                {
-                    if (quoted && *p == '"')
-                        break;
-                    if (!quoted && *p == ';')
-                        break;
-                    name[k++] = *p++;
-                }
-                name[k] = '\0';
-                break;
-            }
-            const char *semi = strchr(p, ';');
-            if (!semi)
-                break;
-            p = semi + 1;
-        }
-    }
-    if (!name[0])
-    {
-        if (strncasecmp(val, "mailto:", 7) == 0)
-            val += 7;
-        strlcpy(name, val, sizeof(name));
-    }
-    if (!name[0])
-        return;
-    if (dst[0])
-        strlcat(dst, ", ", size);
-    strlcat(dst, name, size);
-}
-
 struct ics_reader {
     int fd;
     bool has_peek;
@@ -758,18 +534,16 @@ static bool ics_next_line(struct ics_reader *r, char *out, size_t size)
     return true;
 }
 
-static void parse_ics_file(int cal_idx, struct cal_store *store,
-                           bool read_calname)
+static void scan_alarm_file(const char *path)
 {
-    int fd = open(cal_files[cal_idx].path, O_RDONLY);
+    int fd = open(path, O_RDONLY);
     if (fd < 0)
         return;
 
     struct ics_reader r = { .fd = fd, .has_peek = false };
     char line[512];
-    enum { SEC_ROOT, SEC_VEVENT, SEC_VTODO, SEC_VALARM } sec = SEC_ROOT;
-    struct cal_event ev;
-    struct cal_todo td;
+    enum { SEC_ROOT, SEC_VEVENT, SEC_VALARM } sec = SEC_ROOT;
+    struct cal_reminder ev;
     bool ev_alarm_valid = false;
     bool ev_alarm_ignore = false;
     int16_t ev_alarm_offset = 0;
@@ -796,17 +570,10 @@ static void parse_ics_file(int cal_idx, struct cal_store *store,
             {
                 sec = SEC_VEVENT;
                 memset(&ev, 0, sizeof(ev));
-                ev.cal_idx = (int8_t)cal_idx;
                 ev.hour = 255;
-                ev.end_hour = 255;
                 ev_alarm_valid = false;
                 ev_alarm_ignore = false;
                 ev_alarm_offset = 0;
-            }
-            else if (strcasecmp(val, "VTODO") == 0)
-            {
-                sec = SEC_VTODO;
-                memset(&td, 0, sizeof(td));
             }
             else if (strcasecmp(val, "VALARM") == 0 && sec == SEC_VEVENT)
             {
@@ -830,44 +597,18 @@ static void parse_ics_file(int cal_idx, struct cal_store *store,
                 {
                     if (!ev.summary[0])
                         strlcpy(ev.summary, "(No Title)", sizeof(ev.summary));
-                    ev.has_alarm = ev_alarm_valid ? 1 : 0;
-                    if (store && store->event_count < CAL_MAX_EVENTS)
-                        store->events[store->event_count++] = ev;
                     if (ev_alarm_valid &&
                         cal_reminder_count < CAL_MAX_REMINDERS)
                     {
-                        struct cal_reminder *rem =
-                            &cal_reminders[cal_reminder_count++];
-                        rem->year = ev.year;
-                        rem->month = ev.month;
-                        rem->day = ev.day;
-                        rem->hour = ev.hour;
-                        rem->minute = ev.minute;
-                        rem->offset_min = ev_alarm_offset;
-                        rem->rrule = ev.rrule;
-                        strlcpy(rem->summary, ev.summary,
-                                sizeof(rem->summary));
+                        ev.offset_min = ev_alarm_offset;
+                        cal_reminders[cal_reminder_count++] = ev;
                     }
                 }
-            }
-            else if (strcasecmp(val, "VTODO") == 0 && sec == SEC_VTODO)
-            {
-                sec = SEC_ROOT;
-                if (store && store->todo_count < CAL_MAX_TODOS &&
-                    td.summary[0])
-                    store->todos[store->todo_count++] = td;
             }
             continue;
         }
 
-        if (sec == SEC_ROOT)
-        {
-            if (read_calname && strcasecmp(prop, "X-WR-CALNAME") == 0 &&
-                val[0])
-                ics_unescape(val, cal_files[cal_idx].name,
-                             sizeof(cal_files[cal_idx].name), false);
-        }
-        else if (sec == SEC_VEVENT)
+        if (sec == SEC_VEVENT)
         {
             if (strcasecmp(prop, "DTSTART") == 0)
             {
@@ -881,17 +622,9 @@ static void parse_ics_file(int cal_idx, struct cal_store *store,
                 ics_parse_datetime(val, &ev.end_year, &ev.end_month,
                                    &ev.end_day, &ev.end_hour, &ev.end_minute);
                 if (params && strcasestr(params, "VALUE=DATE"))
-                    ev.end_hour = 255;
-            }
+                }
             else if (strcasecmp(prop, "SUMMARY") == 0)
                 ics_unescape(val, ev.summary, sizeof(ev.summary), false);
-            else if (strcasecmp(prop, "LOCATION") == 0)
-                ics_unescape(val, ev.location, sizeof(ev.location), false);
-            else if (strcasecmp(prop, "DESCRIPTION") == 0)
-                ics_unescape(val, ev.notes, sizeof(ev.notes), true);
-            else if (strcasecmp(prop, "ATTENDEE") == 0)
-                ics_append_attendee(params, val, ev.attendees,
-                                    sizeof(ev.attendees));
             else if (strcasecmp(prop, "RRULE") == 0)
                 ics_parse_rrule(val, &ev.rrule);
         }
@@ -910,110 +643,37 @@ static void parse_ics_file(int cal_idx, struct cal_store *store,
                 }
             }
         }
-        else if (sec == SEC_VTODO)
-        {
-            if (strcasecmp(prop, "SUMMARY") == 0)
-                ics_unescape(val, td.summary, sizeof(td.summary), false);
-            else if (strcasecmp(prop, "DUE") == 0)
-                ics_parse_datetime(val, &td.due_year, &td.due_month,
-                                   &td.due_day, NULL, NULL);
-            else if (strcasecmp(prop, "STATUS") == 0)
-            {
-                if (strcasecmp(val, "NEEDS-ACTION") == 0)
-                    td.status = TODO_STATUS_NEEDS_ACTION;
-                else if (strcasecmp(val, "COMPLETED") == 0)
-                    td.status = TODO_STATUS_COMPLETED;
-                else if (strcasecmp(val, "IN-PROCESS") == 0)
-                    td.status = TODO_STATUS_IN_PROCESS;
-                else if (strcasecmp(val, "CANCELLED") == 0)
-                    td.status = TODO_STATUS_CANCELLED;
-            }
-            else if (strcasecmp(prop, "PRIORITY") == 0)
-            {
-                int pr = atoi(val);
-                if (pr >= 1 && pr <= 9)
-                    td.priority = (uint8_t)pr;
-            }
-            else if (strcasecmp(prop, "DESCRIPTION") == 0)
-                ics_unescape(val, td.notes, sizeof(td.notes), true);
-        }
     }
     close(fd);
 }
 
-static int cmp_cal_file(const void *a, const void *b)
+static void scan_alarms(void)
 {
-    const struct cal_file *fa = a;
-    const struct cal_file *fb = b;
-    return strcasecmp(fa->name, fb->name);
-}
-
-static int cmp_todo(const void *a, const void *b)
-{
-    const struct cal_todo *ta = a;
-    const struct cal_todo *tb = b;
-    return strcasecmp(ta->summary, tb->summary);
-}
-
-/* Scan /Calendars .ics files; fills cal_files[], cal_reminders[], and (when
- * non-NULL) `store`. */
-static void scan_calendars(struct cal_store *store)
-{
-    cal_file_count = 0;
     cal_reminder_count = 0;
     reminders_loaded = true;
-    if (store)
+    const char *base = ICAL_DIR;
+    DIR *dir = opendir(base);
+    if (!dir)
     {
-        store->event_count = 0;
-        store->todo_count = 0;
+        base = "/calendars";
+        dir = opendir(base);
     }
-
-    static const char *const dirs[2] = { "/Calendars", "/calendars" };
-    const char *base = NULL;
-    DIR *d = NULL;
-    for (int i = 0; i < 2 && !d; i++)
-    {
-        d = opendir(dirs[i]);
-        if (d)
-            base = dirs[i];
-    }
-    if (!d)
+    if (!dir)
         return;
 
     struct dirent *entry;
-    while ((entry = readdir(d)) != NULL && cal_file_count < CAL_MAX_FILES)
+    while (cal_reminder_count < CAL_MAX_REMINDERS &&
+           (entry = readdir(dir)) != NULL)
     {
-        if (entry->d_name[0] == '.')
+        if (!extras_has_ext(entry->d_name, ".ics") ||
+            (dir_get_info(dir, entry).attribute & ATTR_DIRECTORY))
             continue;
-        struct dirinfo info = dir_get_info(d, entry);
-        if (info.attribute & ATTR_DIRECTORY)
-            continue;
-        size_t len = strlen(entry->d_name);
-        if (len <= 4 || strcasecmp(entry->d_name + len - 4, ".ics") != 0)
-            continue;
-        struct cal_file *cf = &cal_files[cal_file_count++];
-        size_t stem = MIN(len - 4, sizeof(cf->name) - 1);
-        memcpy(cf->name, entry->d_name, stem);
-        cf->name[stem] = '\0';
-        snprintf(cf->path, sizeof(cf->path), "%s/%s", base, entry->d_name);
+        char path[MAX_PATH];
+        if (snprintf(path, sizeof(path), "%s/%s", base, entry->d_name) <
+            (int)sizeof(path))
+            scan_alarm_file(path);
     }
-    closedir(d);
-
-    /* First pass: read X-WR-CALNAME so sorting uses display names. */
-    for (int i = 0; i < cal_file_count; i++)
-        parse_ics_file(i, NULL, true);
-
-    if (cal_file_count > 1)
-        qsort(cal_files, cal_file_count, sizeof(cal_files[0]), cmp_cal_file);
-
-    /* Second pass: populate store and reminders with final sorted cal_idx. */
-    cal_reminder_count = 0;
-    for (int i = 0; i < cal_file_count; i++)
-        parse_ics_file(i, store, false);
-
-    if (store && store->todo_count > 1)
-        qsort(store->todos, store->todo_count, sizeof(store->todos[0]),
-              cmp_todo);
+    closedir(dir);
 }
 
 /* ---- calendar reminder API for extras_alarm_ring.c ---- */
@@ -1024,7 +684,7 @@ bool extras_calendars_alarms_armed(void)
     if (alarm_sound == 2)
         return false;
     if (!reminders_loaded)
-        scan_calendars(NULL);
+        scan_alarms();
     return cal_reminder_count > 0;
 }
 
@@ -1038,7 +698,7 @@ bool extras_calendars_due_event(long minute, char *summary, size_t size,
     if (alarm_sound == 2)
         return false;
     if (!reminders_loaded)
-        scan_calendars(NULL);
+        scan_alarms();
     if (minute != fired_minute)
     {
         fired_minute = minute;
@@ -1049,19 +709,18 @@ bool extras_calendars_due_event(long minute, char *summary, size_t size,
         if (i < 32 && (fired_mask & (1u << i)))
             continue;
         const struct cal_reminder *r = &cal_reminders[i];
-        long ev_min = minute - r->offset_min;
-        if (ev_min < 0)
-            continue;
-        long ev_day = ev_min / 1440;
-        int ev_tod = (int)(ev_min % 1440);
+        time_t event_utc = (time_t)(minute - r->offset_min) * 60 + 946684800L;
+        struct tm event_local;
+        clock_localtime(event_utc, &event_local);
+        int ev_tod = event_local.tm_hour * 60 + event_local.tm_min;
         int ev_h = ev_tod / 60;
         int ev_m = ev_tod % 60;
         int want_h = r->hour == 255 ? 0 : r->hour;
         int want_m = r->hour == 255 ? 0 : r->minute;
         if (ev_h != want_h || ev_m != want_m)
             continue;
-        struct cal_date d;
-        civil_from_days(ev_day, &d);
+        struct extras_date d = { event_local.tm_year + 1900,
+                                 event_local.tm_mon + 1, event_local.tm_mday };
         if (date_matches_rrule(r->year, r->month, r->day, 0, 0, 0,
                                r->hour == 255, &r->rrule, &d))
         {
@@ -1081,7 +740,61 @@ bool extras_calendars_due_event(long minute, char *summary, size_t size,
     return false;
 }
 
-/* ---- the calendar page and the pane ---- */
+static const char *const repeat_labels[ICAL_REPEAT_COUNT] = {
+    "None", "Daily", "Weekly", "Monthly", "Yearly",
+};
+
+static const char *const alarm_labels[ICAL_ALARM_COUNT] = {
+    "None", "At time", "5 min before", "15 min before",
+    "30 min before", "1 hour before", "1 day before",
+};
+
+static const char *const alarm_short_labels[ICAL_ALARM_COUNT] = {
+    "None", "At time", "5 min", "15 min", "30 min", "1 hour", "1 day",
+};
+
+static const char *const priority_labels[4] = {
+    "None", "Low", "Medium", "High",
+};
+
+static bool is_stock_look(void)
+{
+    return ui_theme_style(UI_STYLE_ART) == UI_ART_PLASTIC && stock_art_ready();
+}
+
+static uint32_t theme_rgb24(enum ui_color_role role)
+{
+    struct ui_theme theme;
+    ui_theme_snapshot(&theme);
+    return ui_theme_color(&theme, role, NULL);
+}
+
+static void format_date_lang(char *buf, size_t size, int lang,
+                             const char *month, int day, int year)
+{
+    size_t used = 0;
+    buf[0] = '\0';
+    for (const char *f = str(lang); *f && used < size; f++)
+    {
+        if (*f == 'M')
+            used += snprintf(buf + used, size - used, "%s", month);
+        else if (*f == 'D')
+            used += snprintf(buf + used, size - used, "%d", day);
+        else if (*f == 'Y')
+            used += snprintf(buf + used, size - used, "%d", year);
+        else
+            used += snprintf(buf + used, size - used, "%c", *f);
+    }
+}
+
+static void format_short_date(char *buf, size_t size,
+                              const struct extras_date *d)
+{
+    snprintf(buf, size, "%s %d, %04d",
+             str(LANG_MONTH_JANUARY + d->month - 1), d->day, d->year);
+}
+
+/* ---- Calendar icon and split pane ---- */
 
 static int pane_font(void)
 {
@@ -1111,6 +824,9 @@ static void put_text(struct stock_canvas *c, int font, const char *text,
         stock_canvas_text(c, font, text, x, base - font_get(font)->ascent,
                           rgb);
 }
+
+#define BELL_GOLD 0xf0b820
+#define BELL_EDGE 0x9a6a00
 
 static void put_pixel(struct stock_canvas *c, int x, int y, uint32_t rgb)
 {
@@ -1199,13 +915,13 @@ static void pane_paint(struct stock_canvas *band)
         LANG_EXTRAS_CALENDARS_SATURDAY,
     };
     const struct tm *tm = get_time();
-    struct cal_date d = today();
-    char time[16];
-    format_clock_hm(time, sizeof(time), tm->tm_hour, tm->tm_min);
+    struct extras_date d = extras_today();
+    char time_buf[16];
+    extras_format_time(time_buf, sizeof(time_buf), tm->tm_hour, tm->tm_min);
     int font = pane_font();
-    put_centred(band, font, time, PANE_MID, TIME_BASE, WHITE);
+    put_centred(band, font, time_buf, PANE_MID, TIME_BASE, WHITE);
     extras_calendars_icon_put(band, PANE_ICON_X, PANE_ICON_Y, d.month, d.day);
-    put_centred(band, font, str(weekday[week_day(&d)]), PANE_MID,
+    put_centred(band, font, str(weekday[extras_week_day(&d)]), PANE_MID,
                 WEEKDAY_BASE, WHITE);
 }
 
@@ -1219,30 +935,975 @@ void extras_calendars_pane(struct menu_pane_content *c)
     c->stamp = (tm->tm_yday * 24 + tm->tm_hour) * 60 + tm->tm_min;
 }
 
-/* ---- generic banded page runner ---- */
+/* ---- Shared choice sheet & confirmation helpers ---- */
 
-struct detail_field {
-    const char *label;
-    char value[160];
-    bool extra_gap;
+struct choice_ctx {
+    const char *const *items;
+    int count;
 };
 
-struct page {
-    void (*compose)(struct stock_canvas *band, struct page *p);
-    uint32_t *band;
-    struct cal_date shown;
-    int cal_filter;                  /* -1 = All Calendars, >=0 = specific */
-    int font, head_font, body_font;
-    int ret;
-    int scroll_y, scroll_max;
-    struct detail_field fields[7];
-    int field_count;
-};
-
-static void page_paint(const struct ui_view *view,
-                       const struct ui_view_frame *frame)
+static const char *choice_get_name(int i, void *data, char *buf, size_t size)
 {
-    struct page *p = view->data;
+    (void)buf; (void)size;
+    struct choice_ctx *c = data;
+    return c->items[i];
+}
+
+static enum list_row_kind choice_get_kind(int i, void *data)
+{
+    (void)i; (void)data;
+    return LIST_ROW_OPTION;
+}
+
+/* Returns selected index 0..count-1, -1 on cancel/back, -2 on USB. */
+static int show_choice_list(const char *title, const char *const *items,
+                            int count, int initial)
+{
+    struct choice_ctx ctx = { items, count };
+    struct gui_synclist list;
+    struct ui_scene scene = {0};
+    int action, ret = -1;
+
+    ui_scene_open_page(&scene, "cal-choice-push");
+    sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
+    viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+    gui_synclist_init(&list, choice_get_name, &ctx, false, 1, NULL);
+    gui_synclist_set_title(&list, title, Icon_NOICON);
+    gui_synclist_set_row_callbacks(&list, choice_get_kind, NULL, NULL);
+    gui_synclist_set_nb_items(&list, count);
+    gui_synclist_select_item(&list, MIN(MAX(initial, 0), count - 1));
+    gui_synclist_draw_settled(&list);
+
+    for (;;)
+    {
+        list_do_action(CONTEXT_TREE, HZ, &list, &action);
+        if (action == ACTION_STD_OK)
+        {
+            ret = gui_synclist_get_sel_pos(&list);
+            break;
+        }
+        if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+            break;
+        if (default_event_handler(action) == SYS_USB_CONNECTED)
+        {
+            ret = -2;
+            break;
+        }
+    }
+
+    gui_synclist_scroll_stop(&list);
+    ui_scene_close_modal(&scene, ret != -2, "cal-choice-pop");
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    return ret;
+}
+
+/* Returns 1 on confirm, 0 on cancel, -1 on USB. */
+static int confirm_prompt(const char *question, int yes_lang, int no_lang)
+{
+    const char *lines[1] = { question };
+    struct text_message msg = { lines, 1 };
+    enum yesno_res r = gui_syncyesno_run_labels(&msg, yes_lang, no_lang);
+    if (r == YESNO_USB)
+        return -1;
+    return r == YESNO_YES ? 1 : r == YESNO_CANCEL ? 2 : 0;
+}
+
+/* ---- Event Editor ---- */
+
+enum ev_field {
+    EVF_TITLE, EVF_DATE, EVF_ALL_DAY, EVF_START, EVF_END,
+    EVF_REPEAT, EVF_ALARM, EVF_NOTES, EVF_SAVE, EVF_DELETE
+};
+
+struct ev_editor_ctx {
+    struct ical_event *ev;
+    enum ev_field rows[10];
+    int row_count;
+    bool dirty;
+};
+
+static struct ical_event *pane_ev;
+
+static void event_pane_paint(struct stock_canvas *band)
+{
+    if (!pane_ev)
+        return;
+    int font = pane_font();
+    char top[32], bot[32];
+    if (pane_ev->all_day)
+        strlcpy(top, "All Day", sizeof(top));
+    else
+        extras_format_time(top, sizeof(top), pane_ev->start_hour,
+                           pane_ev->start_min);
+    strlcpy(bot, repeat_labels[pane_ev->repeat], sizeof(bot));
+    put_centred(band, font, top, PANE_MID, TIME_BASE, WHITE);
+    extras_calendars_icon_put(band, PANE_ICON_X, PANE_ICON_Y,
+                              pane_ev->date.month, pane_ev->date.day);
+    put_centred(band, font, bot, PANE_MID, WEEKDAY_BASE, WHITE);
+}
+
+static enum list_pane_kind ev_pane_cb(int i, void *data, int *art)
+{
+    (void)i; (void)art;
+    struct ev_editor_ctx *ctx = data;
+    pane_ev = ctx->ev;
+    struct menu_pane_content c = {
+        .kind = LIST_PANE_PICTURE, .art = -1, .paint = event_pane_paint,
+        .stamp = (ctx->ev->date.month * 32 + ctx->ev->date.day) * 2048 +
+                 (ctx->ev->all_day ? 1 : 0) * 1024 +
+                 ctx->ev->start_hour * 32 + ctx->ev->repeat,
+    };
+    menu_pane_set_picture(&c);
+    return LIST_PANE_PICTURE;
+}
+
+static void ev_rebuild_rows(struct ev_editor_ctx *ctx)
+{
+    int n = 0;
+    ctx->rows[n++] = EVF_TITLE;
+    ctx->rows[n++] = EVF_DATE;
+    ctx->rows[n++] = EVF_ALL_DAY;
+    if (!ctx->ev->all_day)
+    {
+        ctx->rows[n++] = EVF_START;
+        ctx->rows[n++] = EVF_END;
+    }
+    ctx->rows[n++] = EVF_REPEAT;
+    ctx->rows[n++] = EVF_ALARM;
+    ctx->rows[n++] = EVF_NOTES;
+    ctx->rows[n++] = EVF_SAVE;
+    if (ctx->ev->is_existing)
+        ctx->rows[n++] = EVF_DELETE;
+    ctx->row_count = n;
+}
+
+static const char *ev_row_name(int i, void *data, char *buf, size_t size)
+{
+    (void)buf; (void)size;
+    struct ev_editor_ctx *ctx = data;
+    switch (ctx->rows[i])
+    {
+        case EVF_TITLE:   return "Title";
+        case EVF_DATE:    return str(LANG_DATE);
+        case EVF_ALL_DAY: return "All Day";
+        case EVF_START:   return "Start";
+        case EVF_END:     return "End";
+        case EVF_REPEAT:  return str(LANG_REPEAT);
+        case EVF_ALARM:   return "Alarm";
+        case EVF_NOTES:   return "Notes";
+        case EVF_SAVE:    return str(LANG_SAVE);
+        case EVF_DELETE:  return "Delete Event";
+        default:          return "";
+    }
+}
+
+static const char *ev_row_value(int i, void *data, char *buf, size_t size)
+{
+    struct ev_editor_ctx *ctx = data;
+    const struct ical_event *ev = ctx->ev;
+    switch (ctx->rows[i])
+    {
+        case EVF_TITLE:
+            return ev->summary[0] ? ev->summary : "Untitled";
+        case EVF_DATE:
+            format_short_date(buf, size, &ev->date);
+            return buf;
+        case EVF_ALL_DAY:
+            return str(ev->all_day ? LANG_ON : LANG_OFF);
+        case EVF_START:
+            extras_format_time(buf, size, ev->start_hour, ev->start_min);
+            return buf;
+        case EVF_END:
+            extras_format_time(buf, size, ev->end_hour, ev->end_min);
+            return buf;
+        case EVF_REPEAT:
+            return repeat_labels[ev->repeat];
+        case EVF_ALARM:
+            return alarm_short_labels[ev->alarm];
+        case EVF_NOTES:
+            return ev->notes[0] ? ev->notes : "None";
+        default:
+            return NULL;
+    }
+}
+
+static enum list_row_kind ev_row_kind(int i, void *data)
+{
+    struct ev_editor_ctx *ctx = data;
+    switch (ctx->rows[i])
+    {
+        case EVF_ALL_DAY: return LIST_ROW_TOGGLE;
+        case EVF_SAVE:
+        case EVF_DELETE:  return LIST_ROW_ACTION;
+        default:          return LIST_ROW_SETTING;
+    }
+}
+
+/* Returns 0 normally (saved or cancelled), GO_TO_ROOT on USB. Sets *changed. */
+static int run_event_editor(struct ical_event *ev, bool *changed)
+{
+    struct ev_editor_ctx ctx = { .ev = ev, .dirty = false };
+    struct gui_synclist list;
+    struct ui_scene scene = {0};
+    const char *title = ev->is_existing ? "Edit Event" : "New Event";
+    int sel = 0, action, ret = 0;
+
+    ev_rebuild_rows(&ctx);
+    ui_scene_open_page(&scene, "cal-ev-edit-push");
+    sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
+    viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+
+    gui_synclist_init(&list, ev_row_name, &ctx, false, 1, NULL);
+    gui_synclist_set_title(&list, title, Icon_NOICON);
+    gui_synclist_set_row_callbacks(&list, ev_row_kind, ev_row_value, NULL);
+    gui_synclist_set_pane_callback(&list, ev_pane_cb);
+    gui_synclist_set_nb_items(&list, ctx.row_count);
+    gui_synclist_select_item(&list, sel);
+    gui_synclist_draw_settled(&list);
+
+    for (;;)
+    {
+        list_do_action(CONTEXT_TREE, HZ, &list, &action);
+        sel = gui_synclist_get_sel_pos(&list);
+
+        if (action == ACTION_STD_OK)
+        {
+            enum ev_field f = ctx.rows[sel];
+            if (f == EVF_TITLE)
+            {
+                char tmp[sizeof(ev->summary)];
+                strlcpy(tmp, ev->summary, sizeof(tmp));
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
+                {
+                    strlcpy(ev->summary, tmp, sizeof(ev->summary));
+                    ctx.dirty = true;
+                }
+            }
+            else if (f == EVF_DATE)
+            {
+                int r = extras_pick_date("Event Date", ev->summary,
+                                         &ev->date, 2000, 2099);
+                if (r < 0) { ret = GO_TO_ROOT; break; }
+                if (r > 0) ctx.dirty = true;
+            }
+            else if (f == EVF_ALL_DAY)
+            {
+                ev->all_day = !ev->all_day;
+                ctx.dirty = true;
+                ev_rebuild_rows(&ctx);
+                gui_synclist_set_nb_items(&list, ctx.row_count);
+                gui_synclist_select_item(&list, MIN(sel, ctx.row_count - 1));
+            }
+            else if (f == EVF_START)
+            {
+                int r = extras_pick_time("Start Time", ev->summary,
+                                         &ev->start_hour, &ev->start_min);
+                if (r < 0) { ret = GO_TO_ROOT; break; }
+                if (r > 0)
+                {
+                    int st = ev->start_hour * 60 + ev->start_min;
+                    int en = ev->end_hour * 60 + ev->end_min;
+                    if (en <= st)
+                    {
+                        en = (st + 60) % (24 * 60);
+                        ev->end_hour = en / 60;
+                        ev->end_min = en % 60;
+                    }
+                    ctx.dirty = true;
+                }
+            }
+            else if (f == EVF_END)
+            {
+                int r = extras_pick_time("End Time", ev->summary,
+                                         &ev->end_hour, &ev->end_min);
+                if (r < 0) { ret = GO_TO_ROOT; break; }
+                if (r > 0) ctx.dirty = true;
+            }
+            else if (f == EVF_REPEAT)
+            {
+                int r = show_choice_list("Repeat", repeat_labels,
+                                         ICAL_REPEAT_COUNT, ev->repeat);
+                if (r == -2) { ret = GO_TO_ROOT; break; }
+                if (r >= 0) { ev->repeat = (enum ical_repeat)r; ctx.dirty = true; }
+            }
+            else if (f == EVF_ALARM)
+            {
+                int r = show_choice_list("Alarm", alarm_labels,
+                                         ICAL_ALARM_COUNT, ev->alarm);
+                if (r == -2) { ret = GO_TO_ROOT; break; }
+                if (r >= 0) { ev->alarm = (enum ical_alarm)r; ctx.dirty = true; }
+            }
+            else if (f == EVF_NOTES)
+            {
+                char tmp[sizeof(ev->notes)];
+                strlcpy(tmp, ev->notes, sizeof(tmp));
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
+                {
+                    strlcpy(ev->notes, tmp, sizeof(ev->notes));
+                    ctx.dirty = true;
+                }
+            }
+            else if (f == EVF_SAVE)
+            {
+                if (ical_save_event(ICAL_DIR, ev))
+                {
+                    *changed = true;
+                    break;
+                }
+                splash(HZ, "Could not save event");
+            }
+            else if (f == EVF_DELETE)
+            {
+                int c = confirm_prompt("Delete this event?",
+                                       LANG_DELETE, LANG_DIAG_CANCEL);
+                if (c < 0) { ret = GO_TO_ROOT; break; }
+                if (c == 1)
+                {
+                    if (ical_delete_component(ev->path, ev->comp_start,
+                                              ev->comp_end))
+                    {
+                        *changed = true;
+                        break;
+                    }
+                    splash(HZ, "Could not delete event");
+                }
+            }
+            sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
+            gui_synclist_draw(&list);
+        }
+        else if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+        {
+            if (ctx.dirty)
+            {
+                int c = confirm_prompt("Save changes?",
+                                       LANG_SAVE, LANG_EXTRAS_DISCARD);
+                if (c < 0) { ret = GO_TO_ROOT; break; }
+                if (c == 2) continue;
+                if (c == 1)
+                {
+                    if (!ical_save_event(ICAL_DIR, ev))
+                    {
+                        splash(HZ, "Could not save event");
+                        gui_synclist_draw(&list);
+                        continue;
+                    }
+                    *changed = true;
+                }
+            }
+            break;
+        }
+        else if (default_event_handler(action) == SYS_USB_CONNECTED)
+        {
+            ret = GO_TO_ROOT;
+            break;
+        }
+    }
+
+    gui_synclist_scroll_stop(&list);
+    ui_scene_close_modal(&scene, ret == 0, "cal-ev-edit-pop");
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    pane_ev = NULL;
+    return ret;
+}
+
+/* ---- Day View ---- */
+
+struct day_ctx {
+    struct ical_index *idx;
+    int file_filter;
+    struct extras_date shown;
+    int events[ICAL_MAX_EVENTS];
+    int count, legacy_count;
+    char legacy[DAY_EVENTS_MAX][96];
+    int sub_font;
+};
+
+static void day_add_legacy(const char *text, void *data)
+{
+    struct day_ctx *ctx = data;
+    if (ctx->legacy_count < ARRAYLEN(ctx->legacy))
+        strlcpy(ctx->legacy[ctx->legacy_count++], text, sizeof(ctx->legacy[0]));
+}
+
+static void day_title(const struct extras_date *d, char *buf, size_t size)
+{
+    char month[24];
+    strlcpy(month, str(LANG_EXTRAS_CALENDARS_JANUARY + d->month - 1),
+            sizeof(month));
+    format_date_lang(buf, size, LANG_EXTRAS_CALENDARS_DAY_TITLE,
+                     month, d->day, d->year);
+}
+
+static const char *day_get_name(int row, void *data, char *buf, size_t size)
+{
+    struct day_ctx *ctx = data;
+    if (row >= ctx->count)
+        return ctx->legacy[row - ctx->count];
+    const struct ical_event_idx *e = &ctx->idx->events[ctx->events[row]];
+    const char *s = ical_pool_str(ctx->idx, e->summary_off);
+    strlcpy(buf, *s ? s : "Untitled", size);
+    return buf;
+}
+
+static enum list_row_kind day_get_kind(int row, void *data)
+{
+    (void)row; (void)data;
+    return LIST_ROW_MENU;
+}
+
+static void day_subtitle(const struct ical_event_idx *e, char *buf, size_t size)
+{
+    char t0[16], t1[16];
+    if (e->all_day)
+        strlcpy(buf, "All Day", size);
+    else
+    {
+        extras_format_time(t0, sizeof(t0), e->start_hour, e->start_min);
+        extras_format_time(t1, sizeof(t1), e->end_hour, e->end_min);
+        snprintf(buf, size, "%s - %s", t0, t1);
+    }
+    if (e->repeat != ICAL_REPEAT_NONE)
+    {
+        size_t len = strlen(buf);
+        snprintf(buf + len, size - len, "  (%s)", repeat_labels[e->repeat]);
+    }
+    if (e->alarm != ICAL_ALARM_NONE)
+    {
+        size_t len = strlen(buf);
+        snprintf(buf + len, size - len, "  [Alarm]");
+    }
+}
+
+static void draw_day_row(struct list_putlineinfo_t *info)
+{
+    struct day_ctx *ctx = info->list->data;
+    struct viewport *vp = info->vp;
+    const struct viewport *parent = info->list->parent[SCREEN_MAIN];
+    int width = parent->x + parent->width - (vp->x + info->x);
+    unsigned fg = vp->fg_pattern;
+    int font = vp->font;
+    int x = info->x + TALL_TEXT_X;
+    bool stock = is_stock_look();
+
+    if (info->is_selected)
+    {
+        const uint32_t *bar = stock ? ui_art_selection(TALL_ROW_H) : NULL;
+        if (bar)
+        {
+            for (int y = 0; y < TALL_ROW_H; y++)
+            {
+                vp->fg_pattern = LCD_RGBPACK(bar[y] >> 16, (bar[y] >> 8) & 255,
+                                             bar[y] & 255);
+                lcd_hline(info->x, info->x + width - 1, info->y + y);
+            }
+        }
+        else
+        {
+            vp->fg_pattern = LCD_RGBPACK(30, 34, 44);
+            lcd_fillrect(info->x, info->y, width, TALL_ROW_H);
+            vp->fg_pattern = ui_theme_rgb565(UI_COLOR_SELECTION);
+            lcd_fillrect(info->x, info->y + 4, 4, TALL_ROW_H - 8);
+        }
+    }
+
+    vp->fg_pattern = info->is_selected ?
+        (stock ? fg : ui_theme_rgb565(UI_COLOR_SELECTED_TEXT)) :
+        (stock ? fg : ui_theme_rgb565(UI_COLOR_FOREGROUND));
+    lcd_putsxy(x, info->y + TALL_TITLE_BASE - font_get(font)->ascent,
+               (const unsigned char *)info->dsp_text);
+
+    if (ctx->sub_font >= 0 && info->line < ctx->count)
+    {
+        char sub[80];
+        const struct ical_event_idx *e =
+            &ctx->idx->events[ctx->events[info->line]];
+        day_subtitle(e, sub, sizeof(sub));
+        vp->font = ctx->sub_font;
+        vp->fg_pattern = info->is_selected ?
+            (stock ? fg : ui_theme_rgb565(UI_COLOR_SELECTED_TEXT)) :
+            (stock ? SUB_RGB : ui_theme_rgb565(UI_COLOR_MUTED));
+        lcd_putsxy(x, info->y + TALL_SUB_BASE - font_get(ctx->sub_font)->ascent,
+                   (const unsigned char *)sub);
+        vp->font = font;
+    }
+
+    if (info->is_selected && stock && info->line < ctx->count)
+        stock_art_draw(STOCK_ART_SYSTEM_SUBMENU,
+                       vp->x + info->x + width - TALL_CHEVRON_R,
+                       vp->y + info->y + TALL_CHEVRON_Y,
+                       (struct ui_rect){ vp->x, vp->y, vp->width, vp->height });
+    else if (!info->is_selected)
+    {
+        vp->fg_pattern = stock ? ROW_RULE_RGB :
+                                 ui_theme_rgb565(UI_COLOR_SEPARATOR);
+        lcd_hline(info->x, info->x + width - 1, info->y + TALL_ROW_H - 1);
+    }
+    vp->fg_pattern = fg;
+}
+
+static void paint_empty_page(const char *heading, const char *hint, int font,
+                             int sub_font)
+{
+    struct screen *d = &screens[SCREEN_MAIN];
+    struct viewport content;
+    viewportmanager_theme_enable(SCREEN_MAIN, true, &content);
+    bool stock = is_stock_look();
+    content.bg_pattern = stock ? LCD_WHITE :
+                                 ui_theme_rgb565(UI_COLOR_BACKGROUND);
+    content.fg_pattern = stock ? LCD_BLACK :
+                                 ui_theme_rgb565(UI_COLOR_FOREGROUND);
+    content.drawmode = DRMODE_SOLID;
+    struct viewport *last = d->set_viewport(&content);
+    d->clear_viewport();
+
+    int f = font >= 0 ? font : content.font;
+    content.font = f;
+    content.drawmode = DRMODE_FG;
+    int w = 0, h = 0;
+    font_getstringsize((const unsigned char *)heading, &w, &h, f);
+    d->putsxy((content.width - w) / 2, content.height / 2 - h,
+              (const unsigned char *)heading);
+
+    if (hint && *hint)
+    {
+        int sf = sub_font >= 0 ? sub_font : f;
+        content.font = sf;
+        content.fg_pattern = stock ? SUB_RGB : ui_theme_rgb565(UI_COLOR_MUTED);
+        font_getstringsize((const unsigned char *)hint, &w, &h, sf);
+        d->putsxy((content.width - w) / 2, content.height / 2 + 10,
+                  (const unsigned char *)hint);
+    }
+
+    d->set_viewport(last);
+    d->update();
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+}
+
+static int calendar_button_step(int action)
+{
+    if (action != ACTION_STD_CANCEL && action != ACTION_STD_OK)
+        return 0;
+    int button;
+    get_action_statuscode(&button);
+    return button == BUTTON_LEFT ? -1 : button == BUTTON_RIGHT ? 1 : 0;
+}
+
+static int day_page(struct ical_index *idx, int filter, struct extras_date *d)
+{
+    int ctx_handle = core_alloc(sizeof(struct day_ctx));
+    if (ctx_handle <= 0)
+        return 0;
+    struct day_ctx *ctx = core_get_data_pinned(ctx_handle);
+    *ctx = (struct day_ctx){ .idx = idx, .file_filter = filter, .shown = *d };
+    char title[48];
+    int ret = 0, sel = 0;
+    bool select_wheeled = false;
+    struct ui_scene scene = {0};
+
+    ctx->sub_font = ui_theme_current_font_load(UI_FONT_BODY,
+                                              global_settings.glyphs_to_cache);
+    int head_font = ui_theme_current_font_load(UI_FONT_TITLE,
+                                               global_settings.glyphs_to_cache);
+
+    ui_scene_open_page(&scene, "cal-day-push");
+
+    for (;;)
+    {
+        ctx->count = ical_events_on_day(idx, &ctx->shown, ctx->events,
+                                       ARRAYLEN(ctx->events));
+        if (filter >= 0)
+        {
+            int count = 0;
+            for (int i = 0; i < ctx->count; i++)
+                if (idx->events[ctx->events[i]].file_idx == filter)
+                    ctx->events[count++] = ctx->events[i];
+            ctx->count = count;
+        }
+        ctx->legacy_count = 0;
+        if (filter < 0)
+        {
+            memo_scan(&ctx->shown, day_add_legacy, ctx);
+            calendar_ics_on(ctx->shown.year, ctx->shown.month, ctx->shown.day,
+                            day_add_legacy, ctx);
+        }
+        int rows = ctx->count + ctx->legacy_count;
+        day_title(&ctx->shown, title, sizeof(title));
+        sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
+
+        if (rows == 0)
+        {
+            paint_empty_page(str(LANG_EXTRAS_CALENDARS_NO_EVENTS),
+                             "SELECT: New Event", head_font, ctx->sub_font);
+            int action = get_action(CONTEXT_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ);
+            int step = calendar_button_step(action);
+            if (step)
+            {
+                extras_step_days(&ctx->shown, step);
+                continue;
+            }
+            if (!(button_status() & BUTTON_SELECT))
+                select_wheeled = false;
+            if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+                break;
+            if (default_event_handler(action) == SYS_USB_CONNECTED)
+            {
+                ret = GO_TO_ROOT;
+                break;
+            }
+            if ((action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT) &&
+                (button_status() & BUTTON_SELECT))
+            {
+                select_wheeled = true;
+                extras_step_days(&ctx->shown, 1);
+                continue;
+            }
+            if ((action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT) &&
+                (button_status() & BUTTON_SELECT))
+            {
+                select_wheeled = true;
+                extras_step_days(&ctx->shown, -1);
+                continue;
+            }
+            if (action == ACTION_STD_OK)
+            {
+                struct ical_event ev;
+                bool changed = false;
+                ical_event_init_new(&ev, &ctx->shown);
+                ret = run_event_editor(&ev, &changed);
+                if (ret) break;
+                if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+            }
+            else if (action == ACTION_STD_CONTEXT && !select_wheeled)
+            {
+                static const char *const menu_empty[] = {
+                    "New Event", "Next Day", "Previous Day", "Go to Today"
+                };
+                int choice = show_choice_list(title, menu_empty,
+                                              ARRAYLEN(menu_empty), 0);
+                if (choice == -2) { ret = GO_TO_ROOT; break; }
+                if (choice == 0)
+                {
+                    struct ical_event ev;
+                    bool changed = false;
+                    ical_event_init_new(&ev, &ctx->shown);
+                    ret = run_event_editor(&ev, &changed);
+                    if (ret) break;
+                    if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+                }
+                else if (choice == 1) extras_step_days(&ctx->shown, 1);
+                else if (choice == 2) extras_step_days(&ctx->shown, -1);
+                else if (choice == 3) ctx->shown = extras_today();
+            }
+            continue;
+        }
+
+        struct gui_synclist list;
+        viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+        gui_synclist_init(&list, day_get_name, ctx, false, 1, NULL);
+        gui_synclist_set_title(&list, title, Icon_NOICON);
+        gui_synclist_set_row_callbacks(&list, day_get_kind, NULL, NULL);
+        gui_synclist_set_row_height(&list, TALL_ROW_H);
+        list.callback_draw_item = draw_day_row;
+        gui_synclist_set_nb_items(&list, rows);
+        gui_synclist_select_item(&list, MIN(sel, rows - 1));
+        gui_synclist_draw_settled(&list);
+
+        bool reload = false, leave = false;
+        while (!reload && !leave)
+        {
+            int action;
+            bool handled = list_do_action(CONTEXT_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ, &list, &action);
+            int step = calendar_button_step(action);
+            if (step)
+            {
+                extras_step_days(&ctx->shown, step);
+                sel = 0;
+                reload = true;
+                break;
+            }
+            if (!(button_status() & BUTTON_SELECT))
+                select_wheeled = false;
+
+            if ((action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT) &&
+                (button_status() & BUTTON_SELECT))
+            {
+                select_wheeled = true;
+                extras_step_days(&ctx->shown, 1);
+                sel = 0;
+                reload = true;
+                break;
+            }
+            if ((action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT) &&
+                (button_status() & BUTTON_SELECT))
+            {
+                select_wheeled = true;
+                extras_step_days(&ctx->shown, -1);
+                sel = 0;
+                reload = true;
+                break;
+            }
+            if (handled)
+            {
+                sel = gui_synclist_get_sel_pos(&list);
+                continue;
+            }
+            sel = gui_synclist_get_sel_pos(&list);
+
+            if (action == ACTION_STD_OK && sel < ctx->count)
+            {
+                const struct ical_event_idx *ei = &idx->events[ctx->events[sel]];
+                char path[MAX_PATH];
+                ical_file_path(idx, ei->file_idx, path, sizeof(path));
+                struct ical_event ev;
+                if (ical_load_event(path, ei->comp_start, ei->comp_end, &ev))
+                {
+                    bool changed = false;
+                    gui_synclist_scroll_stop(&list);
+                    viewportmanager_theme_undo(SCREEN_MAIN, false);
+                    ret = run_event_editor(&ev, &changed);
+                    if (ret) goto finish;
+                    if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+                    reload = true;
+                    goto next_iter;
+                }
+            }
+            else if (action == ACTION_STD_CONTEXT && !select_wheeled)
+            {
+                static const char *const menu_day[] = {
+                    "New Event", "Edit Event", "Delete Event",
+                    "Next Day", "Previous Day", "Go to Today"
+                };
+                gui_synclist_scroll_stop(&list);
+                viewportmanager_theme_undo(SCREEN_MAIN, false);
+                static const char *const menu_legacy[] = {
+                    "New Event", "Next Day", "Previous Day", "Go to Today"
+                };
+                bool legacy = sel >= ctx->count;
+                int choice = legacy
+                    ? show_choice_list(title, menu_legacy, ARRAYLEN(menu_legacy), 0)
+                    : show_choice_list(title, menu_day, ARRAYLEN(menu_day), 0);
+                if (legacy && choice > 0)
+                    choice += 2;
+                if (choice == -2) { ret = GO_TO_ROOT; goto finish; }
+                if (choice == 0)
+                {
+                    struct ical_event ev;
+                    bool changed = false;
+                    ical_event_init_new(&ev, &ctx->shown);
+                    ret = run_event_editor(&ev, &changed);
+                    if (ret) goto finish;
+                    if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+                }
+                else if (choice == 1)
+                {
+                    const struct ical_event_idx *ei =
+                        &idx->events[ctx->events[sel]];
+                    char path[MAX_PATH];
+                    ical_file_path(idx, ei->file_idx, path, sizeof(path));
+                    struct ical_event ev;
+                    if (ical_load_event(path, ei->comp_start, ei->comp_end, &ev))
+                    {
+                        bool changed = false;
+                        ret = run_event_editor(&ev, &changed);
+                        if (ret) goto finish;
+                        if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+                    }
+                }
+                else if (choice == 2)
+                {
+                    int c = confirm_prompt("Delete this event?",
+                                           LANG_DELETE, LANG_DIAG_CANCEL);
+                    if (c < 0) { ret = GO_TO_ROOT; goto finish; }
+                    if (c == 1)
+                    {
+                        const struct ical_event_idx *ei =
+                            &idx->events[ctx->events[sel]];
+                        char path[MAX_PATH];
+                        ical_file_path(idx, ei->file_idx, path, sizeof(path));
+                        if (ical_delete_component(path, ei->comp_start,
+                                                  ei->comp_end))
+                        {
+                            reminders_loaded = false;
+                            ical_scan(idx, ICAL_DIR);
+                        }
+                    }
+                }
+                else if (choice == 3) { extras_step_days(&ctx->shown, 1); sel = 0; }
+                else if (choice == 4) { extras_step_days(&ctx->shown, -1); sel = 0; }
+                else if (choice == 5) { ctx->shown = extras_today(); sel = 0; }
+                reload = true;
+                goto next_iter;
+            }
+            else if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+            {
+                leave = true;
+            }
+            else if (default_event_handler(action) == SYS_USB_CONNECTED)
+            {
+                ret = GO_TO_ROOT;
+                leave = true;
+            }
+        }
+        gui_synclist_scroll_stop(&list);
+        viewportmanager_theme_undo(SCREEN_MAIN, false);
+next_iter:
+        if (leave)
+            break;
+    }
+
+finish:
+    ui_scene_close_modal(&scene, ret == 0, "cal-day-pop");
+    if (ctx->sub_font >= 0) font_unload(ctx->sub_font);
+    if (head_font >= 0) font_unload(head_font);
+    *d = ctx->shown;
+    core_put_data_pinned(ctx);
+    core_free(ctx_handle);
+    return ret;
+}
+
+/* ---- Month View ---- */
+
+struct month_page_ctx {
+    struct ical_index *idx;
+    int file_filter;
+    struct extras_date shown;
+    uint32_t *band;
+    int font;
+    int left, top, width;
+};
+
+static void month_title(const struct extras_date *d, char *buf, size_t size)
+{
+    format_date_lang(buf, size, LANG_EXTRAS_CALENDARS_MONTH_TITLE,
+                     str(LANG_MONTH_JANUARY + d->month - 1), d->day, d->year);
+}
+
+static void fill_band_rect(struct stock_canvas *band, int rx, int ry,
+                           int rw, int rh, uint32_t rgb)
+{
+    int y0 = MAX(ry, band->y);
+    int y1 = MIN(ry + rh, band->y + band->height);
+    int x0 = MAX(rx, band->x);
+    int x1 = MIN(rx + rw, band->x + band->width);
+    for (int y = y0; y < y1; y++)
+    {
+        uint32_t *row = band->pixels + (y - band->y) * band->width;
+        for (int x = x0; x < x1; x++)
+            row[x - band->x] = rgb;
+    }
+}
+
+static void month_compose(struct stock_canvas *band, struct month_page_ctx *p)
+{
+    bool stock = is_stock_look();
+    uint32_t bg = stock ? WHITE : theme_rgb24(UI_COLOR_BACKGROUND);
+    uint32_t fg = stock ? BLACK : theme_rgb24(UI_COLOR_FOREGROUND);
+    uint32_t muted = stock ? GREY : theme_rgb24(UI_COLOR_MUTED);
+    uint32_t sel_bg = stock ? 0x0078d4 : 0x2458a8;
+    uint32_t sel_fg = WHITE;
+    uint32_t cell_in = 0x1a1d24;
+    uint32_t cell_out = 0x0e1015;
+    uint32_t accent = 0x52a8ff;
+
+    for (int i = 0; i < band->width * band->height; i++)
+        band->pixels[i] = bg;
+
+    int head_base = stock ? HEAD_BASE : p->top + 13;
+    int cell_x = stock ? CELL_X : p->left + (p->width - 7 * ((p->width) / 7)) / 2;
+    int cell_dx = stock ? CELL_DX : p->width / 7;
+    int cell_w = stock ? CELL_W : cell_dx - 3;
+    int cell_y = stock ? CELL_Y : p->top + 18;
+    int cell_dy = stock ? CELL_DY : (LCD_HEIGHT - cell_y - 2) / 6;
+    int cell_h = stock ? CELL_H : cell_dy - 3;
+    int flag_x = stock ? FLAG_X : cell_w - 11;
+
+    struct extras_date first = { p->shown.year, p->shown.month, 1 };
+    int lead = extras_week_day(&first);
+    struct extras_date d = first;
+    extras_step_days(&d, -(lead ? lead : 7));
+
+    for (int col = 0; col < 7; col++)
+    {
+        const char *head = str(LANG_WEEKDAY_SUNDAY + col);
+        int x = cell_x + col * cell_dx;
+        int font = extras_font_for(p->font, head);
+        put_text(band, font, head,
+                 x + (cell_w - text_width(font, head)) / 2, head_base, muted);
+    }
+
+    for (int i = 0; i < 42; i++, extras_step_days(&d, 1))
+    {
+        int x = cell_x + (i % 7) * cell_dx;
+        int y = cell_y + (i / 7) * cell_dy;
+        if (y >= band->y + band->height || y + cell_dy <= band->y)
+            continue;
+        bool in = d.month == p->shown.month;
+        bool selected = in && d.day == p->shown.day;
+        if (stock)
+        {
+            stock_art_put(band, selected ? STOCK_ART_CALENDAR_HILITE_CELL :
+                          in ? STOCK_ART_CALENDAR_ACTIVE_CELL :
+                          STOCK_ART_CALENDAR_INACTIVE_CELL, x, y);
+        }
+        else
+        {
+            fill_band_rect(band, x, y, cell_w, cell_h,
+                           selected ? sel_bg : in ? cell_in : cell_out);
+        }
+        char num[4];
+        snprintf(num, sizeof(num), "%d", d.day);
+        put_text(band, p->font, num, x + NUM_X, y + NUM_BASE,
+                 selected ? sel_fg : in ? fg : muted);
+        bool event = p->file_filter < 0 && has_memo(&d);
+        bool alarm = false;
+        for (int j = 0; j < p->idx->event_count; j++)
+        {
+            const struct ical_event_idx *e = &p->idx->events[j];
+            if ((p->file_filter < 0 || e->file_idx == p->file_filter) &&
+                ical_event_occurs_on(p->idx, e, &d))
+            {
+                event = true;
+                alarm |= e->alarm != ICAL_ALARM_NONE && alarm_sound != 2;
+            }
+        }
+        if (event)
+        {
+            if (stock)
+                stock_art_put(band, STOCK_ART_CALENDAR_FLAG,
+                              x + FLAG_X, y + FLAG_Y);
+            else
+                fill_band_rect(band, x + flag_x, y + FLAG_Y + 2, 6, 6,
+                               selected ? sel_fg : accent);
+            if (alarm)
+                put_bell(band, x + FLAG_X + 7, y + FLAG_Y + 8);
+        }
+    }
+}
+
+static void month_view_paint(const struct ui_view *view,
+                             const struct ui_view_frame *frame)
+{
+    struct month_page_ctx *p = view->data;
     struct ui_rect clip = frame->clip;
     for (int y = clip.y; y < clip.y + clip.height; y += BAND_ROWS)
     {
@@ -1250,45 +1911,69 @@ static void page_paint(const struct ui_view *view,
             p->band, clip.x, y, clip.width,
             MIN(BAND_ROWS, clip.y + clip.height - y),
         };
-        for (int i = 0; i < band.width * band.height; i++)
-            band.pixels[i] = WHITE;
-        p->compose(&band, p);
+        month_compose(&band, p);
         stock_canvas_show(&band, clip);
     }
 }
 
-static const struct ui_view_ops page_ops = { .paint = page_paint };
+static const struct ui_view_ops month_view_ops = { .paint = month_view_paint };
 
-static int page_run(struct page *p, char *title, size_t size,
-                    bool (*key)(struct page *p, int action, char *title,
-                                size_t size))
+static int month_page(struct ical_index *idx, int filter)
 {
+    char title[48];
+    struct month_page_ctx p = { .idx = idx, .file_filter = filter,
+                                .shown = extras_today() };
     struct viewport content;
     struct ui_view view;
     struct ui_page page;
     struct ui_scene scene = {0};
     int handle = core_alloc(LCD_WIDTH * BAND_ROWS * sizeof(uint32_t));
     int ret = 0;
+    bool select_wheeled = false;
 
     if (handle <= 0)
         return 0;
-    p->band = core_get_data_pinned(handle);
+    p.band = core_get_data_pinned(handle);
+    p.font = font_load_ex(CAL_FONT, 0, global_settings.glyphs_to_cache);
+    if (p.font < 0)
+        p.font = ui_theme_current_font_load(UI_FONT_LIST_VALUE,
+                                            global_settings.glyphs_to_cache);
+
+    month_title(&p.shown, title, sizeof(title));
     ui_scene_open_page(&scene, "calendars-push");
     sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
     viewportmanager_theme_enable(SCREEN_MAIN, true, &content);
+    p.left = content.x;
+    p.top = content.y;
+    p.width = content.width;
     struct ui_rect bounds = { content.x, content.y, content.width,
                               content.height };
-    ui_view_init(&view, bounds, &page_ops, p);
+    ui_view_init(&view, bounds, &month_view_ops, &p);
     ui_page_init(&page, &view);
 
     for (bool dirty = true; ; )
     {
         if (dirty)
         {
+            sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
+            sb_update(SCREEN_MAIN, true);
             ui_page_invalidate(&page, bounds);
             ui_page_draw(&page);
+            dirty = false;
         }
-        int action = extras_get_action(HZ, true);
+
+        int action = get_action(CONTEXT_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ);
+        int step = calendar_button_step(action);
+        if (step)
+        {
+            extras_step_month(&p.shown, step);
+            month_title(&p.shown, title, sizeof(title));
+            dirty = true;
+            continue;
+        }
+        if (!(button_status() & BUTTON_SELECT))
+            select_wheeled = false;
+
         if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
             break;
         if (default_event_handler(action) == SYS_USB_CONNECTED)
@@ -1296,641 +1981,664 @@ static int page_run(struct page *p, char *title, size_t size,
             ret = GO_TO_ROOT;
             break;
         }
-        dirty = key && key(p, action, title, size);
-        if (p->ret)
+
+        if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
         {
-            ret = p->ret;
-            break;
+            if (button_status() & BUTTON_SELECT)
+            {
+                select_wheeled = true;
+                extras_step_month(&p.shown, 1);
+            }
+            else
+                extras_step_days(&p.shown, 1);
+            month_title(&p.shown, title, sizeof(title));
+            dirty = true;
         }
-        if (dirty)
+        else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
         {
-            sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
-            sb_update(SCREEN_MAIN, true);
+            if (button_status() & BUTTON_SELECT)
+            {
+                select_wheeled = true;
+                extras_step_month(&p.shown, -1);
+            }
+            else
+                extras_step_days(&p.shown, -1);
+            month_title(&p.shown, title, sizeof(title));
+            dirty = true;
+        }
+        else if (action == ACTION_STD_OK)
+        {
+            viewportmanager_theme_undo(SCREEN_MAIN, false);
+            ret = day_page(idx, filter, &p.shown);
+            viewportmanager_theme_enable(SCREEN_MAIN, true, &content);
+            if (ret) break;
+            ical_scan(idx, ICAL_DIR);
+            month_title(&p.shown, title, sizeof(title));
+            dirty = true;
+        }
+        else if (action == ACTION_STD_CONTEXT && !select_wheeled)
+        {
+            static const char *const month_menu[] = {
+                "New Event", "Go to Today", "Next Month", "Previous Month"
+            };
+            char mtitle[32];
+            format_short_date(mtitle, sizeof(mtitle), &p.shown);
+            viewportmanager_theme_undo(SCREEN_MAIN, false);
+            int choice = show_choice_list(mtitle, month_menu,
+                                          ARRAYLEN(month_menu), 0);
+            if (choice == -2)
+            {
+                viewportmanager_theme_enable(SCREEN_MAIN, true, &content);
+                ret = GO_TO_ROOT;
+                break;
+            }
+            if (choice == 0)
+            {
+                struct ical_event ev;
+                bool changed = false;
+                ical_event_init_new(&ev, &p.shown);
+                ret = run_event_editor(&ev, &changed);
+                if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+            }
+            else if (choice == 1)
+                p.shown = extras_today();
+            else if (choice == 2)
+                extras_step_month(&p.shown, 1);
+            else if (choice == 3)
+                extras_step_month(&p.shown, -1);
+            viewportmanager_theme_enable(SCREEN_MAIN, true, &content);
+            if (ret) break;
+            month_title(&p.shown, title, sizeof(title));
+            dirty = true;
         }
     }
 
     ui_scene_close_modal(&scene, ret == 0, "calendars-pop");
     viewportmanager_theme_undo(SCREEN_MAIN, false);
-    core_put_data_pinned(p->band);
+    if (p.font >= 0)
+        font_unload(p.font);
+    core_put_data_pinned(p.band);
     core_free(handle);
     return ret;
 }
 
-/* ---- detail page (shared by Event Detail and To Do Detail) ---- */
+/* ---- To Do Editor ---- */
 
-static void draw_scrollbar(struct stock_canvas *band, int scroll_y,
-                           int scroll_max)
-{
-    if (scroll_max <= 0)
-        return;
-    int top = 22;
-    int height = LCD_HEIGHT - top - 2;
-    int total = height + scroll_max;
-    int thumb_h = MAX(20, height * height / total);
-    int thumb_y = top + (height - thumb_h) * scroll_y / scroll_max;
-    for (int y = MAX(band->y, top); y < MIN(band->y + band->height, top + height);
-         y++)
-    {
-        uint32_t col = (y >= thumb_y && y < thumb_y + thumb_h) ?
-                       SCROLL_THUMB : SCROLL_TRACK;
-        for (int x = LCD_WIDTH - 6; x < LCD_WIDTH - 2; x++)
-            put_pixel(band, x, y, col);
-    }
-}
-
-static int detail_measure(struct page *p)
-{
-    struct font *pf = font_get(p->font);
-    int val_w = DETAIL_VALUE_R - DETAIL_VALUE_X;
-    int base = DETAIL_TOP_BASE;
-    font_lock(p->font, true);
-    for (int i = 0; i < p->field_count; i++)
-    {
-        if (p->fields[i].extra_gap && i > 0)
-            base += DETAIL_NOTES_GAP;
-        const char *at = p->fields[i].value;
-        int lines = 0;
-        while (*at)
-        {
-            const char *nl = strchr(at, '\n');
-            char seg[160];
-            if (nl)
-            {
-                size_t n = MIN((size_t)(nl - at), sizeof(seg) - 1);
-                memcpy(seg, at, n);
-                seg[n] = '\0';
-            }
-            else
-                strlcpy(seg, at, sizeof(seg));
-            if (!seg[0])
-                lines++;
-            else
-            {
-                const char *cur = seg, *end;
-                while (*cur)
-                {
-                    cur = text_wrap_next(cur, val_w, pf, &end);
-                    lines++;
-                }
-            }
-            if (!nl)
-                break;
-            at = nl + 1;
-        }
-        if (lines < 1)
-            lines = 1;
-        base += lines * DETAIL_ROW_STEP;
-    }
-    font_lock(p->font, false);
-    int bottom = base + 8;
-    return MAX(0, bottom - LCD_HEIGHT);
-}
-
-static void detail_compose(struct stock_canvas *band, struct page *p)
-{
-    struct font *pf = font_get(p->font);
-    int val_w = (p->scroll_max > 0 ? DETAIL_VALUE_R - 6 : DETAIL_VALUE_R) -
-                DETAIL_VALUE_X;
-    int base = DETAIL_TOP_BASE - p->scroll_y;
-    char line[160];
-    font_lock(p->font, true);
-    for (int i = 0; i < p->field_count; i++)
-    {
-        if (p->fields[i].extra_gap && i > 0)
-            base += DETAIL_NOTES_GAP;
-        char lbl[32];
-        snprintf(lbl, sizeof(lbl), "%s:", p->fields[i].label);
-        int lf = extras_font_for(p->font, lbl);
-        int lw = text_width(lf, lbl);
-        put_text(band, lf, lbl, DETAIL_LABEL_RIGHT - lw, base, GREY);
-
-        const char *at = p->fields[i].value;
-        int lines = 0;
-        while (*at)
-        {
-            const char *nl = strchr(at, '\n');
-            char seg[160];
-            if (nl)
-            {
-                size_t n = MIN((size_t)(nl - at), sizeof(seg) - 1);
-                memcpy(seg, at, n);
-                seg[n] = '\0';
-            }
-            else
-                strlcpy(seg, at, sizeof(seg));
-            if (!seg[0])
-            {
-                base += DETAIL_ROW_STEP;
-                lines++;
-            }
-            else
-            {
-                const char *cur = seg, *end;
-                while (*cur)
-                {
-                    const char *next = text_wrap_next(cur, val_w, pf, &end);
-                    strlcpy(line, cur, MIN((size_t)(end - cur) + 1,
-                                           sizeof(line)));
-                    int vf = extras_font_for(p->font, line);
-                    put_text(band, vf, line, DETAIL_VALUE_X, base, BLACK);
-                    base += DETAIL_ROW_STEP;
-                    lines++;
-                    cur = next;
-                }
-            }
-            if (!nl)
-                break;
-            at = nl + 1;
-        }
-        if (lines == 0)
-            base += DETAIL_ROW_STEP;
-    }
-    font_lock(p->font, false);
-    draw_scrollbar(band, p->scroll_y, p->scroll_max);
-}
-
-static bool detail_key(struct page *p, int action, char *title, size_t size)
-{
-    (void)title; (void)size;
-    if (p->scroll_max <= 0)
-        return false;
-    int prev = p->scroll_y;
-    if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
-        p->scroll_y = MIN(p->scroll_max, p->scroll_y + DETAIL_SCROLL_STEP);
-    else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
-        p->scroll_y = MAX(0, p->scroll_y - DETAIL_SCROLL_STEP);
-    return p->scroll_y != prev;
-}
-
-static void detail_add(struct page *p, int lang, const char *val,
-                       bool extra_gap)
-{
-    if (!val || !val[0] || p->field_count >= (int)ARRAYLEN(p->fields))
-        return;
-    struct detail_field *f = &p->fields[p->field_count++];
-    f->label = str(lang);
-    strlcpy(f->value, val, sizeof(f->value));
-    f->extra_gap = extra_gap;
-}
-
-static int run_detail_page(struct page *p, char *title, size_t size)
-{
-    p->compose = detail_compose;
-    p->font = ui_theme_current_font_load(UI_FONT_LIST_VALUE,
-                                         global_settings.glyphs_to_cache);
-    if (p->font < 0)
-        p->font = pane_font();
-    p->scroll_y = 0;
-    p->scroll_max = detail_measure(p);
-    int ret = page_run(p, title, size, detail_key);
-    font_unload(p->font);
-    return ret;
-}
-
-static int event_detail_page(const struct cal_event *ev,
-                             const struct cal_date *d)
-{
-    static struct page p;
-    char title[48], date_str[48], time_str[48];
-    memset(&p, 0, sizeof(p));
-    format_long_date(title, sizeof(title), d);
-    strlcpy(date_str, title, sizeof(date_str));
-
-    if (ev->hour == 255)
-        strlcpy(time_str, str(LANG_EXTRAS_CALENDARS_ALL_DAY),
-                sizeof(time_str));
-    else
-    {
-        char start_s[20];
-        format_clock_hm(start_s, sizeof(start_s), ev->hour, ev->minute);
-        if (ev->end_hour != 255)
-        {
-            char end_s[20];
-            format_clock_hm(end_s, sizeof(end_s), ev->end_hour,
-                            ev->end_minute);
-            snprintf(time_str, sizeof(time_str), "%s - %s", start_s, end_s);
-        }
-        else
-            strlcpy(time_str, start_s, sizeof(time_str));
-    }
-
-    detail_add(&p, LANG_EXTRAS_CALENDARS_SUMMARY, ev->summary, false);
-    detail_add(&p, LANG_EXTRAS_CALENDARS_DATE, date_str, false);
-    detail_add(&p, LANG_EXTRAS_CALENDARS_TIME, time_str, false);
-    detail_add(&p, LANG_EXTRAS_CALENDARS_LOCATION, ev->location, false);
-    detail_add(&p, LANG_EXTRAS_CALENDARS_ATTENDEES, ev->attendees, false);
-    detail_add(&p, LANG_EXTRAS_CALENDARS_NOTES, ev->notes, true);
-    return run_detail_page(&p, title, sizeof(title));
-}
-
-/* ---- day view ---- */
-
-struct day_list_ctx {
-    struct cal_event items[CAL_DAY_MAX];
-    int count;
+enum td_field {
+    TDF_TITLE, TDF_DONE, TDF_DUE, TDF_PRIO, TDF_NOTES, TDF_SAVE, TDF_DELETE
 };
 
-static void day_add_memo(const char *text, void *data)
-{
-    struct day_list_ctx *ctx = data;
-    if (ctx->count >= CAL_DAY_MAX)
-        return;
-    struct cal_event *ev = &ctx->items[ctx->count++];
-    memset(ev, 0, sizeof(*ev));
-    ev->cal_idx = -1;
-    ev->hour = 255;
-    ev->end_hour = 255;
-    strlcpy(ev->summary, text, sizeof(ev->summary));
-}
+struct td_editor_ctx {
+    struct ical_todo *td;
+    enum td_field rows[7];
+    int row_count;
+    bool dirty;
+};
 
-static int cmp_day_event(const void *a, const void *b)
-{
-    const struct cal_event *ea = a;
-    const struct cal_event *eb = b;
-    int ta = ea->hour == 255 ? -1 : ea->hour * 60 + ea->minute;
-    int tb = eb->hour == 255 ? -1 : eb->hour * 60 + eb->minute;
-    if (ta != tb)
-        return ta - tb;
-    return strcasecmp(ea->summary, eb->summary);
-}
-
-static const char *day_row_name(int i, void *data, char *buf, size_t size)
+static const char *td_row_name(int i, void *data, char *buf, size_t size)
 {
     (void)buf; (void)size;
-    struct day_list_ctx *ctx = data;
-    return ctx->items[i].summary;
+    struct td_editor_ctx *ctx = data;
+    switch (ctx->rows[i])
+    {
+        case TDF_TITLE:  return "Title";
+        case TDF_DONE:   return "Completed";
+        case TDF_DUE:    return "Due Date";
+        case TDF_PRIO:   return "Priority";
+        case TDF_NOTES:  return "Notes";
+        case TDF_SAVE:   return str(LANG_SAVE);
+        case TDF_DELETE: return "Delete To Do";
+        default:         return "";
+    }
 }
 
-static enum list_row_kind day_row_kind(int i, void *data)
+static const char *td_row_value(int i, void *data, char *buf, size_t size)
 {
-    (void)i; (void)data;
-    return LIST_ROW_MENU;
+    struct td_editor_ctx *ctx = data;
+    const struct ical_todo *td = ctx->td;
+    switch (ctx->rows[i])
+    {
+        case TDF_TITLE:
+            return td->summary[0] ? td->summary : "Untitled";
+        case TDF_DONE:
+            return str(td->completed ? LANG_ON : LANG_OFF);
+        case TDF_DUE:
+            if (!td->has_due)
+                return "None";
+            format_short_date(buf, size, &td->due_date);
+            return buf;
+        case TDF_PRIO:
+            return priority_labels[ical_priority_to_bucket(td->priority)];
+        case TDF_NOTES:
+            return td->notes[0] ? td->notes : "None";
+        default:
+            return NULL;
+    }
 }
 
-static void empty_day_compose(struct stock_canvas *band, struct page *p)
+static enum list_row_kind td_row_kind(int i, void *data)
 {
-    put_centred(band, p->font, str(LANG_EXTRAS_CALENDARS_NO_EVENTS),
-                LCD_WIDTH / 2, NO_EVENTS_BASE, BLACK);
+    struct td_editor_ctx *ctx = data;
+    switch (ctx->rows[i])
+    {
+        case TDF_DONE:   return LIST_ROW_TOGGLE;
+        case TDF_SAVE:
+        case TDF_DELETE: return LIST_ROW_ACTION;
+        default:         return LIST_ROW_SETTING;
+    }
 }
 
-static int day_page(struct cal_date *d, int cal_filter, int font)
+static int run_todo_editor(struct ical_todo *td, bool *changed)
 {
-    char title[48];
-    format_long_date(title, sizeof(title), d);
-
-    int h = core_alloc(sizeof(struct day_list_ctx));
-    if (h <= 0)
-        return 0;
-    struct day_list_ctx *ctx = core_get_data_pinned(h);
-    ctx->count = 0;
-
-    if (active_store)
-    {
-        for (int i = 0; i < active_store->event_count &&
-             ctx->count < CAL_DAY_MAX; i++)
-        {
-            const struct cal_event *ev = &active_store->events[i];
-            if (cal_filter >= 0 && ev->cal_idx != cal_filter)
-                continue;
-            if (event_on_date(ev, d))
-                ctx->items[ctx->count++] = *ev;
-        }
-    }
-    if (cal_filter < 0)
-    {
-        memo_scan(d, day_add_memo, ctx);
-        calendar_ics_on(d->year, d->month, d->day, day_add_memo, ctx);
-    }
-
-    if (ctx->count == 0)
-    {
-        core_put_data_pinned(ctx);
-        core_free(h);
-        static struct page p;
-        p = (struct page){ .compose = empty_day_compose, .shown = *d,
-                           .font = font };
-        return page_run(&p, title, sizeof(title), NULL);
-    }
-
-    if (ctx->count > 1)
-        qsort(ctx->items, ctx->count, sizeof(ctx->items[0]), cmp_day_event);
+    struct td_editor_ctx ctx = { .td = td, .dirty = false };
+    int n = 0;
+    ctx.rows[n++] = TDF_TITLE;
+    ctx.rows[n++] = TDF_DONE;
+    ctx.rows[n++] = TDF_DUE;
+    ctx.rows[n++] = TDF_PRIO;
+    ctx.rows[n++] = TDF_NOTES;
+    ctx.rows[n++] = TDF_SAVE;
+    if (td->is_existing)
+        ctx.rows[n++] = TDF_DELETE;
+    ctx.row_count = n;
 
     struct gui_synclist list;
     struct ui_scene scene = {0};
-    int action, ret = 0;
+    const char *title = td->is_existing ? "Edit To Do" : "New To Do";
+    int sel = 0, action, ret = 0;
 
-    ui_scene_open_page(&scene, "calendars-day-push");
-    gui_synclist_init(&list, day_row_name, ctx, false, 1, NULL);
-    gui_synclist_set_title(&list, title, Icon_NOICON);
-    gui_synclist_set_row_callbacks(&list, day_row_kind, NULL, NULL);
-    gui_synclist_set_nb_items(&list, ctx->count);
-    gui_synclist_select_item(&list, 0);
+    ui_scene_open_page(&scene, "cal-todo-edit-push");
     sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
     viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+    gui_synclist_init(&list, td_row_name, &ctx, false, 1, NULL);
+    gui_synclist_set_title(&list, title, Icon_NOICON);
+    gui_synclist_set_row_callbacks(&list, td_row_kind, td_row_value, NULL);
+    gui_synclist_set_nb_items(&list, ctx.row_count);
+    gui_synclist_select_item(&list, sel);
     gui_synclist_draw_settled(&list);
 
-    while (!ret)
+    for (;;)
     {
-        extras_list_do_action(HZ, &list, &action);
+        list_do_action(CONTEXT_TREE, HZ, &list, &action);
+        sel = gui_synclist_get_sel_pos(&list);
+
         if (action == ACTION_STD_OK)
         {
-            int sel = gui_synclist_get_sel_pos(&list);
-            if (sel >= 0 && sel < ctx->count)
-                ret = event_detail_page(&ctx->items[sel], d);
+            enum td_field f = ctx.rows[sel];
+            if (f == TDF_TITLE)
+            {
+                char tmp[sizeof(td->summary)];
+                strlcpy(tmp, td->summary, sizeof(tmp));
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
+                {
+                    strlcpy(td->summary, tmp, sizeof(td->summary));
+                    ctx.dirty = true;
+                }
+            }
+            else if (f == TDF_DONE)
+            {
+                td->completed = !td->completed;
+                ctx.dirty = true;
+            }
+            else if (f == TDF_DUE)
+            {
+                if (td->has_due)
+                {
+                    static const char *const opts[] = {
+                        "Change Due Date", "Clear Due Date"
+                    };
+                    int ch = show_choice_list("Due Date", opts, 2, 0);
+                    if (ch == -2) { ret = GO_TO_ROOT; break; }
+                    if (ch == 0)
+                    {
+                        int r = extras_pick_date("Due Date", td->summary,
+                                                 &td->due_date, 2000, 2099);
+                        if (r < 0) { ret = GO_TO_ROOT; break; }
+                        if (r > 0) ctx.dirty = true;
+                    }
+                    else if (ch == 1)
+                    {
+                        td->has_due = false;
+                        ctx.dirty = true;
+                    }
+                }
+                else
+                {
+                    td->due_date = extras_today();
+                    int r = extras_pick_date("Due Date", td->summary,
+                                             &td->due_date, 2000, 2099);
+                    if (r < 0) { ret = GO_TO_ROOT; break; }
+                    if (r > 0) { td->has_due = true; ctx.dirty = true; }
+                }
+            }
+            else if (f == TDF_PRIO)
+            {
+                int cur = ical_priority_to_bucket(td->priority);
+                int r = show_choice_list("Priority", priority_labels, 4, cur);
+                if (r == -2) { ret = GO_TO_ROOT; break; }
+                if (r >= 0)
+                {
+                    td->priority = ical_bucket_to_priority(r);
+                    ctx.dirty = true;
+                }
+            }
+            else if (f == TDF_NOTES)
+            {
+                char tmp[sizeof(td->notes)];
+                strlcpy(tmp, td->notes, sizeof(tmp));
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
+                {
+                    strlcpy(td->notes, tmp, sizeof(td->notes));
+                    ctx.dirty = true;
+                }
+            }
+            else if (f == TDF_SAVE)
+            {
+                if (ical_save_todo(ICAL_DIR, td))
+                {
+                    *changed = true;
+                    break;
+                }
+                splash(HZ, "Could not save To Do");
+            }
+            else if (f == TDF_DELETE)
+            {
+                int c = confirm_prompt("Delete this To Do?",
+                                       LANG_DELETE, LANG_DIAG_CANCEL);
+                if (c < 0) { ret = GO_TO_ROOT; break; }
+                if (c == 1)
+                {
+                    if (ical_delete_component(td->path, td->comp_start,
+                                              td->comp_end))
+                    {
+                        *changed = true;
+                        break;
+                    }
+                    splash(HZ, "Could not delete To Do");
+                }
+            }
             sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
             gui_synclist_draw(&list);
         }
-        else if (action == ACTION_STD_MENU || action == ACTION_STD_CANCEL)
+        else if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+        {
+            if (ctx.dirty)
+            {
+                int c = confirm_prompt("Save changes?",
+                                       LANG_SAVE, LANG_EXTRAS_DISCARD);
+                if (c < 0) { ret = GO_TO_ROOT; break; }
+                if (c == 2) continue;
+                if (c == 1)
+                {
+                    if (!ical_save_todo(ICAL_DIR, td))
+                    {
+                        splash(HZ, "Could not save To Do");
+                        gui_synclist_draw(&list);
+                        continue;
+                    }
+                    *changed = true;
+                }
+            }
             break;
+        }
         else if (default_event_handler(action) == SYS_USB_CONNECTED)
+        {
             ret = GO_TO_ROOT;
+            break;
+        }
     }
 
     gui_synclist_scroll_stop(&list);
-    ui_scene_close_modal(&scene, ret == 0, "calendars-day-pop");
+    ui_scene_close_modal(&scene, ret == 0, "cal-todo-edit-pop");
     viewportmanager_theme_undo(SCREEN_MAIN, false);
-    core_put_data_pinned(ctx);
-    core_free(h);
     return ret;
 }
 
-/* ---- the month ---- */
+/* ---- To Do's List ---- */
 
-static void month_title(const struct cal_date *d, char *buf, size_t size)
+struct todo_list_ctx {
+    struct ical_index *idx;
+    int order[ICAL_MAX_TODOS];
+    int count;
+    int sub_font;
+};
+
+static const struct ical_index *todo_sort_idx;
+
+static int cmp_todo_order(const void *a, const void *b)
 {
-    format_date(buf, size, LANG_EXTRAS_CALENDARS_MONTH_TITLE,
-                str(LANG_MONTH_JANUARY + d->month - 1), d->day, d->year);
+    const struct ical_todo_idx *ta = &todo_sort_idx->todos[*(const int *)a];
+    const struct ical_todo_idx *tb = &todo_sort_idx->todos[*(const int *)b];
+    if (ta->completed != tb->completed)
+        return ta->completed - tb->completed;
+    int ba = ical_priority_to_bucket(ta->priority);
+    int bb = ical_priority_to_bucket(tb->priority);
+    if (ba != bb)
+        return bb - ba; /* higher priority first */
+    if (ta->has_due != tb->has_due)
+        return tb->has_due - ta->has_due;
+    if (ta->has_due)
+    {
+        int dc = extras_date_cmp(&ta->due_date, &tb->due_date);
+        if (dc != 0)
+            return dc;
+    }
+    return strcasecmp(ical_pool_str(todo_sort_idx, ta->summary_off),
+                      ical_pool_str(todo_sort_idx, tb->summary_off));
 }
 
-static void date_flags(const struct cal_date *d, int cal_filter,
-                       bool *has_ev, bool *has_alm)
+static const char *todo_get_name(int row, void *data, char *buf, size_t size)
 {
-    *has_ev = false;
-    *has_alm = false;
-    if (active_store)
+    struct todo_list_ctx *ctx = data;
+    const struct ical_todo_idx *t = &ctx->idx->todos[ctx->order[row]];
+    const char *s = ical_pool_str(ctx->idx, t->summary_off);
+    strlcpy(buf, *s ? s : "Untitled", size);
+    return buf;
+}
+
+static enum list_row_kind todo_get_kind(int row, void *data)
+{
+    (void)row; (void)data;
+    return LIST_ROW_PLAIN;
+}
+
+static void draw_todo_row(struct list_putlineinfo_t *info)
+{
+    struct todo_list_ctx *ctx = info->list->data;
+    const struct ical_todo_idx *t = &ctx->idx->todos[ctx->order[info->line]];
+    struct viewport *vp = info->vp;
+    const struct viewport *parent = info->list->parent[SCREEN_MAIN];
+    int width = parent->x + parent->width - (vp->x + info->x);
+    unsigned fg = vp->fg_pattern;
+    int font = vp->font;
+    bool stock = is_stock_look();
+
+    if (info->is_selected)
     {
-        for (int i = 0; i < active_store->event_count; i++)
+        const uint32_t *bar = stock ? ui_art_selection(TALL_ROW_H) : NULL;
+        if (bar)
         {
-            const struct cal_event *ev = &active_store->events[i];
-            if (cal_filter >= 0 && ev->cal_idx != cal_filter)
-                continue;
-            if (event_on_date(ev, d))
+            for (int y = 0; y < TALL_ROW_H; y++)
             {
-                *has_ev = true;
-                if (ev->has_alarm && alarm_sound != 2)
-                    *has_alm = true;
-                if (*has_alm)
-                    return;
+                vp->fg_pattern = LCD_RGBPACK(bar[y] >> 16, (bar[y] >> 8) & 255,
+                                             bar[y] & 255);
+                lcd_hline(info->x, info->x + width - 1, info->y + y);
             }
         }
-    }
-    if (cal_filter < 0 && has_memo(d))
-        *has_ev = true;
-}
-
-static void month_compose(struct stock_canvas *band, struct page *p)
-{
-    struct cal_date first = { p->shown.year, p->shown.month, 1 };
-    int lead = week_day(&first);
-    struct cal_date d = first;
-    step_days(&d, -(lead ? lead : 7));
-    for (int col = 0; col < 7; col++)
-    {
-        const char *head = str(LANG_WEEKDAY_SUNDAY + col);
-        int x = CELL_X + col * CELL_DX, font = extras_font_for(p->font, head);
-        put_text(band, font, head,
-                 x + (CELL_W - text_width(font, head)) / 2, HEAD_BASE, GREY);
-    }
-    for (int i = 0; i < 42; i++, step_days(&d, 1))
-    {
-        int x = CELL_X + i % 7 * CELL_DX, y = CELL_Y + i / 7 * CELL_DY;
-        if (y >= band->y + band->height || y + CELL_DY <= band->y)
-            continue;
-        bool in = d.month == p->shown.month;
-        bool selected = in && d.day == p->shown.day;
-        stock_art_put(band, selected ? STOCK_ART_CALENDAR_HILITE_CELL :
-                      in ? STOCK_ART_CALENDAR_ACTIVE_CELL :
-                      STOCK_ART_CALENDAR_INACTIVE_CELL, x, y);
-        char num[4];
-        snprintf(num, sizeof(num), "%d", d.day);
-        put_text(band, p->font, num, x + NUM_X, y + NUM_BASE,
-                 selected ? WHITE : in ? BLACK : GREY);
-        bool has_ev = false, has_alm = false;
-        date_flags(&d, p->cal_filter, &has_ev, &has_alm);
-        if (has_ev)
-            stock_art_put(band, STOCK_ART_CALENDAR_FLAG, x + FLAG_X,
-                          y + FLAG_Y);
-        if (has_alm)
-            put_bell(band, x + BELL_X, y + BELL_Y);
-    }
-}
-
-static bool month_key(struct page *p, int action, char *title, size_t size)
-{
-    switch (action)
-    {
-        case ACTION_STD_NEXT:
-        case ACTION_STD_NEXTREPEAT:
-            step_days(&p->shown, 1);
-            break;
-        case ACTION_STD_PREV:
-        case ACTION_STD_PREVREPEAT:
-            step_days(&p->shown, -1);
-            break;
-        case ACTION_STD_OK:
-            p->ret = day_page(&p->shown, p->cal_filter, p->body_font);
-            break;
-        default:
-            return false;
-    }
-    month_title(&p->shown, title, size);
-    return true;
-}
-
-static int month_page(int cal_filter)
-{
-    char title[48];
-    static struct page p;
-    p = (struct page){ .compose = month_compose, .shown = today(),
-                       .cal_filter = cal_filter };
-    p.font = font_load_ex(CAL_FONT, 0, global_settings.glyphs_to_cache);
-    if (p.font < 0)
-        p.font = ui_theme_current_font_load(UI_FONT_LIST_VALUE,
-                                            global_settings.glyphs_to_cache);
-    p.body_font = pane_font();
-    memo_scan(NULL, NULL, NULL);
-    calendar_ics_load();
-    month_title(&p.shown, title, sizeof(title));
-    int ret = page_run(&p, title, sizeof(title), month_key);
-    font_unload(p.font);
-    return ret;
-}
-
-/* ---- To Do's ---- */
-
-static int put_paragraph(struct stock_canvas *c, int font, const char *text,
-                         int base)
-{
-    struct font *pf = font_get(font);
-    int pitch = pf->height;
-    char line[160];
-    font_lock(font, true);
-    for (const char *at = text, *end; *at; base += pitch)
-    {
-        const char *next = text_wrap_next(at, TODO_W, pf, &end);
-        strlcpy(line, at, MIN((size_t)(end - at) + 1, sizeof(line)));
-        put_text(c, font, line, TODO_X, base, BODY_GREY);
-        at = next;
-        if (!*at)
-            break;
-    }
-    font_lock(font, false);
-    return base;
-}
-
-static void todo_howto_compose(struct stock_canvas *band, struct page *p)
-{
-    put_text(band, p->head_font, str(LANG_EXTRAS_CALENDARS_TODO_HOWTO),
-             TODO_X, TODO_HEAD_BASE, BLACK);
-    int base = put_paragraph(band, p->body_font,
-                             str(LANG_EXTRAS_CALENDARS_TODO_TEXT),
-                             TODO_BODY_BASE);
-    put_paragraph(band, p->body_font, str(LANG_EXTRAS_NOTES_HOWTO_MORE),
-                  base + TODO_PARA_GAP);
-}
-
-static int todo_detail_page(const struct cal_todo *td)
-{
-    static struct page p;
-    char title[64], due_str[48], prio_str[8];
-    memset(&p, 0, sizeof(p));
-    strlcpy(title, td->summary, sizeof(title));
-
-    detail_add(&p, LANG_EXTRAS_CALENDARS_SUMMARY, td->summary, false);
-    if (td->due_year > 0)
-    {
-        struct cal_date d = { td->due_year, td->due_month, td->due_day };
-        format_long_date(due_str, sizeof(due_str), &d);
-        detail_add(&p, LANG_EXTRAS_CALENDARS_DUE, due_str, false);
-    }
-    if (td->status != TODO_STATUS_NONE)
-    {
-        static const int status_lang[] = {
-            0,
-            LANG_EXTRAS_CALENDARS_NEEDS_ACTION,
-            LANG_EXTRAS_CALENDARS_COMPLETED,
-            LANG_EXTRAS_CALENDARS_IN_PROCESS,
-            LANG_EXTRAS_CALENDARS_CANCELLED,
-        };
-        detail_add(&p, LANG_EXTRAS_CALENDARS_STATUS,
-                   str(status_lang[td->status]), false);
-    }
-    if (td->priority > 0)
-    {
-        snprintf(prio_str, sizeof(prio_str), "%u", td->priority);
-        detail_add(&p, LANG_EXTRAS_CALENDARS_PRIORITY, prio_str, false);
-    }
-    detail_add(&p, LANG_EXTRAS_CALENDARS_NOTES, td->notes, true);
-    return run_detail_page(&p, title, sizeof(title));
-}
-
-static const char *todo_row_name(int i, void *data, char *buf, size_t size)
-{
-    (void)data; (void)buf; (void)size;
-    return active_store->todos[i].summary;
-}
-
-static enum list_row_kind todo_row_kind(int i, void *data)
-{
-    (void)i; (void)data;
-    return LIST_ROW_MENU;
-}
-
-static int todo_page(void)
-{
-    if (!active_store || active_store->todo_count == 0)
-    {
-        char title[48];
-        static struct page p;
-        p = (struct page){ .compose = todo_howto_compose };
-        p.head_font = ui_theme_current_font_load(UI_FONT_TITLE,
-                                                 global_settings.glyphs_to_cache);
-        p.body_font = ui_theme_current_font_load(UI_FONT_BODY,
-                                                 global_settings.glyphs_to_cache);
-        strlcpy(title, str(LANG_EXTRAS_NOTES_INSTRUCTIONS), sizeof(title));
-        int ret = page_run(&p, title, sizeof(title), NULL);
-        font_unload(p.head_font);
-        font_unload(p.body_font);
-        return ret;
-    }
-
-    struct gui_synclist list;
-    struct ui_scene scene = {0};
-    int action, ret = 0;
-
-    ui_scene_open_page(&scene, "calendars-todo-push");
-    gui_synclist_init(&list, todo_row_name, NULL, false, 1, NULL);
-    gui_synclist_set_title(&list, str(LANG_EXTRAS_CALENDARS_TODO_LIST),
-                           Icon_NOICON);
-    gui_synclist_set_row_callbacks(&list, todo_row_kind, NULL, NULL);
-    gui_synclist_set_nb_items(&list, active_store->todo_count);
-    gui_synclist_select_item(&list, 0);
-    sb_set_persistent_title(str(LANG_EXTRAS_CALENDARS_TODO_LIST), Icon_NOICON,
-                            SCREEN_MAIN);
-    viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
-    gui_synclist_draw_settled(&list);
-
-    while (!ret)
-    {
-        extras_list_do_action(HZ, &list, &action);
-        if (action == ACTION_STD_OK)
+        else
         {
-            int sel = gui_synclist_get_sel_pos(&list);
-            if (sel >= 0 && sel < active_store->todo_count)
-                ret = todo_detail_page(&active_store->todos[sel]);
-            sb_set_persistent_title(str(LANG_EXTRAS_CALENDARS_TODO_LIST),
-                                    Icon_NOICON, SCREEN_MAIN);
-            gui_synclist_draw(&list);
+            vp->fg_pattern = LCD_RGBPACK(30, 34, 44);
+            lcd_fillrect(info->x, info->y, width, TALL_ROW_H);
+            vp->fg_pattern = ui_theme_rgb565(UI_COLOR_SELECTION);
+            lcd_fillrect(info->x, info->y + 4, 4, TALL_ROW_H - 8);
         }
-        else if (action == ACTION_STD_MENU || action == ACTION_STD_CANCEL)
-            break;
-        else if (default_event_handler(action) == SYS_USB_CONNECTED)
-            ret = GO_TO_ROOT;
     }
 
-    gui_synclist_scroll_stop(&list);
-    ui_scene_close_modal(&scene, ret == 0, "calendars-todo-pop");
-    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    /* Checkbox at left of row. */
+    int bx = info->x + 10, by = info->y + 14, bs = 16;
+    unsigned box_col = info->is_selected ?
+        (stock ? fg : ui_theme_rgb565(UI_COLOR_SELECTED_TEXT)) :
+        (stock ? SUB_RGB : ui_theme_rgb565(UI_COLOR_MUTED));
+    vp->fg_pattern = box_col;
+    lcd_drawrect(bx, by, bs, bs);
+    if (t->completed)
+    {
+        vp->fg_pattern = info->is_selected ?
+            (stock ? fg : ui_theme_rgb565(UI_COLOR_SELECTED_TEXT)) :
+            (stock ? LCD_RGBPACK(24, 130, 56) : ui_theme_rgb565(UI_COLOR_ACCENT));
+        lcd_drawline(bx + 3, by + 8, bx + 6, by + 12);
+        lcd_drawline(bx + 6, by + 12, bx + 13, by + 4);
+        lcd_drawline(bx + 3, by + 9, bx + 6, by + 13);
+        lcd_drawline(bx + 6, by + 13, bx + 13, by + 5);
+    }
+
+    int tx = info->x + 34;
+    vp->fg_pattern = info->is_selected ?
+        (stock ? fg : ui_theme_rgb565(UI_COLOR_SELECTED_TEXT)) :
+        t->completed ? (stock ? SUB_RGB : ui_theme_rgb565(UI_COLOR_MUTED)) :
+                       (stock ? fg : ui_theme_rgb565(UI_COLOR_FOREGROUND));
+    lcd_putsxy(tx, info->y + TALL_TITLE_BASE - font_get(font)->ascent,
+               (const unsigned char *)info->dsp_text);
+
+    if (ctx->sub_font >= 0)
+    {
+        char sub[80];
+        if (t->completed)
+            strlcpy(sub, "Completed", sizeof(sub));
+        else if (t->has_due)
+        {
+            char dbuf[24];
+            format_short_date(dbuf, sizeof(dbuf), &t->due_date);
+            snprintf(sub, sizeof(sub), "Due %s", dbuf);
+        }
+        else
+            strlcpy(sub, "No due date", sizeof(sub));
+
+        int b = ical_priority_to_bucket(t->priority);
+        if (b > 0)
+        {
+            static const char *const pb[4] = { "", "  ! Low", "  !! Med",
+                                               "  !!! High" };
+            size_t len = strlen(sub);
+            snprintf(sub + len, sizeof(sub) - len, "%s", pb[b]);
+        }
+
+        vp->font = ctx->sub_font;
+        vp->fg_pattern = info->is_selected ?
+            (stock ? fg : ui_theme_rgb565(UI_COLOR_SELECTED_TEXT)) :
+            (stock ? SUB_RGB : ui_theme_rgb565(UI_COLOR_MUTED));
+        lcd_putsxy(tx, info->y + TALL_SUB_BASE - font_get(ctx->sub_font)->ascent,
+                   (const unsigned char *)sub);
+        vp->font = font;
+    }
+
+    if (!info->is_selected)
+    {
+        vp->fg_pattern = stock ? ROW_RULE_RGB :
+                                 ui_theme_rgb565(UI_COLOR_SEPARATOR);
+        lcd_hline(info->x, info->x + width - 1, info->y + TALL_ROW_H - 1);
+    }
+    vp->fg_pattern = fg;
+}
+
+static int todo_page(struct ical_index *idx)
+{
+    struct todo_list_ctx ctx = { .idx = idx };
+    struct ui_scene scene = {0};
+    int ret = 0, sel = 0;
+
+    ctx.sub_font = ui_theme_current_font_load(UI_FONT_BODY,
+                                              global_settings.glyphs_to_cache);
+    int head_font = ui_theme_current_font_load(UI_FONT_TITLE,
+                                               global_settings.glyphs_to_cache);
+    ui_scene_open_page(&scene, "cal-todo-push");
+
+    for (;;)
+    {
+        ctx.count = idx->todo_count;
+        for (int i = 0; i < ctx.count; i++)
+            ctx.order[i] = i;
+        todo_sort_idx = idx;
+        if (ctx.count > 1)
+            qsort(ctx.order, (size_t)ctx.count, sizeof(ctx.order[0]),
+                  cmp_todo_order);
+
+        const char *title = str(LANG_EXTRAS_CALENDARS_TODOS);
+        sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
+
+        if (ctx.count == 0)
+        {
+            paint_empty_page("No To Do's", "SELECT: New To Do",
+                             head_font, ctx.sub_font);
+            int action = get_action(CONTEXT_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ);
+            if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+                break;
+            if (default_event_handler(action) == SYS_USB_CONNECTED)
+            {
+                ret = GO_TO_ROOT;
+                break;
+            }
+            if (action == ACTION_STD_OK || action == ACTION_STD_CONTEXT)
+            {
+                struct ical_todo td;
+                bool changed = false;
+                ical_todo_init_new(&td);
+                ret = run_todo_editor(&td, &changed);
+                if (ret) break;
+                if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+            }
+            continue;
+        }
+
+        struct gui_synclist list;
+        viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+        gui_synclist_init(&list, todo_get_name, &ctx, false, 1, NULL);
+        gui_synclist_set_title(&list, title, Icon_NOICON);
+        gui_synclist_set_row_callbacks(&list, todo_get_kind, NULL, NULL);
+        gui_synclist_set_row_height(&list, TALL_ROW_H);
+        list.callback_draw_item = draw_todo_row;
+        gui_synclist_set_nb_items(&list, ctx.count);
+        gui_synclist_select_item(&list, MIN(sel, ctx.count - 1));
+        gui_synclist_draw_settled(&list);
+
+        bool reload = false, leave = false;
+        while (!reload && !leave)
+        {
+            int action;
+            list_do_action(CONTEXT_TREE, HZ, &list, &action);
+            sel = gui_synclist_get_sel_pos(&list);
+
+            if (action == ACTION_STD_OK)
+            {
+                /* SELECT toggles completed in place and writes atomically. */
+                const struct ical_todo_idx *ti = &idx->todos[ctx.order[sel]];
+                char path[MAX_PATH];
+                ical_file_path(idx, ti->file_idx, path, sizeof(path));
+                struct ical_todo td;
+                if (ical_load_todo(path, ti->comp_start, ti->comp_end, &td))
+                {
+                    td.completed = !td.completed;
+                    if (ical_save_todo(ICAL_DIR, &td))
+                    {
+                        ical_scan(idx, ICAL_DIR);
+                        reload = true;
+                    }
+                    else
+                        splash(HZ, "Could not save To Do");
+                }
+            }
+            else if (action == ACTION_STD_CONTEXT)
+            {
+                static const char *const menu_todo[] = {
+                    "New To Do", "Edit To Do", "Delete To Do"
+                };
+                gui_synclist_scroll_stop(&list);
+                viewportmanager_theme_undo(SCREEN_MAIN, false);
+                int choice = show_choice_list(title, menu_todo,
+                                              ARRAYLEN(menu_todo), 0);
+                if (choice == -2) { ret = GO_TO_ROOT; goto finish; }
+                if (choice == 0)
+                {
+                    struct ical_todo td;
+                    bool changed = false;
+                    ical_todo_init_new(&td);
+                    ret = run_todo_editor(&td, &changed);
+                    if (ret) goto finish;
+                    if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+                }
+                else if (choice == 1)
+                {
+                    const struct ical_todo_idx *ti =
+                        &idx->todos[ctx.order[sel]];
+                    char path[MAX_PATH];
+                    ical_file_path(idx, ti->file_idx, path, sizeof(path));
+                    struct ical_todo td;
+                    if (ical_load_todo(path, ti->comp_start, ti->comp_end, &td))
+                    {
+                        bool changed = false;
+                        ret = run_todo_editor(&td, &changed);
+                        if (ret) goto finish;
+                        if (changed)
+                {
+                    reminders_loaded = false;
+                    ical_scan(idx, ICAL_DIR);
+                }
+                    }
+                }
+                else if (choice == 2)
+                {
+                    int c = confirm_prompt("Delete this To Do?",
+                                           LANG_DELETE, LANG_DIAG_CANCEL);
+                    if (c < 0) { ret = GO_TO_ROOT; goto finish; }
+                    if (c == 1)
+                    {
+                        const struct ical_todo_idx *ti =
+                            &idx->todos[ctx.order[sel]];
+                        char path[MAX_PATH];
+                        ical_file_path(idx, ti->file_idx, path, sizeof(path));
+                        if (ical_delete_component(path, ti->comp_start,
+                                                  ti->comp_end))
+                            ical_scan(idx, ICAL_DIR);
+                    }
+                }
+                reload = true;
+                goto next_todo_iter;
+            }
+            else if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+            {
+                leave = true;
+            }
+            else if (default_event_handler(action) == SYS_USB_CONNECTED)
+            {
+                ret = GO_TO_ROOT;
+                leave = true;
+            }
+        }
+        gui_synclist_scroll_stop(&list);
+        viewportmanager_theme_undo(SCREEN_MAIN, false);
+next_todo_iter:
+        if (leave)
+            break;
+    }
+
+finish:
+    ui_scene_close_modal(&scene, ret == 0, "cal-todo-pop");
+    if (ctx.sub_font >= 0) font_unload(ctx.sub_font);
+    if (head_font >= 0) font_unload(head_font);
     return ret;
 }
 
-/* ---- the menu ---- */
+/* ---- Top-level Calendars menu ---- */
 
-static int menu_row_count(void)
-{
-    return 3 + cal_file_count;
-}
-
-static int row_todos_idx(void)
-{
-    return 1 + cal_file_count;
-}
-
-static int row_alarms_idx(void)
-{
-    return 2 + cal_file_count;
-}
-
+enum { ROW_ALL, ROW_TODOS, ROW_ALARMS, ROW_COUNT };
 static const char *row_name(int i, void *data, char *buf, size_t size)
 {
-    (void)data; (void)buf; (void)size;
-    if (i == 0)
-        return str(LANG_EXTRAS_CALENDARS_ALL);
-    if (i >= 1 && i <= cal_file_count)
-        return cal_files[i - 1].name;
-    if (i == row_todos_idx())
-        return str(LANG_EXTRAS_CALENDARS_TODOS);
-    return str(LANG_EXTRAS_CALENDARS_ALARMS);
+    const struct ical_index *idx = data;
+    if (i >= ROW_COUNT)
+    {
+        strlcpy(buf, ical_pool_str(idx, idx->file_off[i - ROW_COUNT]), size);
+        char *ext = strrchr(buf, '.');
+        if (ext)
+            *ext = 0;
+        return buf;
+    }
+    static const int name[ROW_COUNT] = {
+        LANG_EXTRAS_CALENDARS_ALL, LANG_EXTRAS_CALENDARS_TODOS,
+        LANG_EXTRAS_CALENDARS_ALARMS,
+    };
+    return str(name[i]);
 }
 
 static const char *row_value(int i, void *data, char *buf, size_t size)
@@ -1939,13 +2647,13 @@ static const char *row_value(int i, void *data, char *buf, size_t size)
     static const int sound[3] = {
         LANG_EXTRAS_CALENDARS_BEEP, LANG_EXTRAS_CALENDARS_NONE, LANG_OFF,
     };
-    return i == row_alarms_idx() ? str(sound[alarm_sound]) : NULL;
+    return i == ROW_ALARMS ? str(sound[alarm_sound]) : NULL;
 }
 
 static enum list_row_kind row_kind(int i, void *data)
 {
     (void)data;
-    return i == row_alarms_idx() ? LIST_ROW_SETTING : LIST_ROW_MENU;
+    return i == ROW_ALARMS ? LIST_ROW_SETTING : LIST_ROW_MENU;
 }
 
 static enum list_pane_kind row_pane(int i, void *data, int *art)
@@ -1965,23 +2673,22 @@ int extras_calendars(void)
     struct ui_scene scene = {0};
     int action, ret = 0;
 
+    int handle = core_alloc_free_space(sizeof(struct ical_index));
+    if (handle <= 0)
+        return 0;
+    struct ical_index *idx = core_get_data_pinned(handle);
     cal_state_load();
-    int store_h = core_alloc(sizeof(struct cal_store));
-    active_store = store_h > 0 ? core_get_data_pinned(store_h) : NULL;
-    scan_calendars(active_store);
-
-    int count = menu_row_count();
-    if (selected >= count)
-        selected = 0;
+    memo_scan(NULL, NULL, NULL);
+    calendar_ics_load();
+    ical_scan(idx, ICAL_DIR);
 
     ui_scene_open_page(&scene, "calendars-list-push");
-
-    gui_synclist_init(&list, row_name, NULL, false, 1, NULL);
+    gui_synclist_init(&list, row_name, idx, false, 1, NULL);
     gui_synclist_set_title(&list, str(LANG_EXTRAS_CALENDARS), Icon_NOICON);
     gui_synclist_set_row_callbacks(&list, row_kind, row_value, NULL);
     gui_synclist_set_pane_callback(&list, row_pane);
-    gui_synclist_set_nb_items(&list, count);
-    gui_synclist_select_item(&list, selected);
+    gui_synclist_set_nb_items(&list, ROW_COUNT + idx->file_count);
+    gui_synclist_select_item(&list, MIN(selected, ROW_COUNT + idx->file_count - 1));
     sb_set_persistent_title(str(LANG_EXTRAS_CALENDARS), Icon_NOICON,
                             SCREEN_MAIN);
     viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
@@ -1995,17 +2702,20 @@ int extras_calendars(void)
         selected = gui_synclist_get_sel_pos(&list);
         if (action == ACTION_STD_OK)
         {
-            if (selected == row_alarms_idx())
+            if (selected == ROW_ALARMS)
             {
                 alarm_sound = (alarm_sound + 1) % 3;
                 cal_state_save();
             }
-            else if (selected == row_todos_idx())
-                ret = todo_page();
-            else if (selected == 0)
-                ret = month_page(-1);
-            else if (selected >= 1 && selected <= cal_file_count)
-                ret = month_page(selected - 1);
+            else
+            {
+                if (selected == ROW_TODOS)
+                    ret = todo_page(idx);
+                else
+                    ret = month_page(idx, selected == ROW_ALL ? -1 :
+                                     selected - ROW_COUNT);
+                gui_synclist_set_nb_items(&list, ROW_COUNT + idx->file_count);
+            }
             sb_set_persistent_title(str(LANG_EXTRAS_CALENDARS), Icon_NOICON,
                                     SCREEN_MAIN);
             gui_synclist_draw(&list);
@@ -2024,11 +2734,7 @@ int extras_calendars(void)
     gui_synclist_scroll_stop(&list);
     ui_scene_close_modal(&scene, ret == 0, "calendars-list-pop");
     viewportmanager_theme_undo(SCREEN_MAIN, false);
-    if (active_store)
-    {
-        core_put_data_pinned(active_store);
-        core_free(store_h);
-        active_store = NULL;
-    }
+    core_put_data_pinned(idx);
+    core_free(handle);
     return ret;
 }

@@ -155,6 +155,8 @@ enum {
     GO_TO_FRUIT_GENIUS,
     GO_TO_FRUIT_OTG,
     GO_TO_GENIUS_MIXES,
+    GO_TO_CALENDARS,
+    GO_TO_CONTACTS,
 };
 extern struct menu_item_ex root_menu_;
 

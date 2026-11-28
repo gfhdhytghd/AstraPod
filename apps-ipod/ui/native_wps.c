@@ -93,7 +93,10 @@
 #define CLASSIC_LOUD_X 274
 #define CLASSIC_SPEAKER_Y 12
 #define CLASSIC_SHUFFLE_X 292
-#define CLASSIC_SHUFFLE_Y 25
+#define CLASSIC_REPEAT_X 296
+#define CLASSIC_MODE_Y 25
+#define CLASSIC_SHUFFLE_WIDTH 18
+#define CLASSIC_MODE_GAP 5
 /* 4.0 s and 270 ms at the panel's 66.96 Hz. */
 #define CLASSIC_VOLUME_HOLD ANIM_F(268)
 #define CLASSIC_SLIDE_FRAMES ANIM_F(18)
@@ -1787,8 +1790,10 @@ static void setup_classic(void)
                                  CLASSIC_TEXT_WIDTH, CLASSIC_LINE } },
         { WPS_INDEX, WPS_ROOT, { CLASSIC_TEXT_X, CLASSIC_INDEX_Y,
                                  CLASSIC_TEXT_WIDTH, CLASSIC_LINE } },
-        { WPS_SHUFFLE, WPS_ROOT, { CLASSIC_SHUFFLE_X, CLASSIC_SHUFFLE_Y,
-                                   18, 14 } },
+        { WPS_SHUFFLE, WPS_ROOT, { CLASSIC_SHUFFLE_X, CLASSIC_MODE_Y,
+                                   CLASSIC_SHUFFLE_WIDTH, 14 } },
+        { WPS_STOCK_REPEAT, WPS_ROOT, { CLASSIC_REPEAT_X, CLASSIC_MODE_Y,
+                                        19, 15 } },
         { WPS_ROW, WPS_ROOT,
                    { 0, WPS_CLASSIC_PROGRESS_TOP, 2 * LCD_WIDTH, ROW } },
         { WPS_TIMELINE, WPS_ROW, { 0, 0, LCD_WIDTH, ROW } },
@@ -1814,6 +1819,7 @@ static void setup_classic(void)
         [WPS_REMAINING] = &classic_label_ops,
         [WPS_VOLUME] = &classic_volume_ops, [WPS_VOLUME_FILL] = &fill_ops,
         [WPS_SHUFFLE] = &shuffle_ops,
+        [WPS_STOCK_REPEAT] = &stock_repeat_ops,
     };
     void *const data[WPS_VIEW_COUNT] = {
         [WPS_INDEX] = &wps->index, [WPS_TITLE] = &wps->title,
@@ -1839,6 +1845,7 @@ static void setup_classic(void)
         wps->theme.metric[UI_METRIC_STATUS_HEIGHT];
     wps->artist.muted = wps->album.muted = wps->index.muted = true;
     wps->view[WPS_SHUFFLE].value[UI_OPACITY] = 0;
+    wps->view[WPS_STOCK_REPEAT].value[UI_OPACITY] = 0;
     wps->progress_span = WPS_CLASSIC_PROGRESS_WIDTH;
     wps->volume_span = CLASSIC_VOLUME_WIDTH;
     if (wps->stock_controls)
@@ -1866,11 +1873,6 @@ static void setup_classic(void)
             }, controls[i].ops, NULL);
             ui_view_append(&wps->view[WPS_ROW], view);
         }
-        ui_view_init(&wps->view[WPS_STOCK_REPEAT],
-                     (struct ui_rect){ 268, CLASSIC_SHUFFLE_Y, 19, 15 },
-                     &stock_repeat_ops, NULL);
-        wps->view[WPS_STOCK_REPEAT].value[UI_OPACITY] = 0;
-        ui_view_append(&wps->view[WPS_ROOT], &wps->view[WPS_STOCK_REPEAT]);
     }
     ui_page_init(&wps->page, &wps->view[WPS_ROOT]);
 }
@@ -2111,18 +2113,23 @@ void native_wps_render(const struct wps_state *state, bool submit)
     ui_page_set(&wps->page, &wps->view[WPS_SHUFFLE], UI_OPACITY,
                 shuffle != SHUFFLE_OFF ? UI_FULL_OPACITY : 0);
     if (wps->stock_controls)
-    {
         refresh_stock_row(now);
+    if (wps->classic)
+    {
         int repeat = remote ? cider_mode_get(CIDER_MODE_REPEAT) :
                      global_settings.repeat_mode;
+        bool repeat_visible = repeat == REPEAT_ALL || repeat == REPEAT_ONE;
+        ui_page_set(&wps->page, &wps->view[WPS_SHUFFLE], UI_X,
+                    repeat_visible ? CLASSIC_REPEAT_X - CLASSIC_MODE_GAP -
+                                     CLASSIC_SHUFFLE_WIDTH :
+                                     CLASSIC_SHUFFLE_X);
         if (repeat != wps->repeat_mode)
         {
             wps->repeat_mode = repeat;
             ui_page_invalidate(&wps->page, view_bounds(WPS_STOCK_REPEAT));
         }
         ui_page_set(&wps->page, &wps->view[WPS_STOCK_REPEAT], UI_OPACITY,
-                    repeat == REPEAT_ALL || repeat == REPEAT_ONE ?
-                    UI_FULL_OPACITY : 0);
+                    repeat_visible ? UI_FULL_OPACITY : 0);
     }
     if (wps->chrome_ready && native_chrome_poll(&wps->chrome))
         ui_page_invalidate(&wps->page, view_bounds(WPS_HEADER));

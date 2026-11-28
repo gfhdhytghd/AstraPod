@@ -29,8 +29,9 @@
 /* Rank decides who waits. A task *outranks* another when its rank is the
  * smaller number: it runs first, and it turns a running pass of the other
  * back. */
-#define BG_RANK_ART     1
-#define BG_RANK_FILES   2   /* last: a walk takes minutes, nothing waits on it */
+#define BG_RANK_GENIUS  1
+#define BG_RANK_ART     2
+#define BG_RANK_FILES   3   /* last: a walk takes minutes, nothing waits on it */
 
 /* What "the library" looked like at some moment. A task is stale when the
  * marks move, so between them these are the whole definition of "something

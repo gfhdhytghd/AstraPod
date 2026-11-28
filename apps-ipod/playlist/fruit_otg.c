@@ -552,11 +552,10 @@ int fruit_otg_show(char *saved_path, size_t size, int *track_selection)
     return result;
 }
 
-int fruit_genius_show(bool mixes)
+int fruit_genius_show(void)
 {
-    return fruit_info(mixes ? LANG_FRUIT_GENIUS_MIXES : LANG_FRUIT_GENIUS,
-                      mixes ? LANG_FRUIT_GENIUS_MIXES_HELP : LANG_FRUIT_GENIUS_HELP,
-                      STOCK_ART_GENIUS_HELP, mixes ? 151 : 158, false);
+    return fruit_info(LANG_FRUIT_GENIUS, LANG_FRUIT_GENIUS_HELP,
+                      STOCK_ART_GENIUS_HELP, 158, false);
 }
 
 int fruit_genius_unavailable(void)

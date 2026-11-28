@@ -28033,9 +28033,9 @@
     *: "Eject before disconnecting."
   </source>
   <dest>
-    *: "Utilizza iTunes per espellere"
+    *: "Espelli il dispositivo prima di scollegarlo."
   </dest>
   <voice>
-    *: "Utilizza iTunes per espellere"
+    *: "Espelli il dispositivo prima di scollegarlo."
   </voice>
 </phrase>

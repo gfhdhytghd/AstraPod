@@ -72,6 +72,7 @@
 #include "screens/system/file_search.h"
 #include "dircache.h"                 /* whether the file search has a source */
 #include "screens/browse/album_charts.h"
+#include "screens/browse/genius_screen.h"
 #include "screens/browse/book_shelf.h"
 #include "screens/browse/listen_progress.h"   /* every book's stats */
 #include "games/quiz/quiz.h"
@@ -564,6 +565,7 @@ static int browser(void* param)
                 || ret_val == GO_TO_BOOK_SHELF || ret_val == GO_TO_ALBUM_CHARTS
                 || ret_val == GO_TO_DB_SEARCH
                 || ret_val == GO_TO_FEATURED_ARTISTS
+                || ret_val == GO_TO_GENIUS_MIXES
                 || ret_val == GO_TO_MUSIC_QUIZ
                 || ret_val == GO_TO_LISTEN_STATS)
             {
@@ -864,6 +866,7 @@ static int wps_back_to(int screen)
         case GO_TO_PODCASTS:
         case GO_TO_PLAYLISTS_SCREEN:
         case GO_TO_PLAYLIST_VIEWER:
+        case GO_TO_GENIUS_MIXES:
 #ifdef HAVE_USB_PODLINK
         case GO_TO_CIDER:
 #endif
@@ -1298,6 +1301,7 @@ static const struct root_items items[] = {
     [GO_TO_PODCASTS] = { browser, (void*)GO_TO_PODCASTS, &tagcache_menu },
     [GO_TO_LIBRARY_ROW] = { browser, (void*)GO_TO_LIBRARY_ROW, &tagcache_menu },
     [GO_TO_SPUN] = { playback_viewer_scrn, NULL, NULL },
+    [GO_TO_GENIUS_MIXES] = { genius_screen, NULL, &tagcache_menu },
     [GO_TO_MUSIC_QUIZ] = { music_quiz_scrn, NULL, &tagcache_menu },
     [GO_TO_LISTEN_STATS] = { listen_stats_scrn, NULL, &tagcache_menu },
     [GO_TO_ALBUM_COVERS_TRACKS] = { cover_tracks_scrn, (void*)GO_TO_ALBUM_COVERS_TRACKS, &tagcache_menu },

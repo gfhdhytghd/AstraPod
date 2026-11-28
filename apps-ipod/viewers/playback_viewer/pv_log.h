@@ -15,6 +15,7 @@
 #define _PV_LOG_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* Timestamps below this came from a clock that was never set -- they land in
  * the year 2000. The entry still counts as a play; every date-derived figure
@@ -110,6 +111,12 @@ long pv_log_read(enum pv_source src, pv_entry_fn cb, void *ctx);
  * as a line of its own. */
 long pv_log_read_range(enum pv_source src, unsigned long from,
                        unsigned long to, pv_entry_fn cb, void *ctx);
+
+/* Visit at most the last 'bytes' of the path-bearing log with an independent
+ * reader and caller-owned scratch. Can run beside a Playback Report read. */
+void pv_log_recent_playback(char *buf, size_t buf_size,
+                            unsigned long bytes, pv_entry_fn cb, void *ctx,
+                            bool (*stop)(void));
 
 /* What 'src' holds, without reading any of it. Sizes only, so this is an open
  * and a seek per file. */

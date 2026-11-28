@@ -34398,13 +34398,13 @@
   desc: Fruit Company playlist or music context menu
   user: core
   <source>
-    *: "Connect to iTunes to activate Genius."
+    *: "Genius playlists are unavailable on this player. Open Music > Genius Mixes."
   </source>
   <dest>
-    *: "Connect to iTunes to activate Genius."
+    *: "Genius playlists are unavailable on this player. Open Music > Genius Mixes."
   </dest>
   <voice>
-    *: "Connect to iTunes to activate Genius."
+    *: "Genius playlists are unavailable on this player. Open Music > Genius Mixes."
   </voice>
 </phrase>
 <phrase>
@@ -34412,13 +34412,13 @@
   desc: Fruit Company playlist or music context menu
   user: core
   <source>
-    *: "Genius plays songs on your iPod that go great together. You can start from the Now Playing screen, or choose a song you like and hold down the center button to bring up the Genius option."
+    *: "Genius playlists are unavailable on this player. Open Music > Genius Mixes."
   </source>
   <dest>
-    *: "Genius plays songs on your iPod that go great together. You can start from the Now Playing screen, or choose a song you like and hold down the center button to bring up the Genius option."
+    *: "Genius playlists are unavailable on this player. Open Music > Genius Mixes."
   </dest>
   <voice>
-    *: "Genius plays songs on your iPod that go great together. You can start from the Now Playing screen, or choose a song you like and hold down the center button to bring up the Genius option."
+    *: "Genius playlists are unavailable on this player. Open Music > Genius Mixes."
   </voice>
 </phrase>
 <phrase>
@@ -34437,16 +34437,16 @@
 </phrase>
 <phrase>
   id: LANG_FRUIT_GENIUS_MIXES_HELP
-  desc: Fruit Company playlist or music context menu
+  desc: Genius Mixes empty library
   user: core
   <source>
-    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+    *: "Add more music by different artists to make Genius Mixes on this player."
   </source>
   <dest>
-    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+    *: "Add more music by different artists to make Genius Mixes on this player."
   </dest>
   <voice>
-    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+    *: "Add more music by different artists to make Genius Mixes on this player."
   </voice>
 </phrase>
 <phrase>

@@ -80,6 +80,7 @@
 #include "system/output_pause.h"
 #include "files/file_index.h"
 #include "system/bg_task.h"
+#include "database/genius_mixes.h"
 #include "screens/browse/browser_db.h"
 #include "lang.h"
 #include "string.h"
@@ -624,6 +625,7 @@ static void init_tagcache(void)
     tagcache_init();
     file_index_init();
     art_cache_init();
+    genius_mixes_init();
     book_resume_idle_init();
     bg_task_start();
 

@@ -3794,6 +3794,27 @@ static unsigned artist_file_hash(const struct aa_src *src)
     return hash ^ (unsigned)src->emb_pos ^ (unsigned)src->emb_size;
 }
 
+static bool aa_decode_tile(const struct aa_src *source, int dim, void *pixels,
+                           void *scratch, size_t bytes)
+{
+    struct bitmap bm;
+    int w = dim, h = dim;
+    bool ok = aa_read_source(source, &bm, FORMAT_NATIVE | FORMAT_RETURN_SIZE,
+                             dim, dim, scratch, bytes) > 0;
+    if (ok && !aa_cover_dim(bm.width, bm.height, dim, &w, &h))
+        w = h = dim;
+    ok = ok && aa_read_source(source, &bm,
+                              FORMAT_NATIVE | FORMAT_RESIZE | FORMAT_DITHER,
+                              w, h, scratch, bytes) > 0 &&
+              bm.width >= dim && bm.height >= dim;
+    if (ok)
+    {
+        aa_crop_center(scratch, bm.width, bm.height, dim);
+        memcpy(pixels, scratch, dim * dim * sizeof(fb_data));
+    }
+    return ok;
+}
+
 static bool artist_decode(const struct aa_src *source, int dim)
 {
     size_t bytes = BM_SCALED_SIZE(ARTIST_TILE_EDGE * ART_CACHE_COVER_MAX_ASPECT,
@@ -3803,47 +3824,66 @@ static bool artist_decode(const struct aa_src *source, int dim)
     if (handle <= 0)
         return false;
     void *scratch = core_get_data_pinned(handle);
-    struct bitmap bm;
-    int w = dim, h = dim;
-    bool ok = aa_read_source(source, &bm, FORMAT_NATIVE | FORMAT_RETURN_SIZE,
-                             dim, dim, scratch, bytes) > 0;
-    if (ok && !aa_cover_dim(bm.width, bm.height, dim, &w, &h))
-        w = h = dim;
-    ok = ok && aa_read_source(source, &bm, FORMAT_NATIVE | FORMAT_RESIZE | FORMAT_DITHER,
-                              w, h, scratch, bytes) > 0 &&
-              bm.width >= dim && bm.height >= dim;
-    if (ok)
-    {
-        aa_crop_center(scratch, bm.width, bm.height, dim);
-        memcpy(artist_work, scratch, dim * dim * sizeof(fb_data));
-    }
+    bool ok = aa_decode_tile(source, dim, artist_work, scratch, bytes);
     core_put_data_pinned(scratch);
     core_free(handle);
     return ok;
 }
 
-static bool artist_album_tile(const char *path, int dim)
+static bool aa_album_tile(const char *path, int dim, void *pixels)
 {
-    bool ok = false;
     int preferred = -1;
     for (unsigned i = 0; i < ART_CACHE_NUM_SIZES; ++i)
         if (art_sizes[i].layout == AA_ROWS && art_sizes[i].dim >= dim &&
             (preferred < 0 || art_sizes[i].dim < art_sizes[preferred].dim))
             preferred = i;
     unsigned key = art_cache_track_key(path);
-    if (preferred >= 0 && key)
+    if (preferred < 0 || !key)
+        return false;
+
+    char file[MAX_PATH];
+    art_cache_thumb_path(key, preferred, file, sizeof(file));
+    int fd = open(file, O_RDONLY);
+    if (fd < 0)
+        return false;
+    struct bitmap bm = {
+        .data = pixels, .width = dim, .height = dim, .format = FORMAT_NATIVE,
+    };
+    bool ok = art_cache_load_aat(fd, &bm, dim * dim * sizeof(fb_data),
+                                 NULL) > 0;
+    close(fd);
+    return ok;
+}
+
+bool art_cache_load_track_tile(const char *path, int dim, void *pixels)
+{
+    if (aa_album_tile(path, dim, pixels))
+        return true;
+
+    /* A mix may be browsed before the library's full art pass has run. */
+    struct albumart_source src;
+    if (!get_metadata(&aa_id3, -1, path) ||
+        !albumart_find_source(&aa_id3, AA_PREFER_IMAGE_FILE, false, &src) ||
+        src.kind == AA_SOURCE_CACHE)
+        return false;
+
+    struct aa_src source = {.path = src.path, .emb_pos = -1};
+    if (src.kind == AA_SOURCE_EMBEDDED)
     {
-        char file[MAX_PATH];
-        art_cache_thumb_path(key, preferred, file, sizeof(file));
-        int fd = open(file, O_RDONLY);
-        if (fd >= 0)
-        {
-            struct bitmap bm = { .data = (unsigned char *)artist_work,
-                                 .width = dim, .height = dim, .format = FORMAT_NATIVE };
-            ok = art_cache_load_aat(fd, &bm, sizeof(artist_work), NULL) > 0;
-            close(fd);
-        }
+        source.emb_pos = src.pos;
+        source.emb_size = src.size;
+        source.emb_flags = aa_id3.albumart.type;
     }
+    size_t bytes = BM_SCALED_SIZE(dim * ART_CACHE_COVER_MAX_ASPECT,
+                                 dim, FORMAT_NATIVE, 0)
+                   + IMAGE_DECODE_OVERHEAD;
+    int handle = core_alloc_free_space(bytes);
+    if (handle <= 0)
+        return false;
+    void *scratch = core_get_data_pinned(handle);
+    bool ok = aa_decode_tile(&source, dim, pixels, scratch, bytes);
+    core_put_data_pinned(scratch);
+    core_free(handle);
     return ok;
 }
 
@@ -3922,7 +3962,8 @@ static bool artist_build_tile(const struct artist_tile_job *job)
 #endif
     }
     else
-        ok = artist_decode(&source, dim) || (*first && artist_album_tile(first, dim));
+        ok = artist_decode(&source, dim) ||
+             (*first && aa_album_tile(first, dim, artist_work));
     if (ok)
         artist_disk_write(file, hash, bytes);
     return ok;

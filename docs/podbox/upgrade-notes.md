@@ -1,3 +1,7 @@
+- **Music > Genius Mixes** builds mixes on the player after the music
+  database updates. Turn the wheel to browse and press Select to listen.
+  The first library scan after updating can take a moment.
+
 - **Fruit Company music browsing** keeps your existing library. Put
   `Various Artists` in a compilation’s album artist tag to show it under
   Compilations. Use the `iTunes U` genre for courses and episodes. The

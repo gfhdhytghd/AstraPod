@@ -170,6 +170,7 @@ enum table {
     TABLE_SHUFFLE_ALBUMS,
     TABLE_LISTEN_STATS,
     TABLE_PODCAST_EPISODES,
+    TABLE_GENIUS_MIXES,
 };
 
 static const struct id3_to_search_mapping {
@@ -257,6 +258,7 @@ static const struct builtin_row {
     { "featured_artists", LANG_FEATURED_ARTISTS, TABLE_FEATURED_ARTISTS, 0,
       featured_artists_available },
     { "quiz", LANG_QUIZ, TABLE_MUSIC_QUIZ, 0, NULL },
+    { "genius_mixes", LANG_FRUIT_GENIUS_MIXES, TABLE_GENIUS_MIXES, 0, NULL },
     /* The Audiobooks shelves (book_shelf.c), the list in the param */
     { "book_finished", LANG_BOOK_SHELF_ROW_FINISHED, TABLE_BOOK_SHELF,
       BOOK_SHELF_FINISHED, shelf_finished_available },
@@ -2085,6 +2087,24 @@ static bool add_builtin_menus(void)
                  builtin_menu_links[i].row, builtin_menu_links[i].id);
         if (parse_builtin_line(n++, text) < 0
             || parse_builtin_line(n++, "") < 0)
+            return false;
+    }
+    /* The player supplies this row even with an older custom Music menu. */
+    if (root)
+    {
+        for (j = 0; j < root->itemcount; j++)
+        {
+            const struct menu_entry *row = root->items[j];
+            if (row->type == menu_builtin &&
+                builtin_rows[row->link].table == TABLE_GENIUS_MIXES)
+                return true;
+        }
+        char text[MENUENTRY_MAX_NAME + MAX_MENU_ID_SIZE + 16];
+        snprintf(text, sizeof(text), "%%menu_start \"%s\" \"%s\"",
+                 root->id, root->_title);
+        if (parse_builtin_line(n++, text) < 0 ||
+            parse_builtin_line(n++, "\"Genius Mixes\" ==> \"genius_mixes\"") < 0 ||
+            parse_builtin_line(n, "") < 0)
             return false;
     }
     return true;
@@ -5930,6 +5950,8 @@ int browser_db_enter(struct browser_context* c, bool is_visible)
         book_shelf_arm(seek);
         return GO_TO_BOOK_SHELF;
     }
+    if (newextra == TABLE_GENIUS_MIXES)
+        return GO_TO_GENIUS_MIXES;
     if (newextra == TABLE_MUSIC_QUIZ)
         return GO_TO_MUSIC_QUIZ;
     if (newextra == TABLE_LISTEN_STATS)

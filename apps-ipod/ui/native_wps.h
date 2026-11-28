@@ -62,10 +62,20 @@ void native_wps_set_landing(void (*paint)(const struct ui_rect *clip));
 void native_wps_pick_up_art(void);
 /* Borrow a column-major texture from the turn while this track is current. */
 void native_wps_prepare_turn_art(int thumbnail, int side);
-void native_wps_paint_slide(int hidden, fb_data base);
-/* The page's status bar, text and controls over what the frame buffer holds,
- * without its background or cover. */
-void native_wps_paint_chrome(void);
+enum wps_chrome_edge {
+    WPS_CHROME_TOP, WPS_CHROME_BOTTOM, WPS_CHROME_LEFT, WPS_CHROME_RIGHT,
+    WPS_CHROME_EDGES
+};
+
+/* Distance off screen in 1024ths of each group's travel. */
+#define WPS_CHROME_HIDDEN 1024
+void native_wps_paint_slide(unsigned hidden, fb_data base);
+void native_wps_chrome_bounds(struct ui_rect *bounds);
+struct ui_rect native_wps_chrome_pose(struct ui_rect bounds,
+                                     enum wps_chrome_edge edge,
+                                     unsigned hidden);
+void native_wps_paint_chrome(unsigned hidden);
+void native_wps_paint_backing(void);
 void native_wps_invalidate(void);
 void native_wps_close(void);
 

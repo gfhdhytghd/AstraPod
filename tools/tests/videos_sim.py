@@ -212,6 +212,25 @@ def empty_menu_rows(sim):
             after.crop(content).tobytes(), f"SELECT opened empty {name}"
 
 
+def line_text(case, png, box, label):
+    with Image.open(case / png) as screen:
+        line = ImageOps.autocontrast(ImageOps.grayscale(screen.crop(box)))
+    if line.resize((1, 1)).getpixel((0, 0)) < 127:
+        line = ImageOps.invert(line)
+    path = case / f"{label}.png"
+    line.resize((line.width * 4, line.height * 4)).save(path)
+    return subprocess.check_output(
+        ["tesseract", path, "stdout", "--psm", "7"],
+        stderr=subprocess.DEVNULL, text=True).lower().strip()
+
+
+def video_settings(sim):
+    sim.go("select", "settings", ["tv signal", "tv screen", "fit to screen",
+                                 "alternate audio", "captions", "subtitles"])
+    tv_out = line_text(sim.case, "settings.png", (2, 22, 122, 44), "tv-out")
+    assert tv_out == "tv out", tv_out
+
+
 def stock_navigation(sim, theme):
     if theme == "classic":
         sim.text("home", ["videos", "files"])
@@ -221,23 +240,15 @@ def stock_navigation(sim, theme):
     sim.go("select", "videos-menu", ["movies", "rentals", "tv shows",
                                    "music videos", "playlists", "settings"])
     sim.go("select", "movies", ["indexed film", "loose"])
-    movie = Image.open(sim.case / "movies.png")
-    duration = movie.crop((58, 49, 145, 64))
-    duration = ImageOps.invert(ImageOps.autocontrast(ImageOps.grayscale(duration)))
-    duration_png = sim.case / "movie-duration.png"
-    duration.resize((348, 60)).save(duration_png)
-    text = subprocess.check_output(
-        ["tesseract", duration_png, "stdout", "--psm", "7"],
-        stderr=subprocess.DEVNULL, text=True)
-    assert "".join(text.lower().split()) == "3s", text
+    duration = line_text(sim.case, "movies.png", (56, 45, 145, 65),
+                         "movie-duration")
+    assert duration.replace(" ", "") == "3s", duration
     sim.go("select", "movies-open", ["ipod video"])
     sim.text("movies-back", ["indexed film", "loose"])
     sim.go("menu", "videos-back", ["rentals", "tv shows", "music videos"])
     empty_menu_rows(sim)
     sim.tap("down")
-    sim.go("select", "settings", ["tv out", "tv signal", "tv screen",
-                                 "fit to screen", "alternate audio",
-                                 "captions", "subtitles"])
+    video_settings(sim)
     sim.go("menu", "settings-back", ["movies", "video playlists", "rentals"])
 
 

@@ -10,7 +10,7 @@ out = Path(sys.argv[1]).resolve()
 out.mkdir(parents=True, exist_ok=True)
 stubs = out / "headers"
 stubs.mkdir(exist_ok=True)
-for name in ("system.h", "file.h", "backlight.h", "button.h", "crc32.h",
+for name in ("system.h", "file.h", "backlight.h", "crc32.h",
              "dir.h", "font.h", "lang.h", "lcd.h", "menu.h", "misc.h",
              "rbpaths.h", "settings.h", "sound.h", "splash.h", "config.h"):
     (stubs / name).write_text("")

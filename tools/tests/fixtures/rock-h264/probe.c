@@ -27,6 +27,7 @@ static unsigned control_action, resume_calls;
 static int resume_choice;
 static long paused_at;
 static bool exercise_controls;
+static bool exercise_remote;
 static bool saw_timeout;
 static int scaling;
 static unsigned scaling_seen, centre_calls;
@@ -225,11 +226,15 @@ static int action(int context, int timeout)
         case 0: control_action++; return ACTION_WPS_BROWSE;
         case 1: control_action++; return ACTION_WPS_BROWSE;
         case 2: control_action++; return ACTION_WPS_BROWSE;
-        case 3: control_action++; return ACTION_WPS_VOLUP;
+        case 3:
+            control_action++;
+            return exercise_remote ? BUTTON_MULTIMEDIA_VOLUME_UP | BUTTON_REPEAT
+                                   : ACTION_WPS_VOLUP;
         case 4:
             paused_at = current_tick;
             control_action++;
-            return ACTION_WPS_PLAY;
+            return exercise_remote ? BUTTON_MULTIMEDIA_PLAYPAUSE
+                                   : ACTION_WPS_PLAY;
         case 5:
             if (current_tick > paused_at + 4 * HZ)
                 return ACTION_WPS_MENU;
@@ -265,6 +270,7 @@ static int action(int context, int timeout)
 
 static long event(long code)
 {
+    assert(!(code & BUTTON_MULTIMEDIA));
     if (code == SYS_USB_CONNECTED)
     {
         assert(active);
@@ -407,6 +413,7 @@ static void reset(enum mode next)
     sent_menu = sent_seek = false;
     control_action = 0;
     exercise_controls = false;
+    exercise_remote = false;
     saw_timeout = false;
     mode = next;
     rock_h264_begin(scratch, sizeof(scratch));
@@ -523,9 +530,10 @@ int main(int argc, char **argv)
 
     reset(FINISH);
     exercise_controls = true;
+    exercise_remote = true;
     assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
            VIDEO_EXIT);
-    assert(resume_calls == 3);
+    assert(resume_calls == 3 && saw_timeout);
     reset(FINISH);
     resume_choice = 0;
     assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==

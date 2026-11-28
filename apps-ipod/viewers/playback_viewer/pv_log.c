@@ -72,9 +72,8 @@
  * static RAM that the deck would otherwise have to find elsewhere. */
 #define PV_BUF_SZ 16384
 
-/* Streaming reader over the family. One log is read at a time, so a single
- * instance is all there is. */
-static struct
+/* Streaming reader over the family. */
+struct pv_reader
 {
     int fd;
     int pos, len;
@@ -84,71 +83,76 @@ static struct
      * rather than per file -- which is what makes an offset something that
      * survives rotation. */
     unsigned long consumed;
-} rd = { .fd = -1, .next = -1 };
+    char *buf;
+    size_t buf_size;
+};
 
-static char rd_buf[PV_BUF_SZ];
+static char report_buf[PV_BUF_SZ];
+static struct pv_reader report = {
+    .fd = -1, .next = -1, .buf = report_buf, .buf_size = sizeof(report_buf),
+};
 
 /* Open the next file of the family, stepping off the numbered run onto the
  * live log when the numbers run out. */
-static bool rd_advance(void)
+static bool rd_advance(struct pv_reader *rd)
 {
-    if (rd.fd >= 0)
-        close(rd.fd);
-    rd.fd = -1;
-    rd.pos = rd.len = 0;
+    if (rd->fd >= 0)
+        close(rd->fd);
+    rd->fd = -1;
+    rd->pos = rd->len = 0;
 
-    while (rd.next > 0)
+    while (rd->next > 0)
     {
         char path[MAX_PATH];
-        snprintf(path, sizeof(path), "%s_%04d.log", PV_LOG_STEM, rd.next);
-        rd.next++;
-        rd.fd = open(path, O_RDONLY);
-        if (rd.fd >= 0)
+        snprintf(path, sizeof(path), "%s_%04d.log", PV_LOG_STEM, rd->next);
+        rd->next++;
+        rd->fd = open(path, O_RDONLY);
+        if (rd->fd >= 0)
             return true;
-        rd.next = 0;    /* the first missing number ends the numbered run */
+        rd->next = 0;    /* the first missing number ends the numbered run */
     }
 
-    if (rd.next == 0)
+    if (rd->next == 0)
     {
-        rd.next = -1;   /* the live log is the last link */
-        rd.fd = open(PV_LOG_PATH, O_RDONLY);
+        rd->next = -1;   /* the live log is the last link */
+        rd->fd = open(PV_LOG_PATH, O_RDONLY);
     }
-    return rd.fd >= 0;
+    return rd->fd >= 0;
 }
 
-static bool rd_open(enum pv_source src)
+static bool rd_open(struct pv_reader *rd, enum pv_source src)
 {
-    rd.pos = rd.len = 0;
-    rd.consumed = 0;
+    rd->pos = rd->len = 0;
+    rd->consumed = 0;
 
     if (src == PV_SRC_SCROBBLER)
     {
-        rd.next = -1;       /* one file, never rotated */
-        rd.fd = open(PV_SCROBBLER_PATH, O_RDONLY);
-        return rd.fd >= 0;
+        rd->next = -1;       /* one file, never rotated */
+        rd->fd = open(PV_SCROBBLER_PATH, O_RDONLY);
+        return rd->fd >= 0;
     }
 
-    rd.next = 1;
-    return rd_advance();
+    rd->next = 1;
+    return rd_advance(rd);
 }
 
 /* Open the family positioned at byte 'offset' of the concatenation: find the
  * file that offset falls in, seek into it, and leave the chain pointing at
  * whatever follows so reading simply carries on. */
-static bool rd_open_at(enum pv_source src, unsigned long offset)
+static bool rd_open_at(struct pv_reader *rd, enum pv_source src, unsigned long offset)
 {
     unsigned long left = offset;
 
-    rd.pos = rd.len = 0;
-    rd.consumed = offset;
+    rd->pos = rd->len = 0;
+    rd->consumed = offset;
 
     if (src == PV_SRC_SCROBBLER)
     {
-        rd.next = -1;
-        rd.fd = open(PV_SCROBBLER_PATH, O_RDONLY);
-        if (rd.fd < 0)
+        rd->next = -1;
+        rd->fd = open(PV_SCROBBLER_PATH, O_RDONLY);
+        if (rd->fd < 0)
             return false;
-        lseek(rd.fd, (off_t)left, SEEK_SET);
+        lseek(rd->fd, (off_t)left, SEEK_SET);
         return true;
     }
 
@@ -167,8 +171,8 @@ static bool rd_open_at(enum pv_source src, unsigned long offset)
         if (left < sz)
         {
             lseek(fd, (off_t)left, SEEK_SET);
-            rd.fd = fd;
-            rd.next = n + 1;
+            rd->fd = fd;
+            rd->next = n + 1;
             return true;
         }
 
@@ -176,31 +180,31 @@ static bool rd_open_at(enum pv_source src, unsigned long offset)
         close(fd);
     }
 
-    rd.fd = open(PV_LOG_PATH, O_RDONLY);
-    rd.next = -1;
-    if (rd.fd < 0)
+    rd->fd = open(PV_LOG_PATH, O_RDONLY);
+    rd->next = -1;
+    if (rd->fd < 0)
         return false;
-    lseek(rd.fd, (off_t)left, SEEK_SET);
+    lseek(rd->fd, (off_t)left, SEEK_SET);
     return true;
 }
 
-static void rd_close(void)
+static void rd_close(struct pv_reader *rd)
 {
-    if (rd.fd >= 0)
-        close(rd.fd);
-    rd.fd = -1;
-    rd.next = -1;
+    if (rd->fd >= 0)
+        close(rd->fd);
+    rd->fd = -1;
+    rd->next = -1;
 }
 
 /* Refill the buffer from the open file. False at its end, which leaves the
  * buffer empty. */
-static bool rd_fill(void)
+static bool rd_fill(struct pv_reader *rd)
 {
-    rd.len = (rd.fd >= 0) ? read(rd.fd, rd_buf, sizeof(rd_buf)) : 0;
-    rd.pos = 0;
-    if (rd.len <= 0)
+    rd->len = (rd->fd >= 0) ? read(rd->fd, rd->buf, rd->buf_size) : 0;
+    rd->pos = 0;
+    if (rd->len <= 0)
     {
-        rd.len = 0;
+        rd->len = 0;
         return false;
     }
     return true;
@@ -209,23 +213,23 @@ static bool rd_fill(void)
 /* Next line into 'line', CR/LF stripped. Steps across the family
  * transparently, treating each file's end as a line break. False only when
  * everything has been read. */
-static bool rd_line(char *line, int sz)
+static bool rd_line(struct pv_reader *rd, char *line, int sz)
 {
     int n = 0;
 
     for (;;)
     {
-        if (rd.pos >= rd.len && !rd_fill())
+        if (rd->pos >= rd->len && !rd_fill(rd))
         {
             if (n > 0)
                 break;              /* an unterminated tail still counts */
-            if (rd.next >= 0 && rd_advance())
+            if (rd->next >= 0 && rd_advance(rd))
                 continue;           /* next file of the family */
             break;
         }
 
-        char c = rd_buf[rd.pos++];
-        rd.consumed++;
+        char c = rd->buf[rd->pos++];
+        rd->consumed++;
         if (c == '\n')
         {
             line[n] = '\0';
@@ -397,7 +401,7 @@ int pv_log_peek(enum pv_source src, unsigned long offset, void *buf, int len)
 
     if (len <= 0 || offset < (unsigned long)len)
         return 0;
-    if (!rd_open_at(src, offset - (unsigned long)len))
+    if (!rd_open_at(&report, src, offset - (unsigned long)len))
         return 0;
 
     /* Straight out of the stream rather than through the line reader: this
@@ -406,22 +410,22 @@ int pv_log_peek(enum pv_source src, unsigned long offset, void *buf, int len)
     {
         int n;
 
-        if (rd.pos >= rd.len && !rd_fill())
+        if (report.pos >= report.len && !rd_fill(&report))
         {
-            if (rd.next >= 0 && rd_advance())
+            if (report.next >= 0 && rd_advance(&report))
                 continue;
             break;
         }
 
-        n = rd.len - rd.pos;
+        n = report.len - report.pos;
         if (n > len - got)
             n = len - got;
-        memcpy((char *)buf + got, rd_buf + rd.pos, (size_t)n);
-        rd.pos += n;
+        memcpy((char *)buf + got, report.buf + report.pos, (size_t)n);
+        report.pos += n;
         got += n;
     }
 
-    rd_close();
+    rd_close(&report);
     return got;
 }
 
@@ -435,10 +439,10 @@ static bool first_entry(enum pv_source src, unsigned long *ts,
     struct pv_entry e;
     bool found = false;
 
-    if (!rd_open(src))
+    if (!rd_open(&report, src))
         return false;
 
-    while (!found && rd_line(line, sizeof(line)))
+    while (!found && rd_line(&report, line, sizeof(line)))
     {
         if (line[0] == '#' || line[0] == '\0')
             continue;
@@ -446,7 +450,7 @@ static bool first_entry(enum pv_source src, unsigned long *ts,
                                         : parse_playback_line(line, &e);
     }
 
-    rd_close();
+    rd_close(&report);
     if (found)
     {
         *ts = e.ts;
@@ -464,12 +468,12 @@ static bool playback_has(unsigned long ts, unsigned long length_s)
     struct pv_entry e;
     bool found = false;
 
-    if (!rd_open(PV_SRC_PLAYBACK))
+    if (!rd_open(&report, PV_SRC_PLAYBACK))
         return false;
-    while (!found && rd_line(line, sizeof(line)))
+    while (!found && rd_line(&report, line, sizeof(line)))
         found = line[0] != '#' && parse_playback_line(line, &e)
                 && e.ts == ts && e.length_ms / 1000 == length_s;
-    rd_close();
+    rd_close(&report);
     return found;
 }
 
@@ -528,25 +532,28 @@ long pv_log_read(enum pv_source src, pv_entry_fn cb, void *ctx)
     return pv_log_read_range(src, 0, 0, cb, ctx);
 }
 
-long pv_log_read_range(enum pv_source src, unsigned long from,
-                       unsigned long to, pv_entry_fn cb, void *ctx)
+static long read_range(struct pv_reader *rd, enum pv_source src,
+                       unsigned long from, unsigned long to,
+                       pv_entry_fn cb, void *ctx, bool (*stop)(void))
 {
     char line[PV_LINE_MAX];
     long lines = 0;
+    unsigned checkpoints = 0;
 
     if (src == PV_SRC_NONE)
         return -1;
-    if (!(from ? rd_open_at(src, from) : rd_open(src)))
+    if (!(from ? rd_open_at(rd, src, from) : rd_open(rd, src)))
         return -1;
 
     for (;;)
     {
-        unsigned long line_at = rd.consumed;
+        unsigned long line_at = rd->consumed;
         struct pv_entry e;
 
-        if (to && line_at >= to)
+        if ((stop && !(checkpoints++ % 32) && stop()) ||
+            (to && line_at >= to))
             break;
-        if (!rd_line(line, sizeof(line)))
+        if (!rd_line(rd, line, sizeof(line)))
             break;
 
         /* '#' starts a header line in both formats: the per-boot marker in
@@ -572,6 +579,34 @@ long pv_log_read_range(enum pv_source src, unsigned long from,
             cb(&e, ctx);
     }
 
-    rd_close();
+    rd_close(rd);
     return lines;
+}
+
+long pv_log_read_range(enum pv_source src, unsigned long from,
+                       unsigned long to, pv_entry_fn cb, void *ctx)
+{
+    return read_range(&report, src, from, to, cb, ctx, NULL);
+}
+
+void pv_log_recent_playback(char *buf, size_t buf_size,
+                            unsigned long bytes, pv_entry_fn cb, void *ctx,
+                            bool (*stop)(void))
+{
+    unsigned long size = pv_log_size(PV_SRC_PLAYBACK);
+    if (!size || !buf_size)
+        return;
+    struct pv_reader reader = {
+        .fd = -1, .next = -1, .buf = buf, .buf_size = buf_size,
+    };
+    unsigned long from = size > bytes ? size - bytes : 0;
+    /* Find the start of the next complete line if the byte limit split one. */
+    if (from && rd_open_at(&reader, PV_SRC_PLAYBACK, from - 1))
+    {
+        char ignored[2];
+        rd_line(&reader, ignored, sizeof(ignored));
+        from = reader.consumed;
+        rd_close(&reader);
+    }
+    read_range(&reader, PV_SRC_PLAYBACK, from, size, cb, ctx, stop);
 }

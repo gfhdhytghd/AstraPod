@@ -376,6 +376,8 @@ int get_custom_action(int context,int timeout,
 /* Scope MENU to one step back in Now Playing's control-menu subtree. */
 bool action_set_menu_back(bool enabled);
 bool action_menu_back(void);
+/* Use wheel navigation and transport keys on a paged screen. */
+bool action_set_wheel_transport(bool enabled);
 
 int get_action(int context, int timeout);
 

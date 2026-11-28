@@ -37,6 +37,8 @@ database/libfile.c
 database/db_summary.c
 database/sound_index.c
 database/sound_mix.c
+database/genius_model.c
+database/genius_mixes.c
 database/sound_mood.c
 database/sound_cal.c
 playlist/mood_screen.c
@@ -50,6 +52,7 @@ metadata/book_resume.c
 metadata/listen_stats.c
 screens/browse/browser_db.c
 screens/browse/album_charts.c
+screens/browse/genius_screen.c
 screens/browse/featured_artists.c
 screens/browse/listen_progress.c
 screens/browse/book_shelf.c

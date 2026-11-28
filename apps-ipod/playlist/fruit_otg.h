@@ -14,7 +14,7 @@ int fruit_otg_count(void);
 int fruit_playlist_count(const char *path, unsigned mtime);
 const char *fruit_otg_count_text(char *buf, size_t size, int count, bool remove);
 int fruit_otg_show(char *saved_path, size_t size, int *track_selection);
-int fruit_genius_show(bool mixes);
+int fruit_genius_show(void);
 int fruit_genius_unavailable(void);
 int fruit_list_action(int action, struct gui_synclist *list);
 

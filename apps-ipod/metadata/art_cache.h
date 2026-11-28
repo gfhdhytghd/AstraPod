@@ -178,6 +178,10 @@ bool art_cache_lookup(const char *dir, int size_index,
  * and the cost of that collision is one folder's art not being found. */
 unsigned int art_cache_dir_hash(const char *dir);
 
+/* On the library worker: load a square native RGB tile, using cached art
+ * where possible and the track's source when a thumbnail is not ready. */
+bool art_cache_load_track_tile(const char *path, int dim, void *pixels);
+
 /* The key of the cover a track at 'path' is shown with: its album's, as the
  * database's album rows have it -- a book's first file's, an album's names',
  * or for an album with no name its first track's folder -- or, for a track

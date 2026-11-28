@@ -91,6 +91,9 @@
 #include "usb.h"
 #include "metadata.h"
 #include "tagcache.h"
+#ifndef DBTOOL
+#include "database/genius_mixes.h"
+#endif
 #include "database/path_key.h"
 #include "database/sound_index.h"
 #include "database/unreadable.h"
@@ -7326,6 +7329,9 @@ static void tagcache_thread(void)
                  * check_deleted_files() with it: a rebuild regenerates the
                  * whole database from the disk, so nothing is stale. */
                 load_ramcache();
+#ifndef DBTOOL
+                genius_mixes_database_changed();
+#endif
                 break;
 
             case Q_UPDATE:
@@ -7336,6 +7342,9 @@ static void tagcache_thread(void)
                     check_deleted_files();
                 tagcache_build();
                 load_ramcache();
+#ifndef DBTOOL
+                genius_mixes_database_changed();
+#endif
                 break ;
 
             case Q_START_SCAN:
@@ -7408,6 +7417,10 @@ static void tagcache_thread(void)
                     if (!walk_checks_deletions())
                         check_deleted_files();
                     tagcache_build();
+#ifndef DBTOOL
+                    if (asked_to_scan || tc_stat.scan_removed)
+                        genius_mixes_database_changed();
+#endif
                 }
 
                 logf("tagcache check done");

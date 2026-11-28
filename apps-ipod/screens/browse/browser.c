@@ -1743,6 +1743,7 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
                     case GO_TO_BOOK_SHELF:
                     case GO_TO_MUSIC_QUIZ:
                     case GO_TO_LISTEN_STATS:
+                    case GO_TO_GENIUS_MIXES:
                     /* The file browser's and the catalogue's own Search rows
                      * (the FILE_ATTR_SEARCH case in browser_disk_enter()). */
                     case GO_TO_FILE_SEARCH:

@@ -19,7 +19,6 @@
 #include <string.h>
 #include "string-extra.h"
 #include "config.h"
-#include "playlist/fruit_otg.h"
 #include "lang.h"
 #include "kernel.h"
 #include "audio.h"
@@ -259,7 +258,7 @@ static int music_callback(int action, const struct menu_item_ex *this_item,
 
 static int genius_mixes(void)
 {
-    return fruit_genius_show(true) == GO_TO_ROOT ? GO_TO_ROOT : 0;
+    return run(GO_TO_GENIUS_MIXES);
 }
 
 ROW(music_cover_flow, LANG_COVER_FLOW_TITLE, cover_flow, music_callback);

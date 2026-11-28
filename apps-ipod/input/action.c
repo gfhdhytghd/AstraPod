@@ -52,13 +52,21 @@
 #include "screens/playback/wps.h"
 
 static int wheel_transport_pressed;
+static bool extra_wheel_transport;
+
+bool action_set_wheel_transport(bool enabled)
+{
+    bool previous = extra_wheel_transport;
+    extra_wheel_transport = enabled;
+    return previous;
+}
 
 static int wheel_transport_keys(int button)
 {
     const int transport = BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY;
     if (!(button & transport) ||
         (button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW | BUTTON_REMOTE)) ||
-        !ui_wheel_navigation())
+        !(ui_wheel_navigation() || extra_wheel_transport))
         return BUTTON_NONE;
 
     enum current_activity activity = get_current_activity();

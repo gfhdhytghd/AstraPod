@@ -34437,16 +34437,16 @@
 </phrase>
 <phrase>
   id: LANG_FRUIT_GENIUS_MIXES_HELP
-  desc: Fruit Company playlist or music context menu
+  desc: Genius Mixes empty library
   user: core
   <source>
-    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+    *: "Add more music by different artists to make Genius Mixes on this player."
   </source>
   <dest>
-    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+    *: "Add more music by different artists to make Genius Mixes on this player."
   </dest>
   <voice>
-    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+    *: "Add more music by different artists to make Genius Mixes on this player."
   </voice>
 </phrase>
 <phrase>

@@ -226,7 +226,7 @@ restart:
             char saved_path[MAX_PATH] = "";
             browse_ret = otg ?
                 fruit_otg_show(saved_path, sizeof(saved_path), &otg_selection) :
-                fruit_genius_show(false);
+                fruit_genius_show();
             reopen_otg = otg && browse_ret == GO_TO_WPS;
             if (saved_path[0])
             {

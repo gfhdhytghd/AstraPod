@@ -22,7 +22,7 @@
 | EQ 编辑 | `apps-ipod/input/keymap_ipod.c:220`、`apps-ipod/screens/settings/eq_editor.c:1247`。LEFT/RIGHT 选频段。长按 PLAY 旁路 EQ。 | 长按 SELECT 在选频段和改数值之间切换。短按 SELECT 保留参数切换。 |
 | 文本输入 | `apps-ipod/input/keymap_ipod.c:297`、`apps-ipod/widgets/keyboard.c:160`。LEFT/RIGHT 移动或删除。PLAY 把焦点移到操作按钮。 | 滚轮选择字符。SELECT 提交当前字符。长按 SELECT 进入确认按钮行。长按 MENU 删除字符。 |
 | Yes/No 对话框和交接页 | `apps-ipod/input/keymap_ipod.c:263`、`apps-ipod/widgets/yesno.c:255`。LEFT/RIGHT 改选项。PLAY 取消。`apps-ipod/screens/playback/handoff_sheet.c:249` 也读取 LEFT/RIGHT。 | 滚轮选项。SELECT 确认。MENU 返回。 |
-| USB 连接确认 | `apps-ipod/widgets/usb_confirm.c:117`。RIGHT 选择远程控制。PLAY 切换播放。 | 长按 SELECT 选择远程控制。短按 SELECT 连接。MENU 仅充电。 |
+| USB 连接确认 | 短按 SELECT 连接。MENU 仅充电。 | PLAY 切换播放。 |
 | Control Centre | `apps-ipod/input/keymap_ipod.c:279`、`apps-ipod/screens/playback/quick_screen.c`。非导航页的全屏控制页：左栏为随机播放和重复播放，右栏为一项通高的亮度。 | 滚轮直接调节音量，并通过状态栏音量覆盖层显示。LEFT 切换随机播放，RIGHT 切换重复播放，MENU 调高亮度，PLAY 调低亮度。短按 SELECT 关闭且无闪烁，长按 SELECT 打开 Shortcuts。 |
 | Cover Flow 和专辑面板 | `apps-ipod/screens/covers/carousel.c:158`、`:185`、`:188`、`:8687`、`:8727`、`:9333`、`:9477`。LEFT/RIGHT 跳页。长按 PLAY 随机转动。PLAY 可以从面板进入 Now Playing 或播放所选专辑。SELECT+PLAY 切换排序。 | 滚轮移动封面或歌曲焦点。SELECT 打开专辑或播放所选歌曲。MENU 返回。 |
 | Now Playing 及歌词 | `apps-ipod/input/keymap_ipod.c:181`、`apps-ipod/screens/playback/wps.c:896`、`:947`。LEFT/RIGHT 切歌和快进快退。PLAY 切换播放。长按 PLAY 打开菜单。SELECT+PLAY 触发快捷操作或 A/B 标记。歌词继承 WPS 播放动作。 | 播放动作保持可用。长按 SELECT 打开播放菜单。短按 SELECT 打开歌词或执行歌词操作。 |

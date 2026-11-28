@@ -28123,15 +28123,13 @@
 
 <phrase>
   id: LANG_HANDOFF_USB
-  desc: Continuity handoff
+  desc: deprecated
   user: core
   <source>
     *: none
-    ipod6g: "RIGHT   Remote control"
   </source>
   <dest>
     *: none
-    ipod6g: "右键    连接遥控"
   </dest>
   <voice>
     *: none

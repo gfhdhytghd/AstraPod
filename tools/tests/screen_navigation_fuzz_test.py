@@ -61,6 +61,8 @@ static int cider_browse_covers(bool h){(void)h;return GO_TO_CIDER;}
 #define ACTION_REMOTE_WPS 7
 #define ACTION_WPS_MENU 8
 #define PF_QUIT ACTION_WPS_MENU
+#define PF_BACK PF_QUIT
+#define USEC_TIMER 0u
 #define ACTION_WPS_STOP 9
 #define ACTION_WPS_BROWSE 100
 #define ACTION_WPS_QUICKSCREEN 101
@@ -97,6 +99,11 @@ static void leave_playback(void){wps_fullscreen = false;}
 static int carousel_wps_back(void){return GO_TO_PREVIOUS;}
 static void carousel_prepare_transition(void){}
 static void carousel_cancel_transition(void){}
+static void carousel_wps_capture_return(unsigned us){(void)us;}
+static struct {bool live;} panel;
+static bool flat_view(void){return false;}
+static void request_wps_rise(const char *path,bool capture,unsigned us)
+{(void)path;(void)capture;(void)us;}
 static void finish_talk(bool discard){assert(discard);}
 static bool t3_mode(void){return false;}
 static bool agents_fruit_nav(void){return false;}
@@ -174,6 +181,7 @@ AGENT_CASES
 }
 static long wps_run(bool return_agents){
  bool restore=false,theme_enabled=true;
+ unsigned action_us=USEC_TIMER;
  while(1){
  WPS_PENDING
  int button=next_action();events++;
@@ -189,7 +197,11 @@ static long wps_run(bool return_agents){
  }
 }
 static int cover_decide(int button){
+ int leave_result=GO_TO_PREVIOUS;
+ unsigned action_us=USEC_TIMER;
 COVER_CASES
+leave_covers:
+ return leave_result;
 }
 static int carousel_body(int model,const char*file){
  (void)model;(void)file;assert(!owner);owner=1;

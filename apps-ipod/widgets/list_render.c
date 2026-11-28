@@ -49,6 +49,7 @@
 #include "list_hwscroll.h"
 #include "list_select.h"
 #include "list_quickscroll.h"
+#include "list_ultra.h"
 
 struct list_geometry {
     struct ui_rect background, title, header, rows, notes, footer;
@@ -82,6 +83,10 @@ struct list_pose {
  * painted counts the frames drawn. */
 struct list_motion {
     struct list_pose from, live, rest;
+    /* Under Ultra: the speed the glide set out with, a row a frame at
+     * most, and whether it moves the selection. */
+    struct list_pose velocity;
+    bool ultra, moved;
     uint32_t started;
     unsigned painted, trace;
     unsigned glide_frames, spring_frames;
@@ -182,6 +187,18 @@ struct native_list {
     bool holding;
     int repair_rows;
     unsigned char mark_mask[2];
+    /* Whether this paint runs under Ultra. Its glint is armed once the bar
+     * settles, starts at glint_at, and drew glint_painted last;
+     * glint_frame is the frame this paint draws, -1 for none. */
+    bool ultra, glint;
+    uint32_t glint_at;
+    int glint_frame, glint_painted;
+    unsigned glint_trace;
+    /* The run of the Ultra marquee; whether the list shows the classic
+     * indicator, and its strength when the selection last moved. */
+    unsigned marquee_period;
+    bool has_indicator;
+    int indicator_from;
 };
 
 static int renderer_handle;
@@ -419,10 +436,17 @@ int list_render_visible_rows(const struct gui_synclist *list, enum screen_type s
     return g.rows.height / g.pitch;
 }
 
+/* Ultra glides on its own spring whatever the theme's list duration. */
+static unsigned glide_frames(void)
+{
+    if (ui_theme_ultra())
+        return list_ultra_glide_frames();
+    return ui_theme_motion(UI_MOTION_LIST, GLIDE_F, GLIDE_F);
+}
+
 static bool motion_enabled(void)
 {
-    return !ui_scrolling_held() &&
-           ui_theme_motion(UI_MOTION_LIST, GLIDE_F, GLIDE_F) != 0;
+    return !ui_scrolling_held() && glide_frames() != 0;
 }
 
 static int64_t fixed_row(int index)
@@ -442,8 +466,19 @@ static void motion_stop(struct list_motion *motion)
     motion->visible = 0;
 }
 
+/* Under Ultra, rows bound for a pull or a spin's lead reach it in the
+ * standard glide, however long the bar's spring runs, and turn back at
+ * once. */
+static unsigned ultra_lead_frames(const struct list_motion *motion)
+{
+    return MIN(motion->glide_frames, (unsigned)GLIDE_F);
+}
+
 static unsigned motion_duration(const struct list_motion *motion)
 {
+    if (motion->ultra && motion->live.top != motion->rest.top)
+        return MAX(motion->glide_frames,
+                   ultra_lead_frames(motion) + motion->spring_frames);
     return motion->glide_frames +
            (motion->live.top == motion->rest.top ? 0 : motion->spring_frames);
 }
@@ -490,11 +525,34 @@ static int64_t marker_tail(const struct list_motion *motion, int64_t cursor,
     return cursor;
 }
 
+/* Where Ultra's rows stand at `frame`. Rows bound for a pull or a spin's
+ * lead ease out to it rather than spring, as overshooting a point they
+ * turn back from would wobble them a pixel. */
+static int64_t ultra_top(const struct list_motion *motion, unsigned frame)
+{
+    unsigned lead = ultra_lead_frames(motion);
+    if (motion->live.top == motion->rest.top)
+        return list_ultra_spring(motion->from.top, motion->live.top,
+                                 motion->velocity.top, frame,
+                                 motion->glide_frames);
+    if (frame < lead)
+        return ease_out(motion->from.top, motion->live.top, frame, lead);
+    return list_ultra_return(motion->live.top, motion->rest.top,
+                             frame - lead, motion->spring_frames);
+}
+
 static struct list_pose motion_sample(const struct list_motion *motion, unsigned frame)
 {
     struct list_pose pose = motion->live;
     unsigned glide = motion->glide_frames;
-    if (frame < glide)
+    if (motion->ultra)
+    {
+        pose.top = ultra_top(motion, frame);
+        pose.cursor = list_ultra_spring(motion->from.cursor, pose.cursor,
+                                        motion->velocity.cursor, frame,
+                                        glide);
+    }
+    else if (frame < glide)
     {
         pose.top = ease_out(motion->from.top, pose.top, frame, glide);
         pose.cursor = ease_out(motion->from.cursor, pose.cursor, frame, glide);
@@ -507,6 +565,25 @@ static struct list_pose motion_sample(const struct list_motion *motion, unsigned
     }
     pose.top = limit_top(motion, pose);
     return pose;
+}
+
+/* The speed of the pose drawn at `frame`, a row a frame at most. */
+static struct list_pose pose_velocity(const struct list_motion *motion,
+                                      unsigned frame, struct list_pose at)
+{
+    if (!motion->ultra || !frame)
+        return motion->ultra ? motion->velocity : (struct list_pose){0, 0};
+    struct list_pose before = motion_sample(motion, frame - 1);
+    int64_t top = at.top - before.top, cursor = at.cursor - before.cursor;
+    return (struct list_pose){ MIN(MAX(top, -ROW_UNIT), ROW_UNIT),
+                               MIN(MAX(cursor, -ROW_UNIT), ROW_UNIT) };
+}
+
+static void glint_stop(struct native_list *render)
+{
+    ui_perf_end(render->glint_trace);
+    render->glint_trace = 0;
+    render->glint = false;
 }
 
 void list_render_settle(const struct gui_synclist *list)
@@ -522,7 +599,8 @@ void list_render_settle(const struct gui_synclist *list)
 void list_render_retarget(const struct gui_synclist *list, int selection, int top,
                           int offset, bool wheel)
 {
-    unsigned glide = ui_theme_motion(UI_MOTION_LIST, GLIDE_F, GLIDE_F);
+    unsigned glide = glide_frames();
+    bool ultra = ui_theme_ultra();
     if (!glide || ui_scrolling_held() || renderer_handle <= 0 || !list->nb_items ||
         !list->parent[SCREEN_MAIN])
         return;
@@ -552,9 +630,18 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
                       motion->rest.top == from.top && motion->rest.cursor == from.cursor;
     bool snap =
         render->theme.style[UI_STYLE_LIST_SCROLL] == UI_LIST_SCROLL_SNAP;
+    struct list_pose velocity = {0, 0};
     if (continuing)
     {
-        from = motion_sample(motion, snap ? motion->painted : frame);
+        unsigned drawn = snap ? motion->painted : frame;
+        /* The redraw that follows a detent shows the new glide's first
+         * pose at once; under Ultra that pose is the next one, not the
+         * one already on screen, so a spin moves at every frame. */
+        if (ultra && !snap && drawn <= motion->painted)
+            drawn = motion->painted + 1;
+        from = motion_sample(motion, drawn);
+        if (ultra)
+            velocity = pose_velocity(motion, drawn, from);
         /* Carry the frame phase through rapid wheel events. Restarting the
          * clock at each detent would stall a glide when detents arrive < 1 f apart. */
         now -= elapsed - ui_frame_clock(frame);
@@ -569,8 +656,25 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     bool wrapped = (offset < 0 && rest.cursor > fixed_row(selection)) ||
                    (offset > 0 && rest.cursor < fixed_row(selection));
     bool physical_end = wheel && !wrapped && (position < 0 || position > last);
+    /* Ultra's longer settle still counts a spin by the standard glide. */
+    unsigned window = ultra ? MIN(glide, GLIDE_F) : motion->glide_frames;
     bool fast = wheel && (offset < -1 || offset > 1 ||
-                         (continuing && motion->wheel && frame < motion->glide_frames));
+                         (continuing && motion->wheel && frame < window));
+    if (physical_end)
+    {
+        /* The bar stops at the end; only the rows pull past it. */
+        velocity.cursor = 0;
+    }
+    else if (ultra && continuing && wheel && motion->wheel && frame > 0 &&
+             frame < window)
+    {
+        /* A spin keeps at least the wheel's pace, a row per interval
+         * between detents; the spring alone would start each one slowly
+         * and the lag limit would make up the rest in a jump. */
+        int64_t pace = ROW_UNIT / frame;
+        velocity.cursor = offset > 0 ? MAX(velocity.cursor, pace) :
+                                       MIN(velocity.cursor, -pace);
+    }
 
     if (snap)
     {
@@ -602,8 +706,10 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
 
     if (wheel)
     {
-        from.cursor = MIN(MAX(from.cursor, rest.cursor - MAX_WHEEL_LAG),
-                          rest.cursor + MAX_WHEEL_LAG);
+        /* Ultra's bar keeps within a row of a fast spin. */
+        int64_t lag = ultra ? ROW_UNIT : MAX_WHEEL_LAG;
+        from.cursor = MIN(MAX(from.cursor, rest.cursor - lag),
+                          rest.cursor + lag);
     }
     if (from.top == live.top && from.cursor == live.cursor && live.top == rest.top)
     {
@@ -614,15 +720,20 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     /* A snapped jump costs a whole-list frame; the marker's own frames
      * that follow are cheap enough for every refresh again. */
     glide_pace.recover_full_rate = snap;
+    glint_stop(render);
+    bool moved = rest.cursor != fixed_row(selection) ||
+                 (continuing && motion->moved);
     unsigned trace = motion->trace;
     if (!trace)
         trace = ui_perf_begin("list-glide");
     *motion = (struct list_motion) {
         .from = from, .live = live, .rest = rest,
+        .velocity = velocity, .ultra = ultra, .moved = moved,
         .started = continuing ? now : ui_clock_start(),
         .painted = 0, .trace = trace,
         .glide_frames = glide,
-        .spring_frames = ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F),
+        .spring_frames = ultra ? list_ultra_return_frames() :
+            ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F),
         .visible = visible, .count = list->nb_items, .span = span,
         .bounds = g.rows, .pitch = g.pitch, .wheel = wheel, .snap = snap,
     };
@@ -804,11 +915,23 @@ static bool classic_indicator(const struct native_list *render)
 
 static bool stock_index(const struct native_list *render);
 
-/* The indicator's strength now, INDICATOR_STEPS (full) down to 0 (gone). */
+/* The scale of the indicator's strength: Ultra fades it more finely. */
+static int indicator_full(const struct native_list *render)
+{
+    return render->ultra ? LIST_ULTRA_FULL : INDICATOR_STEPS;
+}
+
+/* The indicator's strength now, indicator_full() down to 0 (gone). */
 static int indicator_level(const struct native_list *render)
 {
     if (render->overlay.visible && stock_index(render))
-        return INDICATOR_STEPS;
+        return indicator_full(render);
+    if (render->ultra)
+    {
+        uint32_t now = USEC_TIMER;
+        return list_ultra_indicator(now - render->indicator_started,
+                                    render->indicator_from, INDICATOR_HOLD);
+    }
     uint32_t elapsed = USEC_TIMER - render->indicator_started;
     if (elapsed < INDICATOR_HOLD)
         return INDICATOR_STEPS;
@@ -839,6 +962,18 @@ static unsigned stock_marquee_shift(struct native_list *render,
     if (phase >= run)
         return 0;
     return MIN(period, 2 * (phase + 1)) % period;
+}
+
+/* Stock's marquee under Ultra: the same waits, run a column a refresh. */
+static unsigned ultra_marquee_shift(struct native_list *render,
+                                    unsigned period)
+{
+    if (!global_settings.scrolling_enabled || ui_scrolling_held())
+        return 0;
+    render->has_marquee = true;
+    render->marquee_period = period;
+    return list_ultra_marquee(
+        ui_clock_frame(USEC_TIMER - render->marquee_started), period);
 }
 
 /* Set by any text a paint leaves out until its glyphs load. row_skipped
@@ -888,7 +1023,8 @@ static void draw_text(struct native_list *render, struct ui_rect clip,
     if (!offset && scroll && overflow && stock_marquee(render))
     {
         period = width + STOCK_MARQUEE_GAP;
-        offset = stock_marquee_shift(render, period);
+        offset = render->ultra ? ultra_marquee_shift(render, period) :
+                 stock_marquee_shift(render, period);
     }
     else if (!offset && scroll)
         offset = marquee_shift(render, overflow);
@@ -1505,13 +1641,13 @@ static void blend(struct ui_rect clip, struct ui_rect cell, unsigned int color,
     lcd_set_viewport(prior);
 }
 
-/* `id` at (x, y) as stock_art_draw() draws it, at `level` of
- * INDICATOR_STEPS strength. */
+/* `id` at (x, y) as stock_art_draw() draws it, at `level` of `full`
+ * strength. */
 static void draw_art_faded(enum stock_art_id id, int x, int y,
-                           struct ui_rect clip, int level)
+                           struct ui_rect clip, int level, int full)
 {
     const struct stock_art *art = &stock_art[id];
-    if (level >= INDICATOR_STEPS)
+    if (level >= full)
     {
         stock_art_draw(id, x, y, clip);
         return;
@@ -1529,6 +1665,11 @@ static void draw_art_faded(enum stock_art_id id, int x, int y,
         fb_data mixed[16];
         memcpy(mixed, out, clip.width * sizeof(*out));
         stock_art_row(id, clip.x - x, row - y, mixed, clip.width);
+        if (full == LIST_ULTRA_FULL)
+        {
+            list_ultra_mix_row(out, mixed, clip.width, level);
+            continue;
+        }
         for (int i = 0; i < clip.width; ++i)
         {
             int c[3] = { FB_UNPACK_RED(out[i]), FB_UNPACK_GREEN(out[i]),
@@ -1546,7 +1687,8 @@ static void draw_art_faded(enum stock_art_id id, int x, int y,
  * repeated between, against the bar's right edge, in a track 2 rows short
  * of the bar at each end. Its length is the visible share of the track. */
 static void paint_art_scrollbar(struct ui_rect clip, struct ui_rect bar,
-                                int items, int first, int last, int level)
+                                int items, int first, int last, int level,
+                                int full)
 {
     const struct stock_art *top = &stock_art[STOCK_ART_SYSTEM_SCROLLBARTOP];
     int bottom = stock_art[STOCK_ART_SYSTEM_SCROLLBARBOTTOM].height;
@@ -1566,9 +1708,11 @@ static void paint_art_scrollbar(struct ui_rect clip, struct ui_rect bar,
     struct ui_rect body = intersection(clip, (struct ui_rect){
         x, y + top->height, top->width, end - y - top->height });
     for (int row = y + top->height; row < end; row += middle)
-        draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARCENTER, x, row, body, level);
-    draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARTOP, x, y, clip, level);
-    draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARBOTTOM, x, end, clip, level);
+        draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARCENTER, x, row, body, level,
+                       full);
+    draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARTOP, x, y, clip, level, full);
+    draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARBOTTOM, x, end, clip, level,
+                   full);
 }
 
 /* The stock indicator: no track, a translucent foreground thumb with rounded
@@ -1581,9 +1725,11 @@ static void paint_classic_scrollbar(struct native_list *render,
 {
     if (ui_theme_art(&render->theme))
     {
-        paint_art_scrollbar(clip, bar, items, first, last, level);
+        paint_art_scrollbar(clip, bar, items, first, last, level,
+                            indicator_full(render));
         return;
     }
+    level = level * INDICATOR_STEPS / indicator_full(render);
     struct ui_rect track = { bar.x + 1, bar.y + 3, bar.width - 2,
                              bar.height - 6 };
     if (track.width <= 0 || track.height <= 0 || items <= 0)
@@ -1694,8 +1840,14 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
         const struct ui_theme_gradient *gradient =
             &render->theme.gradient[UI_GRADIENT_SELECTION];
         if (gradient->stops && highlight.height <= LCD_HEIGHT)
-            fill_rows(clip, highlight, gradient_rows(render, &render->bar_rows,
-                      UI_GRADIENT_SELECTION, highlight.height));
+        {
+            const uint16_t *colors = gradient_rows(render, &render->bar_rows,
+                UI_GRADIENT_SELECTION, highlight.height);
+            fill_rows(clip, highlight, colors);
+            if (render->glint_frame >= 0)
+                list_ultra_glint(clip, highlight, colors,
+                                 render->glint_frame);
+        }
         else
             fill(clip, highlight, render->colors[UI_COLOR_SELECTION]);
         int top = MIN(MAX(highlight.y, clip.y), clip.y + clip.height);
@@ -2523,8 +2675,8 @@ static bool marquee_resting(const struct native_list *render)
 }
 
 /* Whether the rows the last paint left differ from this frame's only by
- * where the list and its selection stand. */
-static bool shown_current(const struct native_list *render,
+ * where the list and its selection stand, or by the marquee. */
+static bool shown_settled(const struct native_list *render,
                           const struct list_geometry *g)
 {
     const struct list_shown *shown = &render->shown;
@@ -2535,13 +2687,21 @@ static bool shown_current(const struct native_list *render,
            shown->art == render->art_generation &&
            shown->art_handle == render->art_handle &&
            (shown->font == render->font_epoch || shown->complete) &&
-           shown->artist == render->artist_generation &&
-           marquee_resting(render);
+           shown->artist == render->artist_generation;
+}
+
+/* The same, with the marquee at rest. */
+static bool shown_current(const struct native_list *render,
+                          const struct list_geometry *g)
+{
+    return shown_settled(render, g) && marquee_resting(render);
 }
 
 /* Under snapped scrolling, a frame whose rows stand where the last paint
  * left them repaints only the marker's path, plus the rows whose text
- * colour follows it. False when anything else may have changed. */
+ * colour follows it. False when anything else may have changed. Ultra
+ * does the same for its bar, and repaints the bar's own rows while its
+ * glint or marquee runs. */
 static bool marker_damage(const struct native_list *render,
                           const struct list_geometry *g, struct ui_rect *damage)
 {
@@ -2549,8 +2709,12 @@ static bool marker_damage(const struct native_list *render,
     const struct gui_synclist *list = render->owner;
     int top = render->rows.value[UI_SCROLL_OFFSET];
     int lit = render->rows.value[UI_SELECTION];
-    if (!shown_current(render, g) ||
-        render->theme.style[UI_STYLE_LIST_SCROLL] != UI_LIST_SCROLL_SNAP ||
+    bool ultra = render->ultra;
+    /* A glide can leave the rows a pixel from where they rest. */
+    if (!(ultra ? shown_settled(render, g) : shown_current(render, g)) ||
+        (render->theme.style[UI_STYLE_LIST_SCROLL] != UI_LIST_SCROLL_SNAP &&
+         !ultra) ||
+        (ultra && shown->top_px != top * g->pitch - render->row_shift) ||
         render->row_shift || shown->top != top ||
         (g->notes.height > 0 && shown->selected != list->selected_item))
         return false;
@@ -2575,6 +2739,12 @@ static bool marker_damage(const struct native_list *render,
     {
         band.x = shown->marker.x;
         band.width = shown->marker.width;
+    }
+    if (ultra && (render->glint_frame >= 0 || !marquee_resting(render)))
+    {
+        struct ui_rect bar = { g->rows.x, render->cursor_y, g->rows.width,
+                               render->cursor_height };
+        band = band.height > 0 ? bounding(band, bar) : bar;
     }
     *damage = intersection(band, g->rows);
     if (damage->width <= 0 || damage->height <= 0)
@@ -2875,16 +3045,32 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     }
 
     refresh_tokens(render);
+    render->ultra = ui_theme_ultra();
     if (!same_owner || render->selection != list->selected_item)
     {
+        /* Ultra's indicator rises again from where its fade has got to. */
+        int level = render->ultra && same_owner && render->shown.valid ?
+                    indicator_level(render) : LIST_ULTRA_FULL;
         if (!same_owner || !list->require_row_glyphs)
             render->prefetched_top = -1;
+        if (!same_owner)
+            glint_stop(render);
         render->owner = list;
         render->generation = list->generation;
         render->selection = list->selected_item;
         render->marquee_started = ui_clock_start();
         render->indicator_started = render->marquee_started;
+        render->indicator_from = level;
         child_reset(render);
+    }
+    render->glint_frame = -1;
+    if (render->glint && (int32_t)(USEC_TIMER - render->glint_at) >= 0)
+    {
+        render->glint_frame = MIN(ui_clock_frame(USEC_TIMER -
+                                                 render->glint_at),
+                                  LIST_ULTRA_GLINT_FRAMES);
+        if (!render->glint_trace)
+            render->glint_trace = ui_perf_begin("list-glint");
     }
     if (!status_only)
     {
@@ -2941,8 +3127,8 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     render->page.damage = split && !keep_pane ?
         (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT} : g.background;
     int bar_width = scrollbar_width(list, g.rows, g.rows.height / g.pitch);
-    render->indicator = classic_indicator(render) && bar_width ?
-                        indicator_level(render) : 0;
+    render->has_indicator = classic_indicator(render) && bar_width;
+    render->indicator = render->has_indicator ? indicator_level(render) : 0;
     /* A split menu's pane follows the selection, so only a frame that
      * keeps the pane may shrink to the marker's path. */
     bool partial = moved && !status_only && !show_index &&
@@ -2983,7 +3169,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     adopt_framebuffer(render);
     struct list_hwscroll_pose before;
     bool batch = moved && !status_only && !show_index && !split &&
-                 (!partial || repair) &&
+                 (!partial || repair) && render->glint_frame < 0 &&
                  !held && !gui_synclist_flush_inhibited() &&
                  batch_ready(render, &g);
     if (batch)
@@ -3077,6 +3263,20 @@ static void draw_list(struct gui_synclist *list, bool status_only,
         render->snap_frame = false;
         snap_presented(render, ui_flush_count() != flushes);
     }
+    if (render->glint_frame >= 0 && !status_only && painted)
+    {
+        render->glint_painted = render->glint_frame;
+        if (render->glint_frame >= LIST_ULTRA_GLINT_FRAMES)
+            glint_stop(render);
+    }
+    render->glint_frame = -1;
+    if (motion_finished && render->motion.ultra && render->motion.moved)
+    {
+        /* The bar has settled: its glint follows. */
+        render->glint = true;
+        render->glint_at = USEC_TIMER + LIST_ULTRA_GLINT_WAIT;
+        render->glint_painted = -1;
+    }
     if (motion_finished)
         motion_stop(&render->motion);
 #if defined(HAVE_ADJUSTABLE_CPU_FREQ) || defined(PODBOX_POWER_PROBE)
@@ -3162,6 +3362,7 @@ void list_render_forget(const struct gui_synclist *list)
         render->shown.valid = false;
         render->has_marquee = false;
         motion_stop(&render->motion);
+        glint_stop(render);
         index_release_fonts(render);
         memset(&render->overlay, 0, sizeof(render->overlay));
         render->art_handle = -1;
@@ -3269,6 +3470,62 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
     return delay;
 }
 
+/* Kernel ticks to `at`, 0 once it has passed. Polling arms the precise
+ * wake. */
+static int wait_for(uint32_t at, bool poll)
+{
+    int32_t left = at - (uint32_t)USEC_TIMER;
+    if (left <= 0)
+        return 0;
+    if (poll)
+        return ui_clock_wait_until(at);
+    int tick = 1000000 / HZ;
+    return (left + tick - 1) / tick;
+}
+
+/* When the Ultra glint, marquee or indicator next changes; TIMEOUT_BLOCK
+ * when none will. */
+static int ultra_deadline(const struct native_list *render, bool poll)
+{
+    int delay = TIMEOUT_BLOCK;
+    if (render->glint)
+    {
+        uint32_t at = render->glint_at;
+        if (render->glint_painted >= 0)
+            at += ui_frame_clock(render->glint_painted + 1);
+        delay = wait_for(at, poll);
+    }
+    if (global_settings.scrolling_enabled && render->has_marquee &&
+        stock_marquee(render))
+    {
+        unsigned next = list_ultra_marquee_next(render->marquee_frame,
+                                                render->marquee_period);
+        int ticks = wait_for(render->marquee_started + ui_frame_clock(next),
+                             poll);
+        if (delay == TIMEOUT_BLOCK || ticks < delay)
+            delay = ticks;
+    }
+    if (render->shown.valid && render->has_indicator &&
+        !(render->overlay.visible && stock_index(render)))
+    {
+        uint32_t now = USEC_TIMER;
+        uint32_t moved = now - render->indicator_started;
+        int ticks = TIMEOUT_BLOCK;
+        if (indicator_level(render) != render->shown.indicator)
+            ticks = 0;
+        else if (list_ultra_indicator_moving(moved, render->indicator_from,
+                                             INDICATOR_HOLD))
+            ticks = wait_for(render->indicator_started +
+                             ui_frame_clock(ui_clock_frame(moved) + 1), poll);
+        else if (moved < INDICATOR_HOLD && render->shown.indicator > 0)
+            ticks = wait_for(render->indicator_started + INDICATOR_HOLD,
+                             poll);
+        if (ticks != TIMEOUT_BLOCK && (delay == TIMEOUT_BLOCK || ticks < delay))
+            delay = ticks;
+    }
+    return delay;
+}
+
 /* When the list itself next moves, the pane aside. */
 static int list_deadline(const struct gui_synclist *list, bool poll)
 {
@@ -3315,7 +3572,14 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
                     delay = motion_delay;
             }
         }
-        if (global_settings.scrolling_enabled && render->has_marquee)
+        if (render->ultra)
+        {
+            int ticks = ultra_deadline(render, poll);
+            if (ticks != TIMEOUT_BLOCK &&
+                (delay == TIMEOUT_BLOCK || ticks < delay))
+                delay = ticks;
+        }
+        else if (global_settings.scrolling_enabled && render->has_marquee)
         {
             unsigned frames = stock_marquee(render) ?
                 MAX(1, ui_clock_frame(STOCK_MARQUEE_TICK)) : marquee_frames();
@@ -3326,7 +3590,8 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             if (delay == TIMEOUT_BLOCK || ticks < delay)
                 delay = ticks;
         }
-        if (render->shown.valid && render->shown.indicator > 0 &&
+        if (!render->ultra && render->shown.valid &&
+            render->shown.indicator > 0 &&
             !(render->overlay.visible && stock_index(render)))
         {
             uint32_t elapsed = now - render->indicator_started;

@@ -206,6 +206,7 @@ void gui_usb_screen_run(bool early_usb, intptr_t seqnum)
     }
 
     usb_acknowledge(SYS_USB_CONNECTED_ACK, seqnum);
+    usb_stock_enter();
 
     while (1)
     {

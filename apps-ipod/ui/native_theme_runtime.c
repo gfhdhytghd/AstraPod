@@ -45,7 +45,7 @@ static bool valid_name(const char *name, size_t len)
 static int builtin_id(const char *name, size_t len)
 {
     if (len == 5 && !strncasecmp(name, "light", len))
-        return UI_THEME_SCRIM;
+        return UI_THEME_LIGHT;
     if (len == 7 && !memcmp(name, "plastic", 7))
         return UI_THEME_CLASSIC;
     for (int id = 0; id < UI_THEME_BUILTIN_COUNT; ++id)
@@ -276,6 +276,12 @@ unsigned ui_theme_style(enum ui_style_role role)
     return style;
 }
 
+bool ui_theme_ultra(void)
+{
+    return ui_theme_style(UI_STYLE_MOTION) == UI_MOTION_ULTRA &&
+           ui_theme_duration(UI_THEME_MOTION_ONE) > 0;
+}
+
 unsigned ui_theme_easing(void)
 {
     unsigned easing = UI_EASE_CUBIC;
@@ -367,6 +373,8 @@ static const char *theme_name(int item, void *data, char *buf, size_t len)
         [UI_THEME_SCRIM] = "Scrim",
         [UI_THEME_CLASSIC] = "Classic",
         [UI_THEME_FRUIT_COMPANY] = "Fruit Company",
+        [UI_THEME_LIGHT] = "Light",
+        [UI_THEME_FRUIT_COMPANY_ULTRA] = "Fruit Company Ultra",
     };
     return item < UI_THEME_BUILTIN_COUNT ? builtins[item] :
            files[item - UI_THEME_BUILTIN_COUNT];

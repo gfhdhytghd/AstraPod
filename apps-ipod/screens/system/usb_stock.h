@@ -14,6 +14,9 @@ bool usb_stock_draw(void);
  * (connected, syncing, ejected), battery or hold changes. Safe after
  * font_disable_all(): reads only cached glyphs and in-RAM stock art. */
 void usb_stock_tick(void);
+
+/* Fruit Company Ultra's entry, once the host is answered. */
+void usb_stock_enter(void);
 /* Unload what usb_stock_open() loaded. */
 void usb_stock_close(void);
 

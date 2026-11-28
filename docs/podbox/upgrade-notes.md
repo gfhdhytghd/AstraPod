@@ -163,3 +163,11 @@
   retain their original fields.
   The first Last.fm write archives the old scrobble files under
   `/.scrobbler-local_*.log` and starts `/.scrobbler.log` with UTC timestamps.
+
+- **Fruit Company Ultra** is a new built-in theme: Fruit Company's look and
+  menus, with richer motion. Lists spring and glide, pages slide in depth
+  with shadows, Cover Flow's covers fly in and catch the light, and Now
+  Playing, sheets and the USB screen animate their changes. Choose it in
+  Theme Settings > Native theme; under Fruit Company that is under
+  Settings > Advanced Settings. With Animations off it looks and behaves
+  like Fruit Company.

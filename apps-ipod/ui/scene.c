@@ -17,6 +17,7 @@
 #include "retained.h"
 #include "scene.h"
 #include "statusbar.h"
+#include "ultra_scene.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -79,6 +80,8 @@ static int position(const struct ui_scene *scene, unsigned frame)
 {
     const struct ui_tween *tween = &scene->tween;
     int offset;
+    if (scene->slide && ui_theme_ultra())
+        return ultra_scene_sample(tween, frame) & ~1;
     if (scene->pan_top && !scene->slide && frame < tween->frames)
     {
         /* Smoothstep: zero velocity at each end, equal travel in each half. */
@@ -357,6 +360,12 @@ static void compose_pages(const struct ui_scene *scene, fb_data *out,
                           const fb_data *back, const fb_data *front, int offset,
                           const fb_data *still)
 {
+    if (scene->slide && !still && ui_theme_ultra())
+    {
+        ultra_scene_compose(scene, out, back, front,
+                            lcd_framebuffer_default.fb_ptr, offset);
+        return;
+    }
     if (!scene->pan_top && !scene->slide)
     {
         compose(out, back, front, offset, still);
@@ -643,6 +652,9 @@ void ui_scene_push_rows(int y, int pitch, int count)
 void ui_scene_fade_out(void)
 {
     unsigned duration = ui_theme_duration(ANIM_F(12));
+    bool ultra = ui_theme_ultra();
+    if (ultra)
+        duration = ultra_scene_fade_frames(duration);
     if (!duration || !lcd_active())
         return;
     ui_scene_interrupt();
@@ -669,7 +681,10 @@ void ui_scene_fade_out(void)
             if (level != composed)
             {
                 uint32_t start = USEC_TIMER;
-                ui_blit_dim(framebuffer, source, PAGE_PIXELS, level);
+                if (ultra)
+                    ultra_scene_fade(framebuffer, source, level);
+                else
+                    ui_blit_dim(framebuffer, source, PAGE_PIXELS, level);
                 ui_note_render((uint32_t)USEC_TIMER - start);
                 composed = level;
             }
@@ -700,9 +715,10 @@ static int slide_top(void)
 
 static unsigned page_frames(bool push)
 {
-    return push
+    unsigned frames = push
         ? ui_theme_motion(UI_MOTION_PUSH, PUSH_ROW_FRAMES, PUSH_ROW_FRAMES)
         : ui_theme_motion(UI_MOTION_POP, POP_FRAMES, POP_FRAMES);
+    return ui_theme_ultra() ? ultra_scene_frames(frames) : frames;
 }
 
 /* A pan with slide set is a theme's page push (pan_dir 1) or pop (-1). */
@@ -865,7 +881,8 @@ void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bo
         scene->full_screen = full_screen;
         /* Now Playing slides in over the pane's backdrop, spread across the
          * screen in place of the menu. */
-        if (full_screen && push && scene->slide && scene->back_split)
+        if (full_screen && push && scene->slide && scene->back_split &&
+            !ui_theme_ultra())
         {
             fb_data *data = core_get_data_pinned(scene->handle);
             menu_pane_backdrop(surface(data, false));

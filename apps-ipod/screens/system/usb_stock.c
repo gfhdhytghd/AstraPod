@@ -33,6 +33,7 @@
 #include "ui/stock_art.h"
 #include "screens/extras/extras_bar.h"
 #include "usb_stock.h"
+#include "usb_ultra.h"
 
 #define ART_X       100     /* the pictures' box, centred in it */
 #define ART_W       120
@@ -55,6 +56,8 @@ enum usb_stock_state {
 static int title_font = -1, detail_font = -1;
 static unsigned last_stamp;
 static unsigned sync_phase;
+/* Fruit Company Ultra brings the picture in once the host is answered. */
+static bool entering;
 
 static bool stock_look(void)
 {
@@ -107,10 +110,18 @@ void usb_stock_open(void)
     extras_bar_put(&bar_dummy, str(LANG_ROCKBOX_TITLE));
     sync_phase = 0;
     last_stamp = 0;
+    const struct stock_art *sync = &stock_art[STOCK_ART_DISKMODEIMAGE_SYNCICON];
+    const struct stock_art *plug =
+        &stock_art[STOCK_ART_DISKMODEIMAGE_CONNECTEDICON];
+    int width = MAX(sync->width, plug->width);
+    entering = usb_ultra_open((struct ui_rect){ ART_X + (ART_W - width) / 2,
+        SPHERE_Y, width, MAX(sync->height, plug->height) });
 }
 
 void usb_stock_close(void)
 {
+    entering = false;
+    usb_ultra_close();
     if (title_font >= 0)
         font_unload(title_font);
     if (detail_font >= 0)
@@ -267,11 +278,9 @@ static void put_text_line(struct stock_canvas *band, int font,
                       TEXT_RGB);
 }
 
-static bool draw_state(enum usb_stock_state st)
+static void draw_rows(int top, int bottom, bool picture,
+                      enum usb_stock_state st)
 {
-    if (title_font < 0 || detail_font < 0 || !stock_art_ready())
-        return false;
-
     const char *title = (const char *)str(st == USB_STOCK_EJECTED ?
                             LANG_USB_STOCK_OK_TO_DISCONNECT :
                             st == USB_STOCK_SYNCING ?
@@ -281,25 +290,28 @@ static bool draw_state(enum usb_stock_state st)
         (const char *)str(LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT);
 
     static uint32_t band_pixels[LCD_WIDTH * BAND_ROWS];
-    for (int y = 0; y < LCD_HEIGHT; y += BAND_ROWS)
+    for (int y = top; y < bottom; y += BAND_ROWS)
     {
         struct stock_canvas band = {
-            band_pixels, 0, y, LCD_WIDTH, MIN(BAND_ROWS, LCD_HEIGHT - y),
+            band_pixels, 0, y, LCD_WIDTH, MIN(BAND_ROWS, bottom - y),
         };
         stock_art_put(&band, STOCK_ART_BACKGROUND_LIGHTBLUE, 0, 0);
-        if (st == USB_STOCK_EJECTED)
+        if (picture)
         {
-            put_green_sphere(&band, SPHERE_Y);
-            put_checkmark(&band);
-        }
-        else
-        {
-            put_centred(&band, STOCK_ART_DISKMODEIMAGE_SYNCICON, SPHERE_Y);
-            if (st == USB_STOCK_SYNCING)
-                put_sync_arrows(&band, sync_phase);
+            if (st == USB_STOCK_EJECTED)
+            {
+                put_green_sphere(&band, SPHERE_Y);
+                put_checkmark(&band);
+            }
             else
-                put_centred(&band, STOCK_ART_DISKMODEIMAGE_CONNECTEDICON,
-                            SPHERE_Y);
+            {
+                put_centred(&band, STOCK_ART_DISKMODEIMAGE_SYNCICON, SPHERE_Y);
+                if (st == USB_STOCK_SYNCING)
+                    put_sync_arrows(&band, sync_phase);
+                else
+                    put_centred(&band, STOCK_ART_DISKMODEIMAGE_CONNECTEDICON,
+                                SPHERE_Y);
+            }
         }
         put_text_line(&band, title_font, title, TITLE_Y);
         put_text_line(&band, detail_font, detail, DETAIL_Y);
@@ -309,14 +321,29 @@ static bool draw_state(enum usb_stock_state st)
         /* The host may be waiting on SET_ADDRESS (usb_screen.c). */
         yield();
     }
-    lcd_update();
-    last_stamp = screen_stamp(st);
-    return true;
+}
+
+static void draw_picture_rows(int top, int bottom)
+{
+    draw_rows(top, bottom, true, current_state());
 }
 
 bool usb_stock_draw(void)
 {
-    return draw_state(current_state());
+    if (title_font < 0 || detail_font < 0 || !stock_art_ready())
+    {
+        entering = false;
+        usb_ultra_close();
+        return false;
+    }
+
+    enum usb_stock_state st = current_state();
+    draw_rows(0, LCD_HEIGHT, !entering, st);
+    if (entering)
+        usb_ultra_keep_backdrop();
+    lcd_update();
+    last_stamp = screen_stamp(st);
+    return true;
 }
 
 void usb_stock_tick(void)
@@ -328,5 +355,13 @@ void usb_stock_tick(void)
         sync_phase++;
     unsigned stamp = screen_stamp(st);
     if (stamp != last_stamp)
-        draw_state(st);
+        usb_stock_draw();
+}
+
+void usb_stock_enter(void)
+{
+    if (!entering)
+        return;
+    entering = false;
+    usb_ultra_enter(draw_picture_rows);
 }

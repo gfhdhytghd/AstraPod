@@ -11,8 +11,10 @@ struct ui_sheet {
     unsigned trace;
     uint32_t requested_at;
     int light;
+    /* Fruit Company Ultra's position, which may pass its place. */
+    int shown;
     fb_data tint;
-    bool active, starting;
+    bool active, starting, ultra;
     /* Set before ui_sheet_begin() for a full-screen horizontal page push/pop
      * instead of the vertical sheet slide. */
     /* Set before ui_sheet_begin() for the HUD/dialog fade and scale, or a

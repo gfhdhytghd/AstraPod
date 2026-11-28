@@ -12,7 +12,7 @@
 
 static const struct {
     const char *key;
-    uint32_t scrim;
+    uint32_t scrim, light;
     struct ui_theme_dynamic palette;
 } colors[UI_COLOR_COUNT] = {
     [UI_COLOR_BACKGROUND]         = { "background",         0x000000, {UI_PALETTE_DOMINANT, 0, 15} },
@@ -175,8 +175,9 @@ static const struct {
 };
 
 static const char *const builtin_names[UI_THEME_BUILTIN_COUNT] = {
-    [UI_THEME_SCRIM] = "scrim",
+    [UI_THEME_SCRIM] = "scrim", [UI_THEME_LIGHT] = "light",
     [UI_THEME_CLASSIC] = "classic", [UI_THEME_FRUIT_COMPANY] = "fruit-company",
+    [UI_THEME_FRUIT_COMPANY_ULTRA] = "fruit-company-ultra",
 };
 
 static const struct {
@@ -199,6 +200,7 @@ static const struct {
     [UI_STYLE_QUICK_SCREEN] = { "quick_screen", (const char *const[]){ "tiles", "hud", NULL } },
     [UI_STYLE_LYRICS]       = { "lyrics",       (const char *const[]){ "full", "classic", NULL } },
     [UI_STYLE_DIALOG]       = { "dialog",       (const char *const[]){ "flat", "classic", NULL } },
+    [UI_STYLE_MOTION]       = { "motion",       (const char *const[]){ "standard", "ultra", NULL } },
 };
 
 static const char *const gradients[UI_GRADIENT_COUNT] = {
@@ -336,30 +338,37 @@ static void plastic(struct ui_theme *theme)
 
 void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
 {
+    bool light = id == UI_THEME_LIGHT;
     memset(theme, 0, sizeof(*theme));
     for (size_t i = 0; i < ARRAY_COUNT(colors); i++)
     {
-        theme->color[i] = colors[i].scrim;
-        theme->dynamic[i] = colors[i].palette;
+        theme->color[i] = light ? colors[i].light : colors[i].scrim;
+        if (!light)
+            theme->dynamic[i] = colors[i].palette;
     }
     for (size_t i = 0; i < ARRAY_COUNT(fonts); i++)
         strcpy(theme->font[i], fonts[i].name);
     for (size_t i = 0; i < ARRAY_COUNT(metrics); i++)
         theme->metric[i] = metrics[i].value;
     for (size_t i = 0; i < ARRAY_COUNT(backgrounds); i++)
-        theme->background[i] = backgrounds[i].scrim;
+        theme->background[i] = light ? UI_BG_SOLID : backgrounds[i].scrim;
     theme->background[UI_BG_STATUS] = UI_BG_COVER_TINT;
     theme->motion_scale = UI_THEME_MOTION_ONE;
     for (size_t i = 0; i < UI_MOTION_COUNT; i++)
         theme->motion[i] = UI_MOTION_DEFAULT;
-    if (id == UI_THEME_CLASSIC || id == UI_THEME_FRUIT_COMPANY)
+    bool fruit = id == UI_THEME_FRUIT_COMPANY ||
+                 id == UI_THEME_FRUIT_COMPANY_ULTRA;
+    if (id == UI_THEME_CLASSIC || fruit)
     {
         classic(theme);
         plastic(theme);
     }
     /* Classic's look, with the stock firmware's menus */
-    if (id == UI_THEME_FRUIT_COMPANY)
+    if (fruit)
         theme->style[UI_STYLE_MENU_TREE] = UI_MENU_TREE_STOCK;
+    /* Fruit Company's still frames, with richer motion between them */
+    if (id == UI_THEME_FRUIT_COMPANY_ULTRA)
+        theme->style[UI_STYLE_MOTION] = UI_MOTION_ULTRA;
 }
 
 const char *ui_theme_builtin_name(enum ui_theme_builtin_id id)

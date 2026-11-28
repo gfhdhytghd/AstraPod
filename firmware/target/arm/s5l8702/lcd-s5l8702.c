@@ -901,12 +901,12 @@ extern void lcd_write_yuv420_lines(unsigned char const * const src[3],
 static void lcd_blit_yuv_internal(unsigned char *const src[3],
                                   int src_x, int src_y, int stride,
                                   int x, int y, int width, int height,
-                                  int top_rows, int bottom_rows,
+                                  int top_rows, int bottom_rows, bool allow_async,
                                   struct h264_lcd_timing *timing) ICODE_ATTR;
 static void lcd_blit_yuv_internal(unsigned char *const src[3],
                                   int src_x, int src_y, int stride,
                                   int x, int y, int width, int height,
-                                  int top_rows, int bottom_rows,
+                                  int top_rows, int bottom_rows, bool allow_async,
                                   struct h264_lcd_timing *timing)
 {
     unsigned int z;
@@ -927,11 +927,22 @@ static void lcd_blit_yuv_internal(unsigned char *const src[3],
     yuv_src[1] = src[1] + (z >> 2) + (src_x >> 1);
     yuv_src[2] = src[2] + (yuv_src[1] - src[1]);
 
+    bool async = false;
+    uint16_t *stage = lcd_dblbuf[0];
     /* TODO: ISR()->panicf()->lcd_update() blocks forever */
     mutex_lock(&lcd_mutex);
     if (lcd_ispowered)
     {
-        displaylcd_wait_dma();
+#ifdef HAVE_LCD_TE_QUEUE
+        async = allow_async && lcd_te_async_enabled();
+        if (async)
+            stage = displaylcd_stage();
+        else
+#else
+        (void)allow_async;
+#endif
+            displaylcd_wait_dma();
+        out = stage;
 
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
         /* MPEG playback already supplies planar YUV420. Send those planes
@@ -960,21 +971,21 @@ static void lcd_blit_yuv_internal(unsigned char *const src[3],
 
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
         if (!videoout_yuv_mirrored)
-            videoout_mirror_rgb565(lcd_dblbuf[0], x, y, width,
-                                          original_height, width);
+            videoout_mirror_rgb565(stage, x, y, width, original_height, width);
 #endif
 
 #ifdef HAVE_PODLINK_PLUGIN_TEST
-        podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
+        podlink_plugin_test_lcd_present(stage, x, y, width, original_height);
 #endif
 #ifdef HAVE_LCD_TE_QUEUE
         if (lcd_te_supported())
         {
-            commit_dcache_range(lcd_dblbuf[0], width * height * 2);
+            commit_dcache_range(stage, width * height * 2);
             if (timing)
                 timing->submit_us = USEC_TIMER;
-            displaylcd_submit(lcd_dblbuf[0], x, y, width, height, 0);
-            displaylcd_wait_dma();
+            displaylcd_submit(stage, x, y, width, height, 0);
+            if (!async)
+                displaylcd_wait_dma();
         }
         else
 #endif
@@ -986,7 +997,8 @@ static void lcd_blit_yuv_internal(unsigned char *const src[3],
             if (timing)
                 displaylcd_wait_dma();
         }
-        if (timing)
+        /* A queued frame can outlive the caller's timing record. */
+        if (timing && !async)
         {
 #ifdef HAVE_LCD_TE_QUEUE
             timing->complete_us = lcd_dma_complete_usec;
@@ -1004,7 +1016,7 @@ void lcd_blit_yuv(unsigned char *const src[3], int src_x, int src_y,
                   int stride, int x, int y, int width, int height)
 {
     lcd_blit_yuv_internal(src, src_x, src_y, stride, x, y, width, height,
-                          0, 0, NULL);
+                          0, 0, false, NULL);
 }
 
 #ifdef HAVE_LCD_TE_QUEUE
@@ -1012,7 +1024,7 @@ void lcd_blit_video_timed(unsigned char *const planes[3],
                           struct h264_lcd_timing *timing)
 {
     lcd_blit_yuv_internal(planes, 0, 0, LCD_WIDTH, 0, 0,
-                          LCD_WIDTH, LCD_HEIGHT, 0, 0, timing);
+                          LCD_WIDTH, LCD_HEIGHT, 0, 0, false, timing);
 }
 
 void lcd_blit_video_bands_timed(unsigned char *const planes[3],
@@ -1021,7 +1033,7 @@ void lcd_blit_video_bands_timed(unsigned char *const planes[3],
 {
     lcd_blit_yuv_internal(planes, 0, 0, LCD_WIDTH, 0, 0,
                           LCD_WIDTH, LCD_HEIGHT, first, LCD_HEIGHT - end,
-                          timing);
+                          true, timing);
 }
 #endif
 

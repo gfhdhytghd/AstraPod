@@ -2223,7 +2223,8 @@ Enables animated transitions between screens and pages.
 Shows iTunes U on the Fruit Company main menu when the library contains a course.
 
 [native theme]
-Chooses the built-in interface theme: Scrim, Classic or Fruit Company.
+Chooses the built-in interface theme: Scrim, Classic, Fruit Company
+or Fruit Company Ultra.
 Custom themes in .rockbox/native-themes also appear here.
 
 [status bar cover tint]

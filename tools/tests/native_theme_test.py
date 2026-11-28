@@ -49,7 +49,7 @@ static void check_builtins(void)
 {
     struct ui_theme scrim;
     ui_theme_builtin(&scrim, UI_THEME_SCRIM);
-    assert(UI_THEME_BUILTIN_COUNT == 5);
+    assert(UI_THEME_BUILTIN_COUNT == 4);
     assert(!strcmp(ui_theme_builtin_name(UI_THEME_SCRIM), "scrim"));
     assert(scrim.color[UI_COLOR_BACKGROUND] == 0);
     assert(scrim.color[UI_COLOR_FOREGROUND] == 0xffffff);
@@ -222,7 +222,6 @@ static void check_plastic(void)
     assert(theme.background[UI_BG_STATUS] == UI_BG_SOLID);
     for (int i = 0; i < UI_COLOR_COUNT; i++)
         assert(theme.dynamic[i].source == UI_PALETTE_NONE);
-    assert(UI_THEME_BUILTIN_COUNT == 5);
     assert(!strcmp(ui_theme_builtin_name(UI_THEME_CLASSIC), "classic"));
     assert(theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_ASTRAPOD);
     assert(theme.style[UI_STYLE_QUICK_SCREEN] == UI_QUICK_SCREEN_HUD);

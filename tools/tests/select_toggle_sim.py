@@ -48,7 +48,6 @@ HALF = (0, 22, 160, 240)
 # theme: (list region, start screen, path of (key, presses) to Playback)
 THEMES = {
     "scrim": (FULL, "menu", [("Down", 1), ("Return", 1)]),
-    "light": (FULL, "menu", [("Down", 1), ("Return", 1)]),
     "classic": (HALF, "menu", [("Down", 1), ("Return", 1)]),
     "fruit-company": (HALF, "root",
                       [("Down", 5), ("Return", 1), ("Down", 17),

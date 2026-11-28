@@ -457,7 +457,7 @@ after new music, run it after `database_pb.exe`.
 
 | Setting | What it does | Default | |
 |---|---|---|---|
-| Native theme | Chooses the built-in interface theme: Scrim, Classic or Fruit Company. Custom themes in .rockbox/native-themes also appear here. | Scrim | |
+| Native theme | Chooses the built-in interface theme: Scrim, Classic, Fruit Company or Fruit Company Ultra. Custom themes in .rockbox/native-themes also appear here. | Scrim | |
 | Status Bar Cover Tint | Uses colours from the playing track’s cover in the status bar. | On |  |
 
 ### Appearance

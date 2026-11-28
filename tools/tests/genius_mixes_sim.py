@@ -17,7 +17,7 @@ from power_about_stock_sim import Sim, prepare_disk
 from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
 
 
-THEMES = ("fruit-company", "fruit-company-ultra", "classic", "scrim", "light")
+THEMES = ("fruit-company", "fruit-company-ultra", "classic", "scrim")
 GROUPS = (
     ("Alternative Rock", "2007", ("Radiohead", "Muse", "Coldplay", "Metric")),
     ("Jazz", "1999", ("Esperanza", "Bill Evans", "Ahmad Jamal", "Nina Simone")),
@@ -133,7 +133,7 @@ def verify_theme(binary, root, theme, out):
         print(theme, [m[0] for m in mixes], flush=True)
         open_mixes(sim, theme, out)
 
-        tiles = theme not in ("scrim", "light")
+        tiles = theme != "scrim"
         if tiles:
             wait_for(lambda: mosaic_ready(sim), f"{theme}: first four covers")
         before = snap(sim, out, "mixes-page-1" if tiles else "mixes-list")

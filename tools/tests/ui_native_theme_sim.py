@@ -96,10 +96,10 @@ def main():
                     return image
 
                 black = (0, 0, 0)
-                # The custom theme follows the three built-in themes.
+                # The custom theme follows the four built-in themes.
                 before = snap("scrim")
                 path.write_text("podbox-theme=1\ncolor.background=204060\n")
-                custom = choose(3, (33, 65, 99), first=True)
+                custom = choose(4, (33, 65, 99), first=True)
                 assert ImageChops.difference(before, custom).getbbox()
                 retained_custom = choose(0, (33, 65, 99))
                 assert ImageChops.difference(retained_custom, custom).getbbox() is None
@@ -112,7 +112,7 @@ def main():
                           "custom": custom.getpixel((0, 230)),
                           "invalid_reverted_to_scrim": scrim.getpixel((0, 230)) == black}
     (args.evidence / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print("PASS three built-in themes, custom theme, and invalid-file Scrim fallback")
+    print("PASS four built-in themes, custom theme, and invalid-file Scrim fallback")
 
 
 if __name__ == "__main__":

@@ -102,7 +102,7 @@ def build_simulator(output, jobs):
     return build / "rockboxui"
 
 
-THEMES = ("classic", "scrim", "light", "fruit-company", "fruit-company-ultra")
+THEMES = ("classic", "scrim", "fruit-company", "fruit-company-ultra")
 PROJECTS = "W\t1\n#\tT3\nt3p1\tf\t1\t0\t0\t1\tFixture project"
 TABS = "T\tt3p1\t2\t0\tactive\tActive\tw\nT\tt3p1\t2\t1\tall\tAll\tw"
 THREAD = "t3t1\tcodex\tw\t0\tFixture thread\tgpt · main\tWorking on tests"
@@ -624,8 +624,8 @@ def run_wps_badge(binary, output, resources, theme):
                     image, max_dots = frame, dots
     assert captures >= 2, (theme, "missing WPS frames", captures)
     image.save(directory / "now-playing.png")
-    # Scrim and Light use a WPS layout without a status tray.
-    expected = int(theme not in ("scrim", "light"))
+    # Scrim uses a WPS layout without a status tray.
+    expected = int(theme != "scrim")
     assert len(max_dots) == expected and all(x >= 160 for x, _ in max_dots), (
         theme, "expected working dots in the WPS tray", expected, max_dots)
     return f"{theme}: WPS working badge count {expected} PASS"

@@ -33,6 +33,7 @@
 #include "dircache.h"
 #include "ata_idle_notify.h"
 #include "usb.h"
+#include "audio.h"
 #include "panic.h"
 #include "lang.h"
 #include "settings/settings.h"
@@ -185,6 +186,13 @@ int core_alloc(size_t size)
     return core_alloc_ex(size, NULL);
 }
 
+int core_alloc_free_space(size_t size)
+{
+    if (core_allocatable() < size)
+        return -1;
+    return core_alloc(size);
+}
+
 int core_free(int handle)
 {
     return buflib_free(&core_ctx, handle);
@@ -212,8 +220,12 @@ size_t core_allocatable(void)
     return buflib_allocatable(&core_ctx);
 }
 
-/* No audio buffer is laid out: the reserve tagcache keeps for one is the
- * pool's to spend */
+int audio_status(void)
+{
+    return 0;
+}
+
+/* The pool owns the space that tagcache reserves for audio on the player. */
 size_t audio_buffer_size(void)
 {
     return 0;

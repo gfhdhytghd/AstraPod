@@ -1526,7 +1526,7 @@ static int route_screen_shortcut(int action, int context)
 
 static void scene_takeover(int action)
 {
-    bool system_takeover = action == SYS_USB_CONFIRM || action == SYS_USB_CONNECTED ||
+    bool system_takeover = action == SYS_USB_CONNECTED ||
         action == SYS_USB_DISCONNECTED || action == SYS_ACCESSORY_CONNECTED ||
         action == SYS_HOTSWAP_INSERTED || action == SYS_HOTSWAP_EXTRACTED ||
         action == SYS_POWEROFF || action == SYS_REBOOT;
@@ -1603,21 +1603,21 @@ int get_action(int context, int timeout)
 #endif
     if (extras_alarm_ring_poll(&timeout))
         return ACTION_REDRAW;
+#ifdef HAVE_USB_CONFIRM
+    if (gui_usb_confirm_run_deferred())
+        return ACTION_REDRAW;
+#endif
     action_cur_t current;
     init_act_cur(&current, context, ui_scene_poll(timeout), NULL);
 
     int action = get_action_measured(&current);
 
     action = do_backlight(&action_last, &current, action);
-    scene_takeover(action);
-
 #ifdef HAVE_USB_CONFIRM
     if (action == SYS_USB_CONFIRM)
-    {
-        gui_usb_confirm_run(button_get_data());
-        return ACTION_REDRAW;
-    }
+        return gui_usb_confirm_run(button_get_data()) ? ACTION_REDRAW : ACTION_NONE;
 #endif
+    scene_takeover(action);
     action = route_screen_shortcut(step_handoff(action), current.context);
     return menu_back_action(action);
 }
@@ -1684,21 +1684,21 @@ int get_custom_action(int context,int timeout,
             context & ~CONTEXT_FRUIT_NAV))
         return ACTION_STD_CANCEL;
 #endif
+#ifdef HAVE_USB_CONFIRM
+    if (gui_usb_confirm_run_deferred())
+        return ACTION_REDRAW;
+#endif
     action_cur_t current;
     init_act_cur(&current, context, ui_scene_poll(timeout), get_context_map);
 
     int action = get_action_measured(&current);
 
     action = do_backlight(&action_last, &current, action);
-    scene_takeover(action);
-
 #ifdef HAVE_USB_CONFIRM
     if (action == SYS_USB_CONFIRM)
-    {
-        gui_usb_confirm_run(button_get_data());
-        return ACTION_REDRAW;
-    }
+        return gui_usb_confirm_run(button_get_data()) ? ACTION_REDRAW : ACTION_NONE;
 #endif
+    scene_takeover(action);
     action = route_screen_shortcut(step_handoff(action), current.context);
     return menu_back_action(action);
 }

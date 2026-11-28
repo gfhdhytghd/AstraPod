@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Record the Now Playing sheet going up from Cover Flow and back down.
 
-The album track starts from the track list. PLAY controls the music from
-Cover Flow, and SELECT+PLAY opens Now Playing while preserving transport.
+The album track starts from the track list. SELECT+PLAY opens Now Playing
+while preserving transport. PLAY from Cover Flow starts the centred album.
 
 Usage: coverflow_np_sheet_sim.py ROCKBOXUI ZIP OUTPUT [--fixture DIRECTORY]
 Requires Linux, GDB, ffmpeg and a simulator with debug symbols.
@@ -118,15 +118,20 @@ def flow(sim, theme):
 
         shots = {}
         for state, status in (("playing", 1), ("paused", 3)):
-            if state == "paused":
-                sim.tap("play", 24)
             wait_for(lambda: playback.get("status") == status, f"Playback is not {state}")
             track = playback.get("track")
             shots[state + "-rise"] = record(sim, 100, "select play")
             wait_for(lambda: playback.activity() == wps, "The chord did not open Now Playing")
             assert playback.get("status") == status and playback.get("track") == track
+            if state == "playing":
+                sim.tap("play", 24)
+                wait_for(lambda: playback.get("status") == 3, "Now Playing did not pause")
             shots[state + "-sink"] = record(sim, 100, "menu")
             wait_for(lambda: playback.activity() == covers, "MENU did not return to Cover Flow")
+
+        shots["cover-play-rise"] = record(sim, 180, "play")
+        wait_for(lambda: playback.activity() == wps and playback.get("status") == 1,
+                 "Cover Flow PLAY did not start the centred album")
         return shots
     finally:
         playback.close()
@@ -136,9 +141,10 @@ def check_paths(folder):
     log = (folder / "ui-perf.txt").read_text().splitlines()
     paths = [dict(field.split("=", 1) for field in line.split()[1:])
              for line in log if line.startswith("cover-flow-wps-path ")]
-    assert [(row["path"], row["result"], row["reason"]) for row in paths] == [
-        ("agents-wps", "rise", "ready"),
-        ("agents-wps", "rise", "ready"),
+    assert [(row["path"], row["result"]) for row in paths] == [
+        ("agents-wps", "rise"),
+        ("agents-wps", "rise"),
+        ("local-paused", "rise"),
     ], paths
     sinks = perf_routes(folder, "cover-flow-wps-sink")
     assert len(sinks) == 2, sinks

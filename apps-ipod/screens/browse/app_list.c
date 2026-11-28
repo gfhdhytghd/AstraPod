@@ -357,6 +357,16 @@ static void games_stats_record(unsigned app_idx)
     }
 }
 
+/* A launch that failed takes back the play counted when it started */
+static void games_stats_unrecord(unsigned app_idx)
+{
+    if (app_idx < ARRAYLEN(apps) && game_plays[app_idx] > 0)
+    {
+        game_plays[app_idx]--;
+        games_stats_save();
+    }
+}
+
 /***************************************************************************
  * the icons
  ****************************************************************************/
@@ -779,25 +789,22 @@ static int fruit_games_screen(void)
 
                 unsigned app_idx = rows.app[selection];
                 bool failed = false;
+                /* Counted on the way in, so a game left by a reset or a
+                 * hang still counts */
+                games_stats_record(app_idx);
                 ret = launch(&apps[app_idx], true, &failed);
                 if (ret == GO_TO_MUSIC_QUIZ)
                 {
                     ret = root_menu_run_screen(ret);
-                    if (ret == 0 || ret == GO_TO_PREVIOUS)
-                    {
-                        games_stats_record(app_idx);
+                    if (ret == 0)
                         ret = GO_TO_PREVIOUS;
-                    }
                 }
                 else if (failed)
                 {
+                    games_stats_unrecord(app_idx);
                     ret = show_game_error(
                         str(LANG_FRUIT_GAMES_LAUNCH_ERROR),
                         str(LANG_FRUIT_GAMES_LAUNCH_ERROR_BODY));
-                }
-                else
-                {
-                    games_stats_record(app_idx);
                 }
 
                 if (ret != GO_TO_PREVIOUS)

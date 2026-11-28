@@ -171,7 +171,14 @@ static void check_audio_peripheral_state(void)
 /* disabled function is shared between Main & Remote LCDs */
 static bool filter_first_keypress_disabled(int button, int data)
 {
-    button_queue_try_post(button, data);
+#ifdef HAVE_WHEEL_DETENT_MODE
+    /* A queued wheel detent must not discard a physical key's down edge. */
+    const int keys = BUTTON_SELECT | BUTTON_MENU | BUTTON_PLAY;
+    if (button && !(button & ~keys))
+        button_queue_post(button, data);
+    else
+#endif
+        button_queue_try_post(button, data);
     return false;
 }
 

@@ -1341,7 +1341,7 @@ static bool photo_grid(struct albums *a, const char *title)
     for (;;)
     {
         bool back = false;
-        int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_PAGED_LIST |
+        int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_PHOTO_GRID |
                                        CONTEXT_WHEEL_DETENTS,
                                        photo_thumbs_pending() ? HZ / 20
                                                               : TIMEOUT_BLOCK,

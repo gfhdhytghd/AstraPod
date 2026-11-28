@@ -74,6 +74,27 @@ def fixture(build, case, theme, effect):
     return disk
 
 
+def wheel_between_edges(sim, key):
+    sim.send(f"down {key}")
+    time.sleep(.09)
+    sim.quick("down", .025)
+    sim.send(f"up {key}")
+
+
+def grid_physical_keys(sim):
+    # Down/up key scripts use the physical click wheel codes. One detent
+    # is less than one grid cell, but still reaches the action dispatcher.
+    open_photos(sim, "fruit-company")
+    sim.step("select", "physical-grid", [f"{len(COLORS)} photos"])
+    wheel_between_edges(sim, "select")
+    until(sim, lambda im: shows(im, 0) and im.getpixel((160, 8)) == (0, 0, 0))
+    wheel_between_edges(sim, "menu")
+    sim.text("physical-return-grid", [f"{len(COLORS)} photos"])
+    wheel_between_edges(sim, "menu")
+    sim.text("physical-return-photos", ["all photos", "browse files"])
+    print("PASS physical SELECT/MENU with wheel movement between edges")
+
+
 def run(build, case, theme):
     disk = fixture(build, case, theme, "off")
     with session(build, case, disk, theme) as sim:
@@ -220,11 +241,17 @@ def main():
     parser.add_argument("case", type=Path)
     parser.add_argument("--theme", default="classic",
                         choices=("classic", "fruit-company"))
+    parser.add_argument("--grid-physical", action="store_true")
     parser.add_argument("--transition",
                         choices=("off", "fade", "black", "zoom", "slide",
                                  "center", "random"))
     args = parser.parse_args()
-    if args.transition is None:
+    if args.grid_physical:
+        build, case = args.build.resolve(), args.case.resolve()
+        disk = fixture(build, case, "fruit-company", "off")
+        with session(build, case, disk, "fruit-company") as sim:
+            grid_physical_keys(sim)
+    elif args.transition is None:
         run(args.build.resolve(), args.case.resolve(), args.theme)
     else:
         run_transition(args.build.resolve(), args.case.resolve(), args.theme,

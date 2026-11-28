@@ -107,6 +107,7 @@ enum {
     CONTEXT_VIDEO_PLAYBACK, /* Native movie player, uses the WPS keymap. */
     CONTEXT_DIALOG, /* A dialog with its own button map. */
     CONTEXT_PAGED_LIST, /* Physical arrows page without leaving the list. */
+    CONTEXT_PHOTO_GRID, /* The grid keeps key presses across wheel events. */
     CONTEXT_PHOTO_VIEW, /* Full-screen photos own raw remote gestures. */
     LAST_CONTEXT_PLACEHOLDER,
 };

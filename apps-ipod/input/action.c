@@ -1196,7 +1196,18 @@ static inline int update_action_last(action_last_t *last, action_cur_t *cur)
     }
 
     last->action = action;
-    last->button = cur->button;
+#if defined(BUTTON_SCROLL_FWD) && defined(BUTTON_SCROLL_BACK)
+    /* A click can move the touch sensor before the switch is released. */
+    int context = cur->context & ~CONTEXT_REMOTE;
+    int button = cur->button & ~BUTTON_REPEAT;
+    bool photo_scroll = (context == (CONTEXT_PLUGIN | CONTEXT_PHOTO_GRID) ||
+                         context == (CONTEXT_PLUGIN | CONTEXT_PHOTO_VIEW)) &&
+                        (button == BUTTON_SCROLL_FWD ||
+                         button == BUTTON_SCROLL_BACK);
+    int previous = last->button & ~BUTTON_REPEAT;
+    if (!photo_scroll || (previous != BUTTON_SELECT && previous != BUTTON_MENU))
+#endif
+        last->button = cur->button;
 #ifdef BUTTON_REMOTE
     last->data   = cur->button & BUTTON_REMOTE ? 0 : button_get_data();
 #else

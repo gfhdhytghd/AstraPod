@@ -7000,6 +7000,15 @@ static void remember_current_cover(void)
         cover_resume_dirty = true;
 }
 
+static bool split_caption_transfer(void)
+{
+#ifdef HAVE_LCD_VSYNC
+    return lcd_te_async_enabled();
+#else
+    return false;
+#endif
+}
+
 /* The DMA producer has one pending staging slot. Leave it to the artwork
  * until the interrupt claims its buffer. The driver still arbitrates a race
  * with another producer after this check. */
@@ -9184,9 +9193,10 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
             if (caption_flush_owed)
             {
                 int top = caption_flush_top, end = caption_flush_end;
-                /* The stock look sends the caption with the covers, so a
-                 * frame is one transfer in one refresh. */
-                if (stock_look() && dirty_end > dirty_top)
+                /* Synchronous output pays another presentation for a second
+                 * rectangle. Keep art and caption in one transfer. */
+                if ((stock_look() || !split_caption_transfer()) &&
+                    dirty_end > dirty_top)
                 {
                     dirty_top = MIN(dirty_top, top);
                     dirty_end = MAX(dirty_end, end);

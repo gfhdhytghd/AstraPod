@@ -218,5 +218,6 @@
   Settings, while a headset with a microphone is plugged in or a memo is on
   the player. It lists the memos, oldest first: Select on one to play or
   delete it, Play/Pause plays it, and Delete All removes every memo after
-  asking. Start Recording and Quality show only while the microphone is in.
-  Memos are WAV files in `/Recordings`.
+  asking. Menu in Now Playing goes back to the memos. Start Recording and
+  Quality show only while the microphone is in. Memos are WAV files in
+  `/Recordings`.

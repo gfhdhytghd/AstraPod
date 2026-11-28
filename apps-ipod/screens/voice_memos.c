@@ -599,7 +599,8 @@ static int chosen;          /* the memo row last entered */
 static bool play_chosen;    /* Play/Pause entered it: play, not ask */
 static bool deleted;        /* its menu deleted it */
 
-/* Play the memo on its own, in Now Playing */
+/* Play the memo on its own, in Now Playing over the menu it was chosen in,
+ * which Menu goes back to */
 static int play_row_func(void)
 {
     char path[MAX_PATH];
@@ -609,7 +610,7 @@ static int play_row_func(void)
                               true) < 0)
         return 0;
     playlist_start(0, 0, 0);
-    return GO_TO_WPS;
+    return root_menu_run_screen(GO_TO_WPS);
 }
 
 static int delete_row_func(void)

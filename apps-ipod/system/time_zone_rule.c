@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include <string.h>
 #include "timefuncs.h"
+#if defined(SIMULATOR) && defined(WIN32)
+#include "system-sim.h"
+#endif
 #include "system/time_zone.h"
 
 static bool digit(char c)

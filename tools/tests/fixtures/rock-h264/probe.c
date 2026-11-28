@@ -260,6 +260,10 @@ static int action(int context, int timeout)
         static const int script[] = {
             ACTION_WPS_BROWSE, ACTION_WPS_QUICKSCREEN, ACTION_WPS_BROWSE,
             ACTION_WPS_BROWSE, ACTION_WPS_VOLUP, ACTION_WPS_BROWSE,
+            /* Picture: two steps of four events, then four against the end */
+            ACTION_WPS_VOLUP, ACTION_WPS_VOLUP, ACTION_WPS_VOLUP,
+            ACTION_WPS_VOLUP, ACTION_WPS_VOLUP, ACTION_WPS_VOLUP,
+            ACTION_WPS_VOLUP, ACTION_WPS_VOLUP, ACTION_WPS_VOLUP,
             ACTION_WPS_VOLUP, ACTION_WPS_VOLUP, ACTION_WPS_VOLUP,
             ACTION_WPS_BROWSE, ACTION_WPS_VOLUP, ACTION_WPS_BROWSE,
             ACTION_WPS_VOLDOWN,
@@ -495,6 +499,9 @@ static bool stock_present(unsigned char *const planes[3],
         VIDEO_STOCK_HIDDEN, VIDEO_STOCK_PROGRESS, VIDEO_STOCK_PROGRESS,
         VIDEO_STOCK_SCRUB, VIDEO_STOCK_BRIGHTNESS, VIDEO_STOCK_BRIGHTNESS,
         VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE,
+        VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE,
+        VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE,
+        VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE,
         VIDEO_STOCK_PICTURE, VIDEO_STOCK_HIDDEN, VIDEO_STOCK_VOLUME,
         VIDEO_STOCK_HIDDEN, VIDEO_STOCK_VOLUME, VIDEO_STOCK_VOLUME,
     };
@@ -526,7 +533,8 @@ static bool stock_present(unsigned char *const planes[3],
     if (want == VIDEO_STOCK_VOLUME)
         assert(state->level_max == 86 && state->level >= 0);
     if (want == VIDEO_STOCK_PICTURE)
-        assert(state->picture && *state->picture);
+        assert(state->picture == stock_picture_mode &&
+               state->picture_pull >= 0 && state->picture_pull < 4);
     return false;
 }
 
@@ -708,7 +716,7 @@ int main(int argc, char **argv)
     assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &stock) ==
            VIDEO_EXIT);
     assert(saw_timeout && control_centre_calls == 1 && !drawn);
-    assert(picture_changes == 3 && stock_picture_mode == 0 && volume_changes == 2);
+    assert(picture_changes == 2 && stock_picture_mode == 2 && volume_changes == 2);
     assert(brightness_changes == 1 && stock_frames > 0);
 
     stock.resume_menu = NULL;

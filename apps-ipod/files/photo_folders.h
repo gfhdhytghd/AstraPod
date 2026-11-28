@@ -41,14 +41,17 @@ struct photo_folders {
     struct photo_file *files;
     int file_count;
     char *names;
+    const char *directory;  /* browser path, or NULL for an All Photos walk */
 };
 
-/* Walks the disk into buf and returns the bytes kept from its start.
+/* Indexes directory and lists its child folders, or walks the disk if
+ * directory is NULL. Returns the bytes kept from the start of buf.
+ * A non-NULL directory must remain valid while its photo paths are used.
  * Returns zero if checkpoint() cancels the walk or buf is too small.
  * skip_full_resolution leaves out the folder iTunes copies a Photo
  * Database's originals to. */
 size_t photo_folders_scan(struct photo_folders *pf, void *buf, size_t size,
-                          bool skip_full_resolution,
+                          const char *directory, bool skip_full_resolution,
                           bool (*checkpoint)(void));
 
 /* A file's whole path, false when it does not fit */

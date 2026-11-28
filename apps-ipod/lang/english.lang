@@ -35579,3 +35579,18 @@
     *: "Next Slide"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_BROWSE_PHOTOS
+  desc: Fruit Company: Photos > Browse Files
+  user: core
+  <source>
+    *: "Browse Files"
+  </source>
+  <dest>
+    *: "Browse Files"
+  </dest>
+  <voice>
+    *: "Browse Files"
+  </voice>
+</phrase>

@@ -33928,3 +33928,18 @@
     recording: "录音声道"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_BROWSE_PHOTOS
+  desc: Fruit Company: Photos > Browse Files
+  user: core
+  <source>
+    *: "Browse Files"
+  </source>
+  <dest>
+    *: "浏览文件"
+  </dest>
+  <voice>
+    *: "浏览文件"
+  </voice>
+</phrase>

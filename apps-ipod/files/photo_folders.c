@@ -1,8 +1,7 @@
 /***************************************************************************
  * GNU General Public License (version 2+)
  *
- * The pictures copied to the player as files, found by walking the disk while
- * Photos is open, for the Photos screens to show beside a Photo Database's.
+ * Loose pictures for All Photos and the one-directory-at-a-time browser.
  *
  * Every folder that directly holds a picture is an album named after it; two
  * albums of the same name are shown as "Parent/Name". The walk leaves out
@@ -72,12 +71,12 @@ static bool skipped_entry(const char *name, const struct dirinfo *info)
     return name[0] == '.' || (info->attribute & (ATTR_HIDDEN | ATTR_SYSTEM));
 }
 
-static bool skipped_folder(const struct walk *w, int depth, const char *name)
+static bool skipped_folder(const struct walk *w, const char *name)
 {
-    if (depth == 0)
+    if (!strcmp(walk_path, "/"))
         return !strcasecmp(name, "iPod_Control") ||
                !strcasecmp(name, "Artwork");
-    if (depth == 1 && !strcasecmp(walk_path, "/Photos"))
+    if (!strcasecmp(walk_path, "/Photos"))
         return !strcasecmp(name, "Thumbs") ||
                (w->skip_full && !strcasecmp(name, "Full Resolution"));
     return false;
@@ -120,7 +119,19 @@ static bool read_pictures(struct walk *w, bool *subfolders)
             continue;
         if (info.attribute & ATTR_DIRECTORY)
         {
+            if (skipped_folder(w, name))
+                continue;
             *subfolders = true;
+            if (pf->directory && w->folder_count < PHOTO_FOLDER_LIMIT)
+            {
+                uint32_t at = keep_name(w, name);
+                if (at != UINT32_MAX)
+                {
+                    struct photo_folder *folder =
+                        &pf->folders[w->folder_count++];
+                    *folder = (struct photo_folder){.path = at, .label = at};
+                }
+            }
             continue;
         }
         if (!audio && filetype_get_attr(name) == FILE_ATTR_AUDIO)
@@ -129,7 +140,7 @@ static bool read_pictures(struct walk *w, bool *subfolders)
             continue;
         uint32_t at = keep_name(w, name);
         if (at == UINT32_MAX)
-            break;
+            continue;
         struct photo_file *f = &w->top[-1 - pf->file_count++];
         f->name = at;
         f->size = info.size;
@@ -142,6 +153,12 @@ static bool read_pictures(struct walk *w, bool *subfolders)
     }
     closedir(dir);
 
+    if (pf->directory)
+    {
+        if (audio)
+            pf->file_count = first;
+        return true;
+    }
     bool root = !strcmp(walk_path, "/");
     if (pf->file_count == first)
         return true;
@@ -191,7 +208,7 @@ static bool walk(struct walk *w, int depth)
             return false;
         }
         if (!(info.attribute & ATTR_DIRECTORY) || skipped_entry(name, &info) ||
-            skipped_folder(w, depth, name) ||
+            skipped_folder(w, name) ||
             len + 1 + strlen(name) >= sizeof(walk_path))
             continue;
         strcpy(walk_path + len, len > 1 ? "/" : "");
@@ -254,7 +271,7 @@ static void tell_apart(struct photo_folders *pf)
 }
 
 size_t photo_folders_scan(struct photo_folders *pf, void *buf, size_t size,
-                          bool skip_full_resolution,
+                          const char *directory, bool skip_full_resolution,
                           bool (*checkpoint)(void))
 {
     size_t table = PHOTO_FOLDER_LIMIT * sizeof(struct photo_folder);
@@ -269,10 +286,12 @@ size_t photo_folders_scan(struct photo_folders *pf, void *buf, size_t size,
         .skip_full = skip_full_resolution,
     };
     w.names_size = (char *)w.top - ((char *)buf + table);
+    pf->directory = directory;
     pf->folders = buf;
     pf->names = (char *)buf + table;
-    strcpy(walk_path, "/");
-    if (!walk(&w, 0))
+    strlcpy(walk_path, directory ? directory : "/", sizeof(walk_path));
+    bool subfolders = false;
+    if (!(directory ? read_pictures(&w, &subfolders) : walk(&w, 0)))
         return 0;
     pf->album_count = w.folder_count;
 
@@ -292,8 +311,12 @@ size_t photo_folders_scan(struct photo_folders *pf, void *buf, size_t size,
 
     sorting = pf;
     qsort(pf->folders, pf->album_count, sizeof(*pf->folders), compare_label);
-    tell_apart(pf);
-    qsort(pf->folders, pf->album_count, sizeof(*pf->folders), compare_label);
+    if (!directory)
+    {
+        tell_apart(pf);
+        qsort(pf->folders, pf->album_count, sizeof(*pf->folders),
+              compare_label);
+    }
     for (int k = 0; k < pf->album_count; k++)
     {
         const struct photo_folder *f = &pf->folders[k];
@@ -315,8 +338,11 @@ bool photo_folders_path(const struct photo_folders *pf, int file, char *buf,
                         size_t size)
 {
     const struct photo_file *f = &pf->files[file];
-    const char *folder = f->folder == ROOT_FOLDER ? "" :
-                         pf->names + pf->folders[f->folder].path;
+    const char *folder = "";
+    if (pf->directory && strcmp(pf->directory, "/"))
+        folder = pf->directory;
+    else if (f->folder != ROOT_FOLDER)
+        folder = pf->names + pf->folders[f->folder].path;
     return (size_t)snprintf(buf, size, "%s/%s", folder,
                             pf->names + f->name) < size;
 }

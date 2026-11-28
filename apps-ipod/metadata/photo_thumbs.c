@@ -254,8 +254,7 @@ static bool open_cache(void *temp, size_t temp_size)
     int count = bytes / sizeof(struct index_entry);
     pt.records = ffilesize(pt.dat_fd) / THUMB_BYTES;
     struct index_entry *e = temp;
-    if ((size_t)count > temp_size / sizeof(*e) ||
-        count > 4 * pt.pf->file_count + 1024)
+    if ((size_t)count > temp_size / sizeof(*e))
     {
         close(pt.idx_fd);
         close(pt.dat_fd);

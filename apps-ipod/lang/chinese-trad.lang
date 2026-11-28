@@ -11372,3 +11372,18 @@
     *: "中斷連接前先退出"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_BROWSE_PHOTOS
+  desc: Fruit Company: Photos > Browse Files
+  user: core
+  <source>
+    *: "Browse Files"
+  </source>
+  <dest>
+    *: "瀏覽檔案"
+  </dest>
+  <voice>
+    *: "瀏覽檔案"
+  </voice>
+</phrase>

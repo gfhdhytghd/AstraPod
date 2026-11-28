@@ -1,3 +1,8 @@
+- **Photos > Browse Files** opens the player’s folders one at a time. Choose
+  a folder to see its photos in the thumbnail grid. **All Photos** scans for
+  pictures in the background when you choose it. iTunes photo albums still
+  appear below **Settings**.
+
 - **Music > Genius Mixes** builds mixes on the player after the music
   database updates. Turn the wheel to browse and press Select to listen.
   The first library scan after updating can take a moment.

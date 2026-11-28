@@ -5,10 +5,10 @@ contract; no device.
 Builds tools/tests/crumb_ring_test.c against the firmware's own
 crumb_ring.h with ASan/UBSan and runs it. Then checks the wiring: the ring
 is taken before anything writes and reported once the disk is up; intended
-power off, reboot and ROLO mark the ring clean, panics/HANG/FREEZE crumb
-before masking; the DesignWare register waits in the USB interrupt are all
-bounded; IRAM1 stays clocked for the second copy; .persist is NOLOAD and
-asserted clear of the bootloader; the debug menu has the self-tests.
+power off, reboot and ROLO mark the ring clean, panics/HANG/FREEZE record
+evidence before drawing; the DesignWare register waits in the USB interrupt
+are bounded; the breadcrumb status pointers target retained DRAM, and
+.persist is NOLOAD and asserted clear of the bootloader.
 Null page: IRAM starts at 0x1000, the main stack is in DRAM, crt0 clears
 c1.V, ROLO restores low vectors, the exception screen never scans page 0,
 and an unloaded skin (NULL buffer) never resolves offsets against NULL.
@@ -46,6 +46,14 @@ def body(text, name):
         i += 1
     return text[m.end():i]
 
+crumbs = src('firmware/kernel/crumbs.c')
+crumbs_h = src('firmware/export/crumbs.h')
+assert 'IRAM1_RING_ADDR' not in crumbs
+assert 'crumb_status_a = RING_A->status;' in crumbs
+assert 'crumb_status_extra_a = RING_A->status_extra;' in crumbs
+assert 'crumb_status_b' not in crumbs_h and 'crumb_status_extra_b' not in crumbs_h
+assert 'crumb_crash_latest(CRASH_A, CRASH_EARLY)' in body(crumbs, 'crash_report')
+
 main = body(src('apps-ipod/main.c'), 'init')
 assert main.index('crumbs_boot();') < main.index('system_init();')
 assert main.index('kernel_init();') < main.index('crumbs_guard_init();')
@@ -56,8 +64,10 @@ assert 'crumbs_clean();' in body(hang, 'hang_catch_stop')
 show = body(hang, 'hang_catch_fiq_show')
 assert show.index('crumb(CR_FREEZE') < show.index('panic_screen_enter();')
 assert 'crumb(CR_FREEZE_DRAWN' in show
-hshow = body(hang, 'hang_show')
-assert hshow.index('crumb(CR_HANG,') < hshow.index('panic_screen_enter();')
+hshow = hang[hang.index('static void hang_show_detail(void)\n'):
+             hang.index('static void hang_tick(void)')]
+assert hshow.index('crumb(CR_HANG,') < hshow.index('crumbs_crash_save(')
+assert hshow.index('crumbs_crash_save(') < hshow.index('lcd_set_viewport(')
 rolo = src('firmware/rolo.c')
 assert rolo.index('crumbs_clean();') < rolo.index('rolo_restart(filebuf')
 panic = src('firmware/panic.c')
@@ -96,8 +106,6 @@ assert 'saved_sp >= 0x1000u' in uie
 boot = src('firmware/target/arm/s5l8702/boot.lds')
 assert '#define MAX_LOADSIZE 8M' in boot and 'ORIGIN = DRAM_ORIG + MAX_LOADSIZE' in boot
 
-crumbs = src('firmware/kernel/crumbs.c')
-assert '#define IRAM1_RING_ADDR 0x2203f800' in crumbs
 assert 'crumb_snapshot_take(RING_A, RING_A, &crumbs_prev)' in body(crumbs, 'crumbs_boot')
 assert 'CLOCKGATE_SM1' not in body(crumbs, 'crumbs_boot')
 assert 'tick_add_task(guard_tick);' in body(crumbs, 'crumbs_guard_init')

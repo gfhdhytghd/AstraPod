@@ -68,6 +68,8 @@ enum crumb_id
     CR_MP4_MOOV,       /* moov payload offset */
     CR_MP4_MDAT,       /* nonempty mdat payload offset */
     CR_FREEZE_CONTEXT, /* watchdog kind << 8 | interrupted CPSR low byte */
+    CR_HANG_SAMPLE,    /* overdue scheduler: PC interrupted by the tick */
+    CR_VIDEO_PHASE,    /* video entry and teardown phases in rock_runtime.c */
     CR_COUNT
 };
 
@@ -119,26 +121,18 @@ enum usb_stage
     !defined(BOOTLOADER)
 #define HAVE_CRUMBS
 
-/* Both copies, uncached so a reset loses nothing held in the D-cache */
+/* Uncached DRAM status words, retained across a warm reset. */
 extern volatile uint32_t *const crumb_status_a;
-extern volatile uint32_t *const crumb_status_b;
 extern volatile uint32_t *const crumb_status_extra_a;
-extern volatile uint32_t *const crumb_status_extra_b;
 #define CRUMB_STATUS_BASE 16
 
 void crumb(enum crumb_id id, uint32_t value);
 static inline void crumb_status(enum crumb_status i, uint32_t v)
 {
     if (i < CRUMB_STATUS_BASE)
-    {
         crumb_status_a[i] = v;
-        crumb_status_b[i] = v;
-    }
     else
-    {
         crumb_status_extra_a[i - CRUMB_STATUS_BASE] = v;
-        crumb_status_extra_b[i - CRUMB_STATUS_BASE] = v;
-    }
 }
 
 /* Crash context saved while the storage and scheduler may be unavailable. */

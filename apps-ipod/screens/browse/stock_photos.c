@@ -78,6 +78,13 @@
 #define CELL_W 62
 #define CELL_H 63
 #define GRID_GREY LCD_RGBPACK(32, 32, 32)
+/* The wheel has 96 positions a turn and a detent event counts four. Stock
+ * moves the grid one cell per five positions and the full-screen view one
+ * photo per ten, at any speed, keeping the remainder across pauses and
+ * reversals. */
+#define DETENT_POSITIONS 4
+#define GRID_CELL_POSITIONS 5
+#define VIEW_PHOTO_POSITIONS 10
 #define FRAME_OUTER LCD_RGBPACK(248, 192, 24)
 #define FRAME_INNER LCD_RGBPACK(208, 160, 32)
 #define TITLE_ROWS 24
@@ -721,6 +728,17 @@ static int photo_wheel_steps(void)
     return (data >> 31) ? MAX(1u, (data >> 24) & 0x7f) : 1;
 }
 
+/* Whole moves of `per` wheel positions in the detent event just read,
+ * signed by `forward`, with what is left over carried in `remainder` */
+static int photo_wheel_moves(bool forward, int per, int *remainder)
+{
+    int positions = photo_wheel_steps() * DETENT_POSITIONS;
+    *remainder += forward ? positions : -positions;
+    int moves = *remainder / per;
+    *remainder -= moves * per;
+    return moves;
+}
+
 static void present_photo(const fb_data *pixels, bool brightness)
 {
     lcd_bitmap(pixels, 0, 0, LCD_WIDTH, LCD_HEIGHT);
@@ -816,6 +834,7 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
     /* The loose picture whose decode the screen still shows a stand-in
      * for, or -1, and which way the last step went */
     int waiting = -1, direction = 1;
+    int wheel_remainder = 0;
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
     int initial_brightness = global_settings.brightness;
 #endif
@@ -926,7 +945,9 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
             if (playing)
                 adjust_volume(wheel);
             else
-                step = wheel;
+                step = photo_wheel_moves(action == ACTION_WPS_VOLUP,
+                                         VIEW_PHOTO_POSITIONS,
+                                         &wheel_remainder);
         }
         else if (action == ACTION_WPS_SKIPPREV)
             step = -1;
@@ -1092,13 +1113,30 @@ static void grid_exit(const struct albums *a, const char *title, int sel,
     ui_motion_end(&motion);
 }
 
+/* Where `moves` wheel cells take the selection, as stock computes it.
+ * Within the three rows on screen it moves cell by cell. A move past the
+ * bottom row goes to the last cell of the row below, so a continued turn
+ * steps a whole row at a time. A move past the top row goes up one row and
+ * then right by the selection's column: from the first column, that is
+ * the first cell of the row above. */
+static int grid_wheel_target(int sel, int first, int moves, int total)
+{
+    int column = sel % GRID_COLS;
+    int target = sel + moves;
+    if (target < first)
+        target = sel + column - GRID_COLS;
+    else if (target >= first + GRID_PAGE)
+        target = sel - column + 2 * GRID_COLS - 1;
+    return MIN(total - 1, MAX(0, target));
+}
+
 static bool photo_grid(const struct albums *a, const char *title)
 {
     int total = photo_total(a);
     if (!total)
         return false;
 
-    int sel = 0, first = 0;
+    int sel = 0, first = 0, wheel_remainder = 0;
     unsigned made = photo_thumbs_generation();
     int last_row = (total - 1) / GRID_COLS;
     int last_first = MAX(0, last_row - GRID_ROWS + 1) * GRID_COLS;
@@ -1114,7 +1152,8 @@ static bool photo_grid(const struct albums *a, const char *title)
     for (;;)
     {
         bool back = false;
-        int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_PAGED_LIST,
+        int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_PAGED_LIST |
+                                       CONTEXT_WHEEL_DETENTS,
                                        photo_thumbs_pending() ? HZ / 20
                                                               : TIMEOUT_BLOCK,
                                        photo_grid_keys);
@@ -1144,10 +1183,17 @@ static bool photo_grid(const struct albums *a, const char *title)
             sel = MIN(total - 1, sel + GRID_PAGE);
             first = MIN(last_first, first + GRID_PAGE);
         }
-        else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
-            sel = MAX(0, sel - 1);
-        else if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
-            sel = MIN(total - 1, sel + 1);
+        else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT ||
+                 action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
+        {
+            bool forward = action == ACTION_STD_NEXT ||
+                           action == ACTION_STD_NEXTREPEAT;
+            int moves = photo_wheel_moves(forward, GRID_CELL_POSITIONS,
+                                          &wheel_remainder);
+            if (!moves && made == photo_thumbs_generation())
+                continue;
+            sel = grid_wheel_target(sel, first, moves, total);
+        }
         else if (action == ACTION_STD_OK && (button & select_buttons))
         {
             enum photo_view_result result = photo_view(a, &sel);

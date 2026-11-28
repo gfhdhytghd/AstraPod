@@ -29,6 +29,8 @@ static _Alignas(4) int16_t output[MIX_FRAME_SAMPLES * 2];
 static int16_t *queue;
 static unsigned int capacity, front, used;
 static uint32_t elapsed_frames, base_ms, rate, saved_rate;
+/* The mixer has one DMA block playing and one block prepared ahead of it. */
+static unsigned int pending, playing;
 
 static bool current_output(void)
 {
@@ -54,7 +56,9 @@ static void next_pcm(const void **start, size_t *size)
     memset(output + 2 * frames, 0, (MIX_FRAME_SAMPLES - frames) * 4);
     front = (front + frames) % capacity;
     used -= frames;
-    elapsed_frames += frames;
+    elapsed_frames += playing;
+    playing = pending;
+    pending = frames;
     *start = output;
     *size = sizeof(output);
 }
@@ -103,7 +107,7 @@ static bool video_open(void *buffer, size_t bytes, uint32_t frequency)
         pcm_play_lock();
         queue = buffer;
         capacity = bytes / 4;
-        front = used = elapsed_frames = base_ms = 0;
+        front = used = elapsed_frames = pending = playing = base_ms = 0;
         rate = frequency;
         play();
         pcm_play_unlock();
@@ -222,7 +226,7 @@ static size_t video_write(const int16_t *data, size_t frames)
 static uint32_t video_buffered(void)
 {
     pcm_play_lock();
-    uint32_t frames = current_output() ? used : 0;
+    uint32_t frames = current_output() ? used + pending + playing : 0;
     pcm_play_unlock();
     return frames;
 }
@@ -257,7 +261,7 @@ static bool video_seek(uint32_t ms)
         pcm_play_lock();
         mixer_channel_stop(VIDEO_CHANNEL);
         mixer_discard_plugin_prefetch();
-        front = used = elapsed_frames = 0;
+        front = used = elapsed_frames = pending = playing = 0;
         base_ms = ms;
         play();
         pcm_play_unlock();
@@ -279,7 +283,7 @@ static void close_locked(bool handover)
     queue = NULL;
     uint32_t frequency = rate;
     base_ms += (uint64_t)elapsed_frames * 1000 / frequency;
-    front = used = elapsed_frames = rate = 0;
+    front = used = elapsed_frames = pending = playing = rate = 0;
     pcm_play_unlock();
     if (pcm_current_sink() == PCM_SINK_BUILTIN &&
         mixer_get_frequency() == frequency)

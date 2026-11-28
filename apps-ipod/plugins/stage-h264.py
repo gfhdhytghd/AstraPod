@@ -82,6 +82,8 @@ enum plugin_status plugin_start""")
         .themed_controls = request->themed_controls,
         .accent = request->accent,
         .resume_menu = request->resume_menu,
+        .control_centre = request->control_centre,
+        .picture_mode = request->picture_mode,
     };
     result = video_h264_play_named(path, buffer, buffer_size, &options);
     switch (result)
@@ -124,7 +126,28 @@ elif src.name == "video_playback.c":
     replace("""    case ACTION_WPS_MENU:
         return VIDEO_INPUT_MENU;""", """    case ACTION_WPS_MENU:
     case ACTION_STD_CANCEL:
-        return VIDEO_INPUT_EXIT;""")
+        return VIDEO_INPUT_EXIT;
+    case ACTION_WPS_QUICKSCREEN:
+    {
+        if (!osd->options || !osd->options->control_centre)
+            break;
+        bool resume = !*paused;
+        long opened = *rb->current_tick;
+        video_set_paused(true, paused, start_tick, pause_started,
+                         have_audio, cpu_boosted);
+        if (!osd->options->control_centre())
+            return VIDEO_INPUT_USB;
+        long elapsed = *rb->current_tick - opened;
+        if (osd->mode != VIDEO_OVERLAY_HIDDEN)
+            osd->until += elapsed;
+        if (osd->pending_seek)
+            osd->seek_until += elapsed;
+        if (resume)
+            video_set_paused(false, paused, start_tick, pause_started,
+                             have_audio, cpu_boosted);
+        *redraw = true;
+        break;
+    }""")
     replace("int action = rb->get_action(CONTEXT_WPS, TIMEOUT_NOBLOCK);",
             "int action = rb->get_action(CONTEXT_VIDEO_PLAYBACK, TIMEOUT_NOBLOCK);")
 
@@ -156,12 +179,14 @@ elif src.name == "video_playback.c":
 
 """)
     cut("            if (action == VIDEO_INPUT_MENU)", "            if (redraw_requested")
-    replace("clock_ms = audio_master ? video_pcm_get_clock_ms() :",
-            "clock_ms = audio_master ? rb->h264_audio->clock_ms() :")
+    replace("return audio_master ? video_pcm_get_clock_ms() :",
+            "return audio_master ? rb->h264_audio->clock_ms() :")
     replace("(!video_audio_is_active() && video_pcm_empty())",
             "(!video_audio_is_active() && rb->h264_audio->buffered() == 0)")
     replace('#include "plugin.h"',
-            '#include "plugin.h"\n#include "plugins/rock_video_log.h"')
+            '#include "plugin.h"\n#include "plugins/rock_video_log.h"\n'
+            '#include "settings/video_picture.h"\n'
+            '#define VIDEO_SYNC_LOG ROCK_VIDEO_SYNC_LOG')
     replace("size_t video_h264_scratch_size(const char *path)", r"""
 static int video_log_open(const char *path, const char *stage, int code)
 {
@@ -395,18 +420,18 @@ size_t video_h264_scratch_size(const char *path)""")
                 video_audio_stop();
                 have_audio = false;""")
     replace("        uint32_t offset;\n        uint32_t size;\n", "")
-    cut("        if (mp4v_get_sample_offset(video_fd", "            rb->splash(HZ * 2, \"Video sample",
-        """\
-        offset = size = 0;
-        code = video_sample_read(video_fd, sample, read_buffer, &offset, &size);
-        if (code < 0)
-        {
-            failure = "sample-read";
+    cut('            if (mp4v_get_sample_offset(video_fd',
+        '                rb->splash(HZ * 2, "Video sample', """\
+            offset = size = 0;
+            code = video_sample_read(video_fd, sample, read_buffer, &offset, &size);
+            if (code < 0)
+            {
+                failure = "sample-read";
 """)
-    replace('            rb->splash(HZ * 2, "VPU sample decode failed");',
-            '''            failure = "sample-decode";
-            code = decoded;
-            rb->splash(HZ * 2, "VPU sample decode failed");''')
+    replace('                rb->splash(HZ * 2, "VPU sample decode failed");',
+            '''                failure = "sample-decode";
+                code = decoded;
+                rb->splash(HZ * 2, "VPU sample decode failed");''')
     replace("cleanup:\n", r"""cleanup:
     if (failure)
     {
@@ -441,11 +466,99 @@ int video_h264_play_named(const char *path, void *buffer, size_t size,
 
 int video_h264_play(const char *filepath,""")
 
-    replace("    draw_width = LCD_WIDTH;",
-            """    draw_width = rb->global_settings->video_fit ?
-        LCD_WIDTH : MIN(width, LCD_WIDTH);""")
-    replace("    draw_height = (int)((int64_t)height * LCD_WIDTH / width);",
-            "    draw_height = (int)((int64_t)height * draw_width / width);")
+    replace("    VIDEO_OVERLAY_VOLUME,",
+            "    VIDEO_OVERLAY_VOLUME,\n    VIDEO_OVERLAY_PICTURE,")
+    replace("    enum video_overlay mode;",
+            "    enum video_overlay mode;\n    int picture_mode;")
+    replace("    struct video_osd osd = {.options = options, .title = title};",
+            """    struct video_osd osd = {
+        .options = options,
+        .title = title,
+        .picture_mode = options && options->picture_mode ?
+            options->picture_mode(0) : VIDEO_PICTURE_FIT,
+    };""")
+    replace("""        if (osd->mode == VIDEO_OVERLAY_SCRUB)
+            mode = VIDEO_OVERLAY_HIDDEN;""",
+            """        if (osd->mode == VIDEO_OVERLAY_SCRUB)
+            mode = stock && osd->options->picture_mode ?
+                VIDEO_OVERLAY_PICTURE : VIDEO_OVERLAY_HIDDEN;
+        if (osd->mode == VIDEO_OVERLAY_PICTURE)
+            mode = VIDEO_OVERLAY_HIDDEN;""")
+    replace("""        *redraw = true;
+        if (osd->mode == VIDEO_OVERLAY_SCRUB)
+        {""",
+            """        *redraw = true;
+        if (osd->mode == VIDEO_OVERLAY_PICTURE)
+        {
+            osd->picture_mode = osd->options->picture_mode(direction);
+            video_osd_show(osd, VIDEO_OVERLAY_PICTURE);
+        }
+        else if (osd->mode == VIDEO_OVERLAY_SCRUB)
+        {""")
+    replace("static void video_draw_themed_controls(",
+            """static const char *video_picture_label(const struct video_osd *osd)
+{
+    static const char *const labels[] = {"Fit", "Fill", "Stretch"};
+    return labels[osd->picture_mode];
+}
+
+static void video_draw_themed_controls(""")
+    replace("""        rb->snprintf(right_text, sizeof(right_text), "%d%%", percent);
+    }
+    else""",
+            """        rb->snprintf(right_text, sizeof(right_text), "%d%%", percent);
+    }
+    else if (osd->mode == VIDEO_OVERLAY_PICTURE)
+    {
+        fill = (osd->picture_mode + 1) * width / VIDEO_PICTURE_COUNT;
+        rb->snprintf(left_text, sizeof(left_text), "Picture Scaling");
+        rb->snprintf(right_text, sizeof(right_text), "%s",
+                     video_picture_label(osd));
+    }
+    else""")
+    replace("""        video_yuv_text(planes, left, bottom + 7, right, "Volume",
+                       241, 245, 245);
+    }
+    else""",
+            """        video_yuv_text(planes, left, bottom + 7, right, "Volume",
+                       241, 245, 245);
+    }
+    else if (osd->mode == VIDEO_OVERLAY_PICTURE)
+    {
+        const char *label = video_picture_label(osd);
+        fill = (osd->picture_mode + 1) * bar_width / VIDEO_PICTURE_COUNT;
+        video_yuv_text(planes, left, bottom + 7, right, "Picture Scaling",
+                       241, 245, 245);
+        video_yuv_text(planes, right - video_yuv_text_width(label),
+                       bottom + 7, right, label, 241, 245, 245);
+    }
+    else""")
+    cut("    draw_width = LCD_WIDTH;", "    draw_width &= ~1;", """\
+    draw_width = LCD_WIDTH;
+    draw_height = LCD_HEIGHT;
+    if (osd->picture_mode == VIDEO_PICTURE_FILL)
+    {
+        /* Crop on even pixel boundaries for the subsampled chroma planes. */
+        int crop_w = MIN(width, height * LCD_WIDTH / LCD_HEIGHT) & ~1;
+        int crop_h = MIN(height, width * LCD_HEIGHT / LCD_WIDTH) & ~1;
+        int crop_x = ((width - crop_w) / 2) & ~1;
+        int crop_y = ((height - crop_h) / 2) & ~1;
+        y += crop_y * stride + crop_x;
+        cb += crop_y / 2 * (stride / 2) + crop_x / 2;
+        cr += crop_y / 2 * (stride / 2) + crop_x / 2;
+        width = crop_w;
+        height = crop_h;
+    }
+    else if (osd->picture_mode != VIDEO_PICTURE_STRETCH)
+    {
+        draw_height = height * LCD_WIDTH / width;
+        if (draw_height > LCD_HEIGHT)
+        {
+            draw_height = LCD_HEIGHT;
+            draw_width = width * LCD_HEIGHT / height;
+        }
+    }
+""")
 
 elif src.name == "video_audio.c":
     for name in ("codec_thread.h", "video_pcm.h"):

@@ -63,8 +63,11 @@
 #define VIDEO_MAX_SAMPLES        400000u
 #define VIDEO_MAX_AUDIO_SAMPLES  600000u
 #define VIDEO_READ_BUFFER        (512u * 1024u)
+#define VIDEO_FRAME_BUFFER       (VIDEO_MAX_WIDTH * VIDEO_MAX_HEIGHT * 3u / 2u)
 #define VIDEO_OUTPUT_BUFFER      (LCD_WIDTH * LCD_HEIGHT * 3u / 2u)
 #define VIDEO_PCM_BUFFER         (256u * 1024u)
+#define VIDEO_SYNC_RECOVERY_MS   250
+#define VIDEO_DECODE_LEAD_MS     100
 #define VIDEO_OSD_SHOW_TICKS     (HZ * 4)
 #define VIDEO_RESUME_MAGIC       0x48323634u
 #define VIDEO_RESUME_FILE        PLUGIN_APPS_DATA_DIR \
@@ -114,6 +117,21 @@ struct video_pool
 {
     uint8_t *cursor;
     uint8_t *end;
+};
+
+struct video_frame
+{
+    uint8_t *pixels;
+    int width;
+    int height;
+};
+
+struct video_sync_stats
+{
+    unsigned decoded, shown, dropped;
+    unsigned decode_ticks, max_ticks;
+    long report_at;
+    bool reported;
 };
 
 struct video_timing
@@ -204,6 +222,79 @@ static void video_timing_advance(const struct mp4v_demux_res *demux,
         timing->in_run = 0;
     }
 }
+
+/* Convert accumulated STTS ticks only at the comparison with the clock. */
+static uint32_t video_end_pts(const struct mp4v_demux_res *movie,
+                              const struct video_timing *timing)
+{
+    struct video_timing next = *timing;
+    video_timing_advance(movie, &next);
+    return video_pts_ms(movie, &next);
+}
+
+static uint32_t video_clock_ms(bool audio_master, long start_tick)
+{
+    return audio_master ? video_pcm_get_clock_ms() :
+        (uint32_t)((uint64_t)(unsigned long)
+                   (*rb->current_tick - start_tick) * 1000 / HZ);
+}
+
+/* Leave parameter sets, IDRs and every referenced picture in the decoder's
+ * input. A malformed sample still goes to the decoder's normal error path. */
+static bool video_disposable_sample(const uint8_t *data, size_t size,
+                                    unsigned length_bytes)
+{
+    bool slice = false;
+    while (size > length_bytes)
+    {
+        uint32_t length = 0;
+        for (unsigned i = 0; i < length_bytes; ++i)
+            length = (length << 8) | *data++;
+        size -= length_bytes;
+        if (!length || length > size)
+            return false;
+
+        unsigned nal = data[0];
+        unsigned type = nal & 31;
+        if (type == 1 && !(nal & 0xe0))
+            slice = true;
+        else if (type != 6 && type != 9 && type != 12)
+            return false;
+
+        size -= length;
+        data += length;
+    }
+    return slice && !size;
+}
+
+#ifdef VIDEO_SYNC_LOG
+static void video_sync_log(struct video_sync_stats *stats, uint32_t media,
+                           uint32_t audio, uint32_t shown)
+{
+    long now = *rb->current_tick;
+    if (TIME_BEFORE(now, stats->report_at))
+        return;
+
+    int fd = rb->open(VIDEO_SYNC_LOG, O_WRONLY | O_CREAT |
+                      (stats->reported ? O_APPEND : O_TRUNC), 0666);
+    if (fd >= 0)
+    {
+        unsigned avg = stats->decoded ? (unsigned)
+            ((uint64_t)stats->decode_ticks * 1000 / HZ / stats->decoded) : 0;
+        rb->fdprintf(fd, "media_ms=%u audio_ms=%u shown_pts_ms=%u "
+                     "offset_ms=%d decoded=%u shown=%u dropped=%u "
+                     "decode_avg_ms=%u decode_max_ms=%u\n",
+                     (unsigned)media, (unsigned)audio, (unsigned)shown,
+                     (int)audio - (int)shown, stats->decoded, stats->shown,
+                     stats->dropped, avg, stats->max_ticks * 1000 / HZ);
+        rb->close(fd);
+        stats->reported = true;
+    }
+    stats->report_at = now + 10 * HZ;
+    stats->decoded = stats->shown = stats->dropped = 0;
+    stats->decode_ticks = stats->max_ticks = 0;
+}
+#endif
 
 static uint32_t video_duration_ms(const struct mp4v_demux_res *demux)
 {
@@ -968,23 +1059,47 @@ static void video_draw_frame(const uint8_t *y, const uint8_t *cb,
                  LCD_WIDTH, LCD_HEIGHT);
 }
 
-static void video_redraw_frame(struct vpu_h264 *decoder, uint8_t *scaled,
-                               bool paused, uint32_t position_ms,
-                               uint32_t duration_ms,
+static void video_redraw_frame(const struct video_frame *frame,
+                               uint8_t *scaled, bool paused,
+                               uint32_t position_ms, uint32_t duration_ms,
                                const struct video_osd *osd)
 {
-    const uint8_t *frame_y;
-    const uint8_t *frame_cb;
-    const uint8_t *frame_cr;
-    int width;
-    int height;
-    int stride;
+    size_t y_size = (size_t)frame->width * frame->height;
+    video_draw_frame(frame->pixels, frame->pixels + y_size,
+                     frame->pixels + y_size + y_size / 4,
+                     frame->width, frame->height, frame->width,
+                     scaled, paused, position_ms, duration_ms, osd);
+}
 
-    rb->hw_h264->get_frame(decoder, &frame_y, &frame_cb, &frame_cr,
-                       &width, &height, &stride);
-    video_draw_frame(frame_y, frame_cb, frame_cr, width, height, stride,
-                     scaled, paused, position_ms, duration_ms,
-                     osd);
+/* A decoded picture can be waiting for its PTS or can be dropped. Keep the
+ * last presented picture separate so a paused redraw never shows either. */
+static bool video_cache_frame(struct vpu_h264 *decoder,
+                              struct video_frame *frame)
+{
+    const uint8_t *planes[3];
+    int width, height, stride;
+
+    rb->hw_h264->get_frame(decoder, &planes[0], &planes[1], &planes[2],
+                          &width, &height, &stride);
+    if (width < 2 || height < 2 || width > VIDEO_MAX_WIDTH ||
+        height > VIDEO_MAX_HEIGHT || (width | height | stride) % 2 != 0 ||
+        stride < width || !planes[0] || !planes[1] || !planes[2])
+        return false;
+
+    frame->width = width;
+    frame->height = height;
+    uint8_t *dst = frame->pixels;
+    for (unsigned i = 0; i < 3; ++i)
+    {
+        int shift = i != 0;
+        for (int row = 0; row < (height >> shift); ++row)
+        {
+            memcpy(dst, planes[i] + row * (stride >> shift),
+                   width >> shift);
+            dst += width >> shift;
+        }
+    }
+    return true;
 }
 
 static struct mp4v_demux_res demux;
@@ -1016,7 +1131,7 @@ size_t video_h264_scratch_size(const char *path)
         return 0;
     /* Worst-case alignment for the decoder and four following buffers. */
     size_t bytes = 4095 + decoder + VIDEO_READ_BUFFER + VIDEO_OUTPUT_BUFFER +
-                   2 * 31;
+                   VIDEO_FRAME_BUFFER + 3 * 31;
     if (demux.audio_format == MAKEFOURCC('m', 'p', '4', 'a'))
         bytes += video_audio_workspace_size(&demux) + VIDEO_PCM_BUFFER +
                  2 * (CACHEALIGN_SIZE - 1);
@@ -1029,6 +1144,8 @@ int video_h264_play_named(const char *filepath, void *buffer,
 {
     struct video_pool pool;
     struct video_timing timing;
+    struct video_frame frame = {0};
+    struct video_sync_stats stats = {0};
     struct vpu_h264 *decoder = NULL;
     uint8_t *decoder_buffer;
     uint8_t *read_buffer;
@@ -1051,6 +1168,8 @@ int video_h264_play_named(const char *filepath, void *buffer,
     bool cpu_boosted = false;
     bool have_audio = false;
     bool have_frame = false;
+    bool frame_ready = false;
+    uint32_t next_recovery_ms = 0;
     bool preview_frame = false;
     bool audio_master = false;
     enum video_input_action action = VIDEO_INPUT_NONE;
@@ -1106,6 +1225,7 @@ int video_h264_play_named(const char *filepath, void *buffer,
     decoder_buffer = video_pool_take(&pool, decoder_size, 4096);
     read_buffer = video_pool_take(&pool, VIDEO_READ_BUFFER, 32);
     scale_buffer = video_pool_take(&pool, VIDEO_OUTPUT_BUFFER, 32);
+    frame.pixels = video_pool_take(&pool, VIDEO_FRAME_BUFFER, 32);
     audio_codec_workspace_size = demux.audio_num_samples > 0 ?
         video_audio_workspace_size(&demux) : 0;
     audio_codec_workspace = audio_codec_workspace_size > 0 ?
@@ -1114,7 +1234,7 @@ int video_h264_play_named(const char *filepath, void *buffer,
     pcm_buffer = audio_codec_workspace_size > 0 ?
         video_pool_take(&pool, VIDEO_PCM_BUFFER, CACHEALIGN_SIZE) : NULL;
     if (decoder_buffer == NULL || read_buffer == NULL ||
-        scale_buffer == NULL || decoder_size == 0 ||
+        scale_buffer == NULL || frame.pixels == NULL || decoder_size == 0 ||
         (audio_codec_workspace_size > 0 &&
          (audio_codec_workspace == NULL || pcm_buffer == NULL)))
     {
@@ -1218,18 +1338,20 @@ int video_h264_play_named(const char *filepath, void *buffer,
     rb->lcd_update();
     rb->backlight_on();
     rb->backlight_set_timeout(0);
+    stats.report_at = *rb->current_tick + 10 * HZ;
     while ((sample < demux.num_samples || paused) &&
            action == VIDEO_INPUT_NONE)
     {
         uint32_t offset;
         uint32_t size;
         uint32_t pts_ms = video_pts_ms(&demux, &timing);
+        uint32_t end_ms = video_end_pts(&demux, &timing);
+        uint32_t clock_ms = 0;
         bool seek_requested = false;
         int decoded;
 
         while (action == VIDEO_INPUT_NONE)
         {
-            uint32_t clock_ms;
             bool redraw_requested;
 
             action = video_input(&paused, &start_tick,
@@ -1241,7 +1363,7 @@ int video_h264_play_named(const char *filepath, void *buffer,
                     &paused, &start_tick, &pause_started, have_audio,
                     &cpu_boosted, &osd, &redraw_requested);
             if (redraw_requested && have_frame)
-                video_redraw_frame(decoder, scale_buffer, paused,
+                video_redraw_frame(&frame, scale_buffer, paused,
                                    displayed_ms, duration_ms, &osd);
             if (action == VIDEO_INPUT_SEEK ||
                 action == VIDEO_INPUT_SEEK_BACK ||
@@ -1290,7 +1412,8 @@ int video_h264_play_named(const char *filepath, void *buffer,
                 pause_started = *rb->current_tick;
                 displayed_ms = play_ms;
                 preview_frame = paused;
-                have_frame = false;
+                have_frame = frame_ready = false;
+                next_recovery_ms = 0;
                 action = VIDEO_INPUT_NONE;
                 seek_requested = true;
                 break;
@@ -1306,9 +1429,7 @@ int video_h264_play_named(const char *filepath, void *buffer,
             }
             if (sample >= demux.num_samples)
                 break;
-            clock_ms = audio_master ? video_pcm_get_clock_ms() :
-                (uint32_t)((uint64_t)(unsigned long)
-                    ((*rb->current_tick) - start_tick) * 1000 / HZ);
+            clock_ms = video_clock_ms(audio_master, start_tick);
             if (audio_master &&
                 (video_audio_failed() ||
                  (!video_audio_is_active() && video_pcm_empty())))
@@ -1319,7 +1440,9 @@ int video_h264_play_named(const char *filepath, void *buffer,
                 start_tick = (*rb->current_tick) -
                     (long)((uint64_t)clock_ms * HZ / 1000u);
             }
-            if (clock_ms + 2 >= pts_ms)
+            unsigned lead = !audio_master ? 2 :
+                            frame_ready ? 0 : VIDEO_DECODE_LEAD_MS;
+            if (clock_ms + lead >= pts_ms)
                 break;
             rb->sleep(1);
         }
@@ -1329,38 +1452,84 @@ int video_h264_play_named(const char *filepath, void *buffer,
             continue;
         if (sample >= demux.num_samples)
             break;
-        if (mp4v_get_sample_offset(video_fd, &demux, sample, &offset,
-                                   &size) < 0 ||
-            size == 0 || size > VIDEO_READ_BUFFER ||
-            rb->lseek(video_fd, offset, SEEK_SET) < 0 ||
-            rb->read(video_fd, read_buffer, size) != (ssize_t)size)
+        if (audio_master && !preview_frame && sample >= show_sample &&
+            clock_ms > pts_ms && clock_ms - pts_ms >= VIDEO_SYNC_RECOVERY_MS &&
+            clock_ms >= next_recovery_ms && demux.num_stss)
         {
-            rb->splash(HZ * 2, "Video sample read failed");
-            goto cleanup;
+            /* Rejoin at a due sync picture. Never start a dependent picture
+             * with a reference chain that has been skipped. */
+            next_recovery_ms = clock_ms + VIDEO_DECODE_LEAD_MS;
+            struct video_timing target;
+            uint32_t target_sample = video_sample_for_ms(
+                &demux, clock_ms + VIDEO_DECODE_LEAD_MS, &target);
+            uint32_t sync;
+            if (mp4v_find_keyframe(video_fd, &demux, target_sample, &sync) &&
+                sync > sample)
+            {
+                stats.dropped += sync - sample;
+                rb->hw_h264->close(decoder);
+                decoder = rb->hw_h264->open(
+                    decoder_buffer, decoder_size,
+                    (demux.width + 15) & ~15, (demux.height + 15) & ~15);
+                if (!decoder || rb->hw_h264->configure(
+                        decoder, demux.codecdata, demux.codecdata_len) < 0)
+                {
+                    rb->splash(HZ * 2, "H.264 recovery failed");
+                    goto cleanup;
+                }
+                sample = sync;
+                frame_ready = false;
+                video_timing_for_sample(&demux, sample, &timing);
+                continue;
+            }
         }
-        decoded = rb->hw_h264->decode_sample(
-            decoder, read_buffer, size, demux.nalu_len_size);
-        if (decoded < 0)
+        if (!frame_ready)
         {
-            rb->splash(HZ * 2, "VPU sample decode failed");
-            goto cleanup;
-        }
-        if (decoded > 0 && sample >= show_sample)
-        {
-            const uint8_t *frame_y;
-            const uint8_t *frame_cb;
-            const uint8_t *frame_cr;
-            int width;
-            int height;
-            int stride;
+            if (mp4v_get_sample_offset(video_fd, &demux, sample, &offset,
+                                       &size) < 0 ||
+                size == 0 || size > VIDEO_READ_BUFFER ||
+                rb->lseek(video_fd, offset, SEEK_SET) < 0 ||
+                rb->read(video_fd, read_buffer, size) != (ssize_t)size)
+            {
+                rb->splash(HZ * 2, "Video sample read failed");
+                goto cleanup;
+            }
+            if (audio_master && !preview_frame && sample >= show_sample &&
+                end_ms <= clock_ms &&
+                video_disposable_sample(read_buffer, size, demux.nalu_len_size))
+            {
+                ++stats.dropped;
+                goto advance;
+            }
+            long decode_start = *rb->current_tick;
+            decoded = rb->hw_h264->decode_sample(
+                decoder, read_buffer, size, demux.nalu_len_size);
+            if (decoded < 0)
+            {
+                rb->splash(HZ * 2, "VPU sample decode failed");
+                goto cleanup;
+            }
+            unsigned ticks = *rb->current_tick - decode_start;
+            ++stats.decoded;
+            stats.decode_ticks += ticks;
+            stats.max_ticks = MAX(stats.max_ticks, ticks);
+            if (decoded <= 0 || sample < show_sample)
+                goto advance;
 
-            rb->hw_h264->get_frame(decoder, &frame_y, &frame_cb, &frame_cr,
-                               &width, &height, &stride);
-            video_draw_frame(frame_y, frame_cb, frame_cr, width, height,
-                             stride, scale_buffer, paused, pts_ms,
-                             duration_ms, &osd);
+            frame_ready = true;
+            if (audio_master && !preview_frame)
+                continue; /* Poll input and wait for this picture's PTS. */
+        }
+
+        if (audio_master && !preview_frame && clock_ms >= end_ms)
+            ++stats.dropped;
+        else if (video_cache_frame(decoder, &frame))
+        {
+            video_redraw_frame(&frame, scale_buffer, paused,
+                               pts_ms, duration_ms, &osd);
             displayed_ms = pts_ms;
             have_frame = true;
+            ++stats.shown;
             if (preview_frame)
             {
                 preview_frame = false;
@@ -1375,6 +1544,12 @@ int video_h264_play_named(const char *filepath, void *buffer,
             }
             last_sample = sample;
         }
+advance:
+#ifdef VIDEO_SYNC_LOG
+        if (audio_master && have_frame && !paused)
+            video_sync_log(&stats, pts_ms, clock_ms, displayed_ms);
+#endif
+        frame_ready = false;
         video_timing_advance(&demux, &timing);
         sample++;
     }

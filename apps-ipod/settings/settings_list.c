@@ -43,6 +43,7 @@
 #include "pcm.h"
 #include "iap-usb.h"
 #include "settings.h"
+#include "settings/video_picture.h"
 #include "rbpaths.h"
 #include "settings_list.h"
 #include "system/time_zone.h"
@@ -1230,8 +1231,11 @@ const struct settings_list settings[] = {
     CHOICE_SETTING(0, video_tv_screen, LANG_VIDEO_TV_SCREEN, 0,
                    "video tv screen", "standard,widescreen", NULL, 2,
                    ID2P(LANG_VIDEO_STANDARD), ID2P(LANG_VIDEO_WIDESCREEN)),
-    OFFON_SETTING(0, video_fit, LANG_VIDEO_FIT, true,
-                  "video fit", NULL),
+    CHOICE_SETTING(0, video_picture_mode, LANG_VIDEO_PICTURE,
+                   VIDEO_PICTURE_FIT, "picture scaling",
+                   "fit,fill,stretch", NULL, VIDEO_PICTURE_COUNT,
+                   ID2P(LANG_VIDEO_PICTURE_FIT), ID2P(LANG_VIDEO_PICTURE_FILL),
+                   ID2P(LANG_VIDEO_PICTURE_STRETCH)),
     OFFON_SETTING(0, video_alt_audio, LANG_VIDEO_ALT_AUDIO, false,
                   "video alternate audio", NULL),
     OFFON_SETTING(0, video_captions, LANG_VIDEO_CAPTIONS, false,

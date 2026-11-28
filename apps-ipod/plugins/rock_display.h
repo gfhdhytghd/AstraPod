@@ -38,7 +38,7 @@ void rock_send_event(unsigned short id, void *data);
 void rock_frame_start(void);
 unsigned int rock_frame_next(void);
 
-struct rock_native_scope rock_display_native_begin(void);
+struct rock_native_scope rock_display_native_begin(bool wait_for_release);
 enum rock_display_resume {
     ROCK_RESUME_SILENT,
     ROCK_RESUME_PRESENT,

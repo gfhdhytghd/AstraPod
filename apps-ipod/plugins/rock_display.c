@@ -127,7 +127,7 @@ void rock_display_stop(bool back_to_browser)
     button_queue_post(BUTTON_REDRAW, 0);
 }
 
-struct rock_native_scope rock_display_native_begin(void)
+struct rock_native_scope rock_display_native_begin(bool wait_for_release)
 {
     struct rock_native_scope scope = {
         .from_raw = raw,
@@ -140,7 +140,10 @@ struct rock_native_scope rock_display_native_begin(void)
         lcd_scroll_stop();
         memcpy(plugin_pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
         raw = false;
-        action_handoff_enter();
+        if (wait_for_release)
+            rock_action_handoff_wait_for_release();
+        else
+            action_handoff_enter();
         viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
         lcd_set_backdrop(caller.backdrop);
         viewport_set_defaults(lcd_init_viewport(NULL), SCREEN_MAIN);

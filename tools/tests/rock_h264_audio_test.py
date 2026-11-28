@@ -18,7 +18,7 @@ prefix = r"""
 #include <stdio.h>
 #define HAVE_HW_H264
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
-#define MIX_FRAME_SAMPLES 4
+#define MIX_FRAME_SAMPLES 64
 #define MIX_AMP_UNITY 65536
 #define PCM_MIXER_CHAN_ROCK_STREAM 2
 #define CHANNEL_STOPPED 0
@@ -152,10 +152,10 @@ static void produce(void)
     assert(rock_h264_audio_api.decode_aac(&api) == CODEC_ERROR);
     assert(!codec_loaded && api.id3 == &api);
     fail_entry = false;
-    int16_t input[40];
-    for (unsigned i = 0; i < 40; ++i)
+    int16_t input[400];
+    for (unsigned i = 0; i < 400; ++i)
         input[i] = i + 1;
-    assert(rock_h264_audio_api.write(input, 20) == 10);
+    assert(rock_h264_audio_api.write(input, 200) == 160);
 }
 
 static void consume(int first)
@@ -171,7 +171,7 @@ static void consume(int first)
 int main(void)
 {
     const struct rock_h264_audio_api *api = &rock_h264_audio_api;
-    int32_t scratch[10];
+    int32_t scratch[160];
     rock_h264_audio_revoke();
     rock_h264_audio_begin(scratch, sizeof(scratch));
     assert(!api->open(scratch + 1, sizeof(scratch), 44100));
@@ -190,10 +190,15 @@ int main(void)
     consume(0);
     assert(api->start(produce) && !api->start(produce));
     step_codec();
-    assert(decoded == 1 && api->buffered() == 10);
+    assert(decoded == 1 && api->buffered() == 160);
     consume(1);
-    consume(9);
-    assert(api->buffered() == 2);
+    consume(129);
+    /* Neither mixed block has left the PCM output pipeline. */
+    assert(api->clock_ms() == 0 && api->buffered() == 160);
+    consume(257);
+    assert(api->clock_ms() == 1 && api->buffered() == 96);
+    consume(0);
+    assert(api->clock_ms() == 2 && api->buffered() == 32);
     assert(api->pause(true) && paused);
     assert(api->seek(12150));
     assert(api->clock_ms() == 12150 && api->buffered() == 0);

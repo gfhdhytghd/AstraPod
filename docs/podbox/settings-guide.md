@@ -296,7 +296,7 @@ TV Out and TV Signal are shared with Photos.
 | Setting | What it does | Default | |
 |---|---|---|---|
 | TV Screen | Stores the preferred TV aspect ratio. This firmware displays media on the iPod screen. | Standard | |
-| Fit to Screen | Scales the whole picture to fit the iPod screen. Turn it off to use native size and center the picture. | On | |
+| Picture Scaling | Fit shows the whole picture and preserves its aspect ratio. Fill crops the edges to cover the screen and preserves the aspect ratio. Stretch covers the screen by scaling each dimension independently. During playback, press Select to show Picture Scaling and turn the wheel to change the mode. | Fit | |
 | Alternate Audio | Stores the alternate audio preference. The player uses the first supported audio track. | Off | |
 | Captions | Stores the captions preference. The player cannot render closed captions. | Off | |
 | Subtitles | Stores the subtitle preference. The player cannot render subtitle tracks. | Off | |

@@ -34771,17 +34771,59 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_VIDEO_FIT
-  desc: Stock media browser
+  id: LANG_VIDEO_PICTURE
+  desc: Video picture scaling
   user: core
   <source>
-    *: "Fit to Screen"
+    *: "Picture Scaling"
   </source>
   <dest>
-    *: "Fit to Screen"
+    *: "Picture Scaling"
   </dest>
   <voice>
-    *: "Fit to Screen"
+    *: "Picture Scaling"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_PICTURE_FIT
+  desc: Video picture scaling
+  user: core
+  <source>
+    *: "Fit"
+  </source>
+  <dest>
+    *: "Fit"
+  </dest>
+  <voice>
+    *: "Fit"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_PICTURE_FILL
+  desc: Video picture scaling
+  user: core
+  <source>
+    *: "Fill"
+  </source>
+  <dest>
+    *: "Fill"
+  </dest>
+  <voice>
+    *: "Fill"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_PICTURE_STRETCH
+  desc: Video picture scaling
+  user: core
+  <source>
+    *: "Stretch"
+  </source>
+  <dest>
+    *: "Stretch"
+  </dest>
+  <voice>
+    *: "Stretch"
   </voice>
 </phrase>
 <phrase>

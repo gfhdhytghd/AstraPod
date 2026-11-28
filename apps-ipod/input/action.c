@@ -404,6 +404,13 @@ void rock_action_reset(void)
     rock_action_last = (action_last_t){ .button = BUTTON_REL,
                                       .context = CONTEXT_STD };
 }
+
+void rock_action_handoff_wait_for_release(void)
+{
+    /* The native context must finish the keypress begun by the raw plugin. */
+    action_last.button = rock_action_last.button;
+    action_wait_for_release_preserve_queue();
+}
 #endif
 
 /******************************************************************************

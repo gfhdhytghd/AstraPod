@@ -698,7 +698,7 @@ static const struct media_option video_options[] = {
     MEDIA_OPTION(media_tv_out, false),
     MEDIA_OPTION(media_tv_signal, false),
     MEDIA_OPTION(video_tv_screen, false),
-    MEDIA_OPTION(video_fit, false),
+    MEDIA_OPTION(video_picture_mode, false),
     MEDIA_OPTION(video_alt_audio, false),
     MEDIA_OPTION(video_captions, false),
     MEDIA_OPTION(video_subtitles, false),

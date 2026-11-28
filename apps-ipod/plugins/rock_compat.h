@@ -38,6 +38,8 @@ struct rock_video_request {
     bool themed_controls;
     unsigned accent;
     int (*resume_menu)(void);
+    bool (*control_centre)(void); /* False on USB takeover. */
+    int (*picture_mode)(int step); /* Zero reads without changing the mode. */
 };
 #ifdef HAVE_HW_H264
 int rock_probe_video(const char *path);
@@ -51,6 +53,7 @@ void rock_usb_takeover(void);
 void rock_media_shutdown(void);
 void rock_playback_takeover(void);
 void rock_action_reset(void);
+void rock_action_handoff_wait_for_release(void);
 const unsigned char *rock_widget_text(const unsigned char *text);
 #else
 static inline void rock_usb_takeover(void) {}

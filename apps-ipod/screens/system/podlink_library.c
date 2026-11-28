@@ -99,6 +99,7 @@ static bool managed_path(const char *path)
 static bool sample_path(const char *path)
 {
     return !strcmp(path, ROCK_VIDEO_LOG) ||
+           !strcmp(path, ROCK_VIDEO_SYNC_LOG) ||
            !strcmp(path, ROCKBOX_DIR "/crumbs-last.txt") ||
            !strcmp(path, ROCKBOX_DIR "/crash-native.txt") ||
            !strcmp(path, ROCKBOX_DIR "/lcd-te-diag.txt") ||

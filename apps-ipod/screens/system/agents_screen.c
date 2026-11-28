@@ -201,7 +201,7 @@ static unsigned long native_play_at;
 _Static_assert(sizeof(struct detail_layout) <= 6400, "Detail layout cache budget");
 static struct detail_layout detail_layout;
 static int detail_body_y, detail_body_avail;
-static int usage_scroll, detail_scroll, detail_scroll_max;
+static int detail_scroll, detail_scroll_max;
 static struct row usage_from;   /* the spaces row to go back to */
 
 /* Hold to talk: the band at the foot of the list, while it is wanted */
@@ -261,14 +261,6 @@ static bool threads_view(void)
     return (view == VIEW_AGENTS && is_t3(space_id)) ||
            (view == VIEW_SPACES && t3_flat());
 }
-
-static bool usage_legacy_keys(void)
-{
-    /* A legacy heartbeat can precede its W. Desktop keys are enabled only
-     * when a legacy workspace actually identifies the current source. */
-    return !agents_fruit_nav() && model.mode == HR_MODE_HERDR;
-}
-
 
 static bool take_action_result(void)
 {
@@ -1238,7 +1230,7 @@ static const char *row_text(int item, char *buf, size_t size)
         case ROW_ANSWER_PENDING:
             return "Answer pending request…";
         case ROW_VOICE:
-            return "Voice reply";
+            return "Desktop voice";
         case ROW_OPEN_COMPUTER:
             return "Open on computer";
         case ROW_RETRY:
@@ -1650,20 +1642,21 @@ static unsigned limit_colour(unsigned colour, unsigned bg, unsigned text)
 
 /* One limit in a cell w wide: its label and the used percent with the
  * reset time on a line of the small font, and its bar under them */
-#define USE_BAR     6       /* the bar's height */
+#define USE_BAR     5       /* the bar's height */
 #define USE_MARGIN  10      /* the panel's inset from either side */
-#define USE_SPACE   12      /* between one service and the next */
 static int draw_limit(struct screen *d, struct viewport *vp,
                       const struct panel_ink *ink, int x, int y, int w,
                       const char *label, int pct, int reset, int period,
                       bool dim)
 {
     char r[16], text[24];
-    if (pct < 0)
-        snprintf(text, sizeof text, "—");
-    else
+    if (pct >= 0)
         snprintf(text, sizeof text, "%d%% · %s", pct,
                  fmt_reset(r, sizeof r, reset));
+    else if (reset >= 0)
+        snprintf(text, sizeof text, "— · %s", fmt_reset(r, sizeof r, reset));
+    else
+        snprintf(text, sizeof text, "—");
     vp->font = agents_small_font;
     text_at(d, x, y, ink->muted, label);
     text_at(d, x + w - text_w(d, text), y, dim ? ink->muted : ink->text, text);
@@ -1696,7 +1689,7 @@ static int draw_limit(struct screen *d, struct viewport *vp,
  * with nothing to show, or whose figures could not be read, is greyed and
  * gives its note on the right. Returns the y after it. */
 static int draw_service(struct screen *d, struct viewport *vp,
-                        const struct panel_ink *ink, int y,
+                        const struct panel_ink *ink, int y, int name_font,
                         const struct hr_service *s, bool stale)
 {
     static const char *const names[HR_USAGE_SVCS] =
@@ -1706,8 +1699,8 @@ static int draw_service(struct screen *d, struct viewport *vp,
     bool dim = stale || grey;
     int i = s - model.usage.svc;
     int x = USE_MARGIN, w = vp->width - 2 * USE_MARGIN;
-    int name_h = font_get(agents_list_font)->height;
-    vp->font = agents_list_font;
+    int name_h = font_get(name_font)->height;
+    vp->font = name_font;
     text_at(d, x, y, dim ? ink->muted : ink->text, names[i]);
     int name_w = text_w(d, names[i]);
     if (grey)
@@ -1720,12 +1713,13 @@ static int draw_service(struct screen *d, struct viewport *vp,
     vp->font = agents_small_font;
     fit_in(right, sizeof right, right, w - name_w - 12, agents_small_font);
     /* On the name's baseline */
-    int ry = y + font_get(agents_list_font)->ascent -
+    int ry = y + font_get(name_font)->ascent -
              font_get(agents_small_font)->ascent;
     text_at(d, x + w - text_w(d, right), ry, dim ? ink->muted : ink->text, right);
-    y += name_h + 2;
+    y += name_h;
     if (s->state != 'o')
-        return y + USE_SPACE - 2;
+        return y;
+    y += 2;
     /* A service with no 5h limit has one bar, the week's, the row wide */
     if (s->h5_pct < 0 && s->h5_reset < 0)
         y = draw_limit(d, vp, ink, x, y, w, "Week", s->wk_pct, s->wk_reset,
@@ -1733,15 +1727,13 @@ static int draw_service(struct screen *d, struct viewport *vp,
     else
     {
         int half = (w - 16) / 2;
-        draw_limit(d, vp, ink, x, y, half, "5 hours", s->h5_pct, s->h5_reset,
+        draw_limit(d, vp, ink, x, y, half, "5h", s->h5_pct, s->h5_reset,
                    5 * 3600, dim);
         y = draw_limit(d, vp, ink, x + w - half, y, half, "Week", s->wk_pct,
                        s->wk_reset, USE_WEEK, dim);
     }
-    return y + USE_SPACE;
+    return y;
 }
-
-static int usage_height;    /* the panel's content, for its scroll */
 
 /* Draw the usage figures and bars directly over the list backdrop. */
 static void draw_usage(struct gui_synclist *list)
@@ -1761,22 +1753,34 @@ static void draw_usage(struct gui_synclist *list)
         text_at(d, (vp->width - text_w(d, msg)) / 2,
                 (vp->height - font_get(agents_small_font)->height) / 2,
                 ink.muted, msg);
-        usage_height = 0;
     }
     else
     {
         int age = usage_age();
         bool stale = t_trouble || !u->ok || age > 3 * USAGE_EVERY / HZ;
-        int y = 8 - usage_scroll;
+        int limits = 0;
         for (int i = 0; i < HR_USAGE_SVCS; i++)
-            y = draw_service(d, vp, &ink, y, &u->svc[i], stale);
+            limits += u->svc[i].state == 'o';
+        int small_h = font_get(agents_small_font)->height;
+        int limit_h = small_h + USE_BAR + 4;
+        int name_font = agents_list_font;
+        int rows = HR_USAGE_SVCS + 1; /* providers and total */
+        int content = rows * font_get(name_font)->height + limits * limit_h;
+        if (content + 2 * (rows + 1) > vp->height)
+        {
+            name_font = agents_small_font;
+            content = rows * small_h + limits * limit_h;
+        }
+        int gap = MAX(2, MIN(9, (vp->height - content) / (rows + 1)));
+        int y = gap;
+        for (int i = 0; i < HR_USAGE_SVCS; i++)
+            y = draw_service(d, vp, &ink, y, name_font, &u->svc[i], stale) + gap;
         d->set_foreground(ui_theme_rgb565(UI_COLOR_SEPARATOR));
-        d->hline(USE_MARGIN, vp->width - USE_MARGIN - 1, y - USE_SPACE / 2);
-        y += 2;
-        vp->font = agents_list_font;
+        d->hline(USE_MARGIN, vp->width - USE_MARGIN - 1, y - gap / 2);
+        vp->font = name_font;
         text_at(d, USE_MARGIN, y, stale ? ink.muted : ink.text, "Total");
         int total_w = text_w(d, "Total");
-        int ry = y + font_get(agents_list_font)->ascent -
+        int ry = y + font_get(name_font)->ascent -
                  font_get(agents_small_font)->ascent;
         vp->font = agents_small_font;
         if (stale)
@@ -1785,8 +1789,6 @@ static void draw_usage(struct gui_synclist *list)
                  fmt_usd(c, sizeof c, u->usd_milli));
         text_at(d, vp->width - USE_MARGIN - text_w(d, buf), ry,
                 stale ? ink.muted : ink.text, buf);
-        y += font_get(agents_list_font)->height + 8;
-        usage_height = y + usage_scroll;
     }
     d->set_viewport(previous);
     ui_flush_dirty();
@@ -3160,15 +3162,14 @@ static void settle_viewport(struct gui_synclist *list)
 static void update_volume_mode(void)
 {
 #ifdef IPOD_ACCESSORY_PROTOCOL
-    bool want = view != VIEW_USAGE || !usage_legacy_keys();
+    bool want = view != VIEW_USAGE;
     if (want != volume_paging)
     {
         iap_agents_volume_enable(want);
         volume_paging = want;
     }
-    iap_agents_volume_host_keys(!agents_fruit_nav() &&
-        ((view == VIEW_USAGE && usage_legacy_keys()) ||
-         (view == VIEW_DETAIL && !is_t3(detail_pane))));
+    iap_agents_volume_host_keys(view == VIEW_USAGE ||
+        (!agents_fruit_nav() && view == VIEW_DETAIL && !is_t3(detail_pane)));
 #endif
 }
 
@@ -3386,11 +3387,8 @@ static int tab_index(void)
 
 static void open_usage(struct gui_synclist *list)
 {
-    if (agents_fruit_nav())
-        slide(&spaces_page, &usage_page, true);
-    else
-        pan(&spaces_page, &usage_page, -1);
-    usage_scroll = 0;
+    /* Usage sits to the left of Agents in every theme. */
+    pan(&spaces_page, &usage_page, -1);
     int sel = gui_synclist_get_sel_pos(list);
     usage_from = sel >= 0 && sel < nrows ? rows[sel] : (struct row){0};
     view = VIEW_USAGE;
@@ -3402,12 +3400,9 @@ static void open_usage(struct gui_synclist *list)
 /* Back to the spaces view, on the row the usage view was opened from */
 static void close_usage(struct gui_synclist *list)
 {
-    if (agents_fruit_nav())
-        slide(&usage_page, &spaces_page, false);
-    else
-        pan(&usage_page, &spaces_page, 1);
+    pan(&usage_page, &spaces_page, 1);
     view = VIEW_SPACES;
-    key_runs.nruns = 0;
+    forget_keys();
     show_row(list, &usage_from);
 }
 
@@ -4111,10 +4106,7 @@ static void activate_select(struct gui_synclist *list)
             break;
         }
         case VIEW_USAGE:
-            if (!usage_legacy_keys())
-                ask_usage();
-            else
-                send_key("enter");
+            send_key("enter");
             break;
         case VIEW_DETAIL:
             if (is_t3(detail_pane) || agents_fruit_nav())
@@ -4185,18 +4177,6 @@ static void scroll_panel(struct gui_synclist *list, int dir, bool page)
             draw_detail(list);
         }
     }
-    else if (view == VIEW_USAGE && !usage_legacy_keys())
-    {
-        int height = list->parent[SCREEN_MAIN]->height;
-        int maximum = MAX(0, usage_height - height);
-        int line = font_get(agents_list_font)->height;
-        int scroll = MAX(0, MIN(maximum, usage_scroll + dir * (page ? height - line : line)));
-        if (scroll != usage_scroll)
-        {
-            usage_scroll = scroll;
-            draw_usage(list);
-        }
-    }
     else if (view == VIEW_USAGE || view == VIEW_DETAIL)
     {
         const char *key = hr_wheel_step(&wheel, current_tick, dir, WHEEL_FAST);
@@ -4234,7 +4214,7 @@ static void horizontal_button(struct gui_synclist *list, int dir, bool held)
         case VIEW_USAGE:
             if (dir > 0 && !held)
                 close_usage(list);
-            else if (dir < 0 && usage_legacy_keys())
+            else if (dir < 0)
                 send_key("bs");
             break;
         case VIEW_AGENTS:
@@ -4348,7 +4328,7 @@ static int agents_run(void)
         if (!preloaded)
             last_message = current_tick;
         usage_serial = model.usage.serial;
-        usage_scroll = detail_scroll = detail_scroll_max = 0;
+        detail_scroll = detail_scroll_max = 0;
         memset(&detail_layout, 0, sizeof detail_layout);
         detail_body_avail = 0;
     }
@@ -4626,7 +4606,7 @@ static int agents_run(void)
                 page = !agents_fruit_nav() &&
                        (raw & (BUTTON_RC_VOL_UP | BUTTON_RC_VOL_DOWN));
 #endif
-                if (view == VIEW_USAGE || view == VIEW_DETAIL)
+                if (view == VIEW_DETAIL)
                 {
                     if (panel_scroll.lease || panel_scroll.trace)
                         ui_motion_renew(&panel_scroll);
@@ -4827,8 +4807,8 @@ static int agents_run(void)
             case ACTION_AGENTS_REMOTE_SWITCH:
                 native_play_pending = false;
                 finish_talk(true);
-                ret = (t3_mode() || agents_fruit_nav()) ?
-                      AGENTS_SWITCH_WPS : AGENTS_SWITCH_REMOTE_WPS;
+                ret = view == VIEW_USAGE || (!t3_mode() && !agents_fruit_nav()) ?
+                      AGENTS_SWITCH_REMOTE_WPS : AGENTS_SWITCH_WPS;
                 done = true;
                 break;
             case ACTION_AGENTS_SWITCH:

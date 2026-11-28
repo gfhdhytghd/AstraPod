@@ -21,6 +21,10 @@ void extras_bar_put(struct stock_canvas *canvas, const char *title);
 /* The same, choosing whether the battery and playback indicators appear. */
 void extras_bar_put_ex(struct stock_canvas *canvas, const char *title,
                        bool show_battery, bool show_play);
+/* The bar's title, Hold padlock, battery and playback mark without its
+ * background, for a page that lays its own bar. */
+void extras_bar_put_marks(struct stock_canvas *canvas, const char *title,
+                          bool show_battery, bool show_play);
 /* Draw the bar over Background_LightBlue_Image into the framebuffer, rows
  * 0 to EXTRAS_BAR_HEIGHT - 1; the caller updates the LCD. */
 void extras_bar_draw(const char *title);

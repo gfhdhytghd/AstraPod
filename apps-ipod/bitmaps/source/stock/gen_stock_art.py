@@ -2,8 +2,10 @@
 """Write the stock art's tables, or pack its pixels, from the PNGs here.
 
 Most PNGs are bitmaps from the iPod Classic 1.1.2 resource bank, named
-after their resource. SearchResult_* are icon tiles converted from the
-2.0.5 LCD output. AstraPod_* are ours, drawn in the same style.
+after their resource. SearchResult_* are icon tiles, and
+Photos_Header_Image the photo grid's header with its text taken out,
+converted from the 2.0.5 LCD output. AstraPod_* are ours, drawn in the same
+style.
 A greyscale PNG is a mask: its levels are
 the alpha of a colour the caller picks. Any other PNG is an image with its
 own alpha, kept as a palette and indices. A mask keeps only the rectangle

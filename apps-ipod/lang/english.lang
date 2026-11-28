@@ -35372,3 +35372,59 @@
     *: "All Day"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_FRUIT_PHOTO_COUNT
+  desc: Fruit Company: Photos thumbnail grid, the number of photos in the album; keep %d
+  user: core
+  <source>
+    *: "%d Photos"
+  </source>
+  <dest>
+    *: "%d Photos"
+  </dest>
+  <voice>
+    *: "%d Photos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ONE_PHOTO
+  desc: Fruit Company: Photos thumbnail grid when the album holds one photo
+  user: core
+  <source>
+    *: "1 Photo"
+  </source>
+  <dest>
+    *: "1 Photo"
+  </dest>
+  <voice>
+    *: "1 Photo"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_PHOTOS
+  desc: Fruit Company: Photos side pane when the library has no photos
+  user: core
+  <source>
+    *: "No Photos"
+  </source>
+  <dest>
+    *: "No Photos"
+  </dest>
+  <voice>
+    *: "No Photos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_DURATION_PICKER
+  desc: Stock photo slideshow Time Per Slide picker title
+  user: core
+  <source>
+    *: "Next Slide"
+  </source>
+  <dest>
+    *: "Next Slide"
+  </dest>
+  <voice>
+    *: "Next Slide"
+  </voice>
+</phrase>

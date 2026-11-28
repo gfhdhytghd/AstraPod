@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "ui/motion_schedule.h"
 #include "config.h"
 #include "backlight.h"
@@ -25,12 +26,17 @@
 #include "kernel.h"
 #include "lang.h"
 #include "lcd.h"
+#include "rbpaths.h"
 #include "root_menu.h"
+#include "screens/extras/extras_bar.h"
 #include "screens/playback/wps.h"
+#include "system/activity.h"
 #include "system/volume.h"
 #include "settings/settings.h"
 #include "system.h"
+#include "ui/menu_pane.h"
 #include "ui/scene.h"
+#include "ui/stock_art.h"
 #include "widgets/list.h"
 #include "widgets/menu.h"
 #include "widgets/option_select.h"
@@ -41,12 +47,29 @@
 #define PHOTO_LIMIT 32768
 #define ALBUM_LIMIT 2048
 #define THUMB_EDGE 64
-#define GRID_TILE 58
-#define GRID_TOP 42
-#define GRID_COLS (LCD_WIDTH / THUMB_EDGE)
-#define GRID_ROWS ((LCD_HEIGHT - GRID_TOP) / THUMB_EDGE)
-#define GRID_PAGE (GRID_COLS * GRID_ROWS)
 #define PHOTO_PIXELS (LCD_WIDTH * LCD_HEIGHT)
+
+/* Stock's thumbnail grid: five 62 x 63 cells a row on 64 x 65 pitches below
+ * a 46-row header, three rows on screen. A 64 x 64 thumbnail sits in its cell
+ * with its first column and last row cut off. */
+#define GRID_TOP 46
+#define GRID_COLS 5
+#define GRID_ROWS 3
+#define GRID_PAGE (GRID_COLS * GRID_ROWS)
+#define GRID_PITCH_X 64
+#define GRID_PITCH_Y 65
+#define CELL_W 62
+#define CELL_H 63
+#define GRID_GREY LCD_RGBPACK(32, 32, 32)
+#define FRAME_OUTER LCD_RGBPACK(248, 192, 24)
+#define FRAME_INNER LCD_RGBPACK(208, 160, 32)
+#define SUBTITLE_FONT FONT_DIR "/13-helvetica-bold.pbf"
+#define SUBTITLE_GREY 0x939393
+#define SUBTITLE_BASELINE 38
+#define SUBTITLE_LEFT 4
+#define SUBTITLE_RIGHT 316
+/* Mac HFS dates count from 1904. */
+#define MAC_EPOCH 2082844800u
 
 enum {
     PHOTO_CUT, PHOTO_FADE, PHOTO_WIPE, PHOTO_BLACK, PHOTO_ZOOM, PHOTO_CENTER,
@@ -130,8 +153,6 @@ static const char *album_name(int row, void *data, char *buf, size_t size)
         return str(LANG_SETTINGS);
     if (!a->indexed)
         return str(LANG_FRUIT_ALL_PHOTOS);
-    if (row == a->album_count + 1)
-        return "Loose photo files";
     if (row > 1)
         row--;
     struct stock_record album, name;
@@ -187,57 +208,98 @@ static void read_album(struct albums *a, int row)
     }
 }
 
+static int subtitle_font = -1;
+
+/* The date a photo was taken, as "November 27, 2026", or "" if unknown. */
+static void photo_date(const struct albums *a, int sel, char *buf, size_t size)
+{
+    uint32_t mac;
+    *buf = '\0';
+    if (!stock_db_u32(&a->db, a->slides[sel] + 40, &mac) || mac < MAC_EPOCH)
+        return;
+    time_t when = mac - MAC_EPOCH;
+    struct tm tm;
+    gmtime_r(&when, &tm);
+    snprintf(buf, size, "%s %d, %d", str(LANG_EXTRAS_CALENDARS_JANUARY + tm.tm_mon),
+             tm.tm_mday, tm.tm_year + 1900);
+}
+
+/* The black title bar, then the album's photo count and the selected
+ * photo's date on the grey band below it. */
+static void draw_grid_header(const struct albums *a, const char *title,
+                             int sel)
+{
+    enum { ROWS = 4 };
+    uint32_t pixels[LCD_WIDTH * ROWS];
+    char count[32], date[48];
+    int date_width = 0;
+    if (subtitle_font < 0)
+        subtitle_font = font_load_ex(SUBTITLE_FONT, 0,
+                                     global_settings.glyphs_to_cache);
+    snprintf(count, sizeof(count), a->slide_count == 1 ?
+             str(LANG_FRUIT_ONE_PHOTO) : str(LANG_FRUIT_PHOTO_COUNT),
+             a->slide_count);
+    photo_date(a, sel, date, sizeof(date));
+    int top = 0;
+    if (subtitle_font >= 0)
+    {
+        font_getstringsize((const unsigned char *)date, &date_width, NULL,
+                           subtitle_font);
+        top = SUBTITLE_BASELINE - font_get(subtitle_font)->ascent;
+    }
+    bool playing = audio_status() & AUDIO_STATUS_PLAY;
+    for (int y = 0; y < GRID_TOP; y += ROWS)
+    {
+        struct stock_canvas band = { pixels, 0, y, LCD_WIDTH,
+                                     MIN(ROWS, GRID_TOP - y) };
+        for (int i = 0; i < LCD_WIDTH * band.height; i++)
+            pixels[i] = 0x202020;
+        stock_art_put(&band, STOCK_ART_PHOTOS_HEADER, 0, 0);
+        extras_bar_put_marks(&band, title, true, playing);
+        if (subtitle_font >= 0)
+        {
+            stock_canvas_text(&band, subtitle_font, count, SUBTITLE_LEFT, top,
+                              SUBTITLE_GREY);
+            stock_canvas_text(&band, subtitle_font, date,
+                              SUBTITLE_RIGHT - date_width, top, SUBTITLE_GREY);
+        }
+        stock_canvas_show(&band, (struct ui_rect){ 0, y, LCD_WIDTH,
+                                                   band.height });
+    }
+}
+
+static void draw_frame(int x, int y)
+{
+    lcd_set_foreground(FRAME_OUTER);
+    lcd_fillrect(x, y, CELL_W, 2);
+    lcd_fillrect(x, y + CELL_H - 2, CELL_W, 2);
+    lcd_fillrect(x, y + 2, 2, CELL_H - 4);
+    lcd_fillrect(x + CELL_W - 2, y + 2, 2, CELL_H - 4);
+    lcd_set_foreground(FRAME_INNER);
+    lcd_drawrect(x + 2, y + 2, CELL_W - 4, CELL_H - 4);
+}
+
 static void draw_grid(const struct albums *a, const char *title,
                       int sel, int first)
 {
     static fb_data tile[THUMB_EDGE * THUMB_EDGE];
-    char position[24];
-    int width, height;
 
-    lcd_set_foreground(LCD_RGBPACK(20, 28, 41));
-    lcd_fillrect(0, 0, LCD_WIDTH, LCD_HEIGHT);
-    lcd_set_foreground(LCD_WHITE);
-    lcd_setfont(FONT_UI);
-    int drawmode = lcd_get_drawmode();
-    lcd_set_drawmode(DRMODE_FG);
-    lcd_putsxy(12, 4, title);
-    snprintf(position, sizeof(position), "%d / %d", sel + 1, a->slide_count);
-    lcd_getstringsize(position, &width, &height);
-    lcd_putsxy(LCD_WIDTH - width - 12, GRID_TOP - height - 4, position);
-    lcd_set_drawmode(drawmode);
-
+    draw_grid_header(a, title, sel);
+    lcd_set_foreground(GRID_GREY);
+    lcd_fillrect(0, GRID_TOP, LCD_WIDTH, LCD_HEIGHT - GRID_TOP);
     for (int i = first; i < a->slide_count && i < first + GRID_PAGE; i++)
     {
         int cell = i - first;
-        int inset = (THUMB_EDGE - GRID_TILE) / 2;
-        int x = cell % GRID_COLS * THUMB_EDGE + inset;
-        int y = GRID_TOP + cell / GRID_COLS * THUMB_EDGE + inset;
-        if (i == sel)
-        {
-            lcd_set_foreground(LCD_RGBPACK(77, 190, 237));
-            lcd_fillrect(x - 2, y - 2, GRID_TILE + 4, GRID_TILE + 4);
-        }
+        int x = cell % GRID_COLS * GRID_PITCH_X + 1;
+        int y = GRID_TOP + cell / GRID_COLS * GRID_PITCH_Y;
+        lcd_set_foreground(LCD_BLACK);
+        lcd_fillrect(x, y, CELL_W, CELL_H);
         if (stock_photo_pixels(&a->db, a->slides[i], THUMB_EDGE, THUMB_EDGE,
                                tile))
-        {
-            /* Each source pixel is at or after its destination. */
-            for (int row = 0; row < GRID_TILE; row++)
-            {
-                int src_y = row * THUMB_EDGE / GRID_TILE;
-                const fb_data *src = tile + src_y * THUMB_EDGE;
-                for (int col = 0; col < GRID_TILE; col++)
-                    tile[row * GRID_TILE + col] =
-                        src[col * THUMB_EDGE / GRID_TILE];
-            }
-            lcd_bitmap(tile, x, y, GRID_TILE, GRID_TILE);
-        }
-        else
-        {
-            lcd_set_foreground(LCD_BLACK);
-            lcd_fillrect(x, y, GRID_TILE, GRID_TILE);
-        }
+            lcd_bitmap_part(tile, 1, 0, THUMB_EDGE, x, y, CELL_W, CELL_H);
+        if (i == sel)
+            draw_frame(x, y);
     }
-    lcd_update();
 }
 
 static void draw_photo(const struct albums *a, int sel, fb_data *pixels)
@@ -246,11 +308,15 @@ static void draw_photo(const struct albums *a, int sel, fb_data *pixels)
         memset(pixels, 0, PHOTO_PIXELS * sizeof(*pixels));
 }
 
+/* A slideshow's first transition is always Cross Fade, whatever the
+ * setting. */
 static void transition(const fb_data *before, const fb_data *after,
-                       fb_data *mix, int *previous)
+                       fb_data *mix, int *previous, bool initial)
 {
-    int mode = global_settings.photo_transition;
-    if (mode == PHOTO_RANDOM)
+    int mode = initial ? PHOTO_FADE : global_settings.photo_transition;
+    if (initial)
+        *previous = mode;
+    else if (mode == PHOTO_RANDOM)
     {
         static const int effects[] = {
             PHOTO_FADE, PHOTO_BLACK, PHOTO_ZOOM, PHOTO_WIPE, PHOTO_CENTER
@@ -556,6 +622,43 @@ static void present_photo(const fb_data *pixels, bool brightness)
     lcd_update();
 }
 
+/* Stock pushes between the grid and a photo in 8 frames of 1/30 s, easing
+ * out quadratically; forward moves the pages left. */
+static void push_pages(const fb_data *from, const fb_data *to, bool forward)
+{
+    if (global_settings.animations)
+    {
+        struct ui_motion motion = ui_motion_begin("photo-push");
+        long start = current_tick;
+        for (int k = 1; k < 8; k++)
+        {
+            long frame = start + k * HZ / 30;
+            if (TIME_BEFORE(current_tick, frame))
+                sleep(frame - current_tick);
+            int rest = 8 - k;
+            int off = (LCD_WIDTH * (64 - rest * rest) + 63) / 64;
+            int keep = LCD_WIDTH - off;
+            if (forward)
+            {
+                lcd_bitmap_part(from, off, 0, LCD_WIDTH, 0, 0, keep, LCD_HEIGHT);
+                lcd_bitmap_part(to, 0, 0, LCD_WIDTH, keep, 0, off, LCD_HEIGHT);
+            }
+            else
+            {
+                lcd_bitmap_part(to, keep, 0, LCD_WIDTH, 0, 0, off, LCD_HEIGHT);
+                lcd_bitmap_part(from, 0, 0, LCD_WIDTH, off, 0, keep, LCD_HEIGHT);
+            }
+            lcd_update();
+        }
+        long end = start + 8 * HZ / 30;
+        if (TIME_BEFORE(current_tick, end))
+            sleep(end - current_tick);
+        ui_motion_end(&motion);
+    }
+    lcd_bitmap(to, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+    lcd_update();
+}
+
 enum photo_view_result {
     PHOTO_VIEW_GRID,
     PHOTO_VIEW_ALBUMS,
@@ -576,7 +679,7 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
     enum slideshow_music music = SLIDESHOW_UNCHANGED;
     int interval = MIN(20, MAX(0, global_settings.photo_duration)) * HZ;
     int last_transition = PHOTO_CUT;
-    bool playing = false;
+    bool playing = false, initial = false;
     long due = current_tick + interval;
     bool brightness = false;
     long brightness_due = 0;
@@ -584,8 +687,9 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
     int initial_brightness = global_settings.brightness;
 #endif
     enum photo_view_result result = PHOTO_VIEW_GRID;
+    memcpy(mix, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
     draw_photo(a, *sel, current);
-    present_photo(current, false);
+    push_pages(mix, current, true);
     for (;;)
     {
         long now = current_tick;
@@ -627,7 +731,7 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
                 music = slideshow_start(order, a->slide_count, *sel);
                 pos = position = global_settings.photo_shuffle ? 0 : *sel;
                 last_transition = PHOTO_CUT;
-                playing = true;
+                playing = initial = true;
                 due = current_tick + interval;
             }
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
@@ -695,7 +799,8 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
             {
                 if (brightness || redraw)
                     lcd_bitmap(current, 0, 0, LCD_WIDTH, LCD_HEIGHT);
-                transition(current, next, mix, &last_transition);
+                transition(current, next, mix, &last_transition, initial);
+                initial = false;
                 brightness = brightness && TIME_BEFORE(current_tick, brightness_due);
             }
             fb_data *swap = current;
@@ -719,6 +824,27 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
     return result;
 }
 
+/* Push the grid back in from the left over the photo on the screen. */
+static void return_to_grid(const struct albums *a, const char *title,
+                           int sel, int first)
+{
+    int handle = core_alloc(2 * PHOTO_PIXELS * sizeof(fb_data));
+    if (handle <= 0)
+    {
+        draw_grid(a, title, sel, first);
+        lcd_update();
+        return;
+    }
+    fb_data *photo = core_get_data_pinned(handle);
+    fb_data *grid = photo + PHOTO_PIXELS;
+    memcpy(photo, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
+    draw_grid(a, title, sel, first);
+    memcpy(grid, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
+    push_pages(photo, grid, false);
+    core_unpin(handle);
+    core_free(handle);
+}
+
 static bool photo_grid(const struct albums *a, const char *title)
 {
     if (!a->slide_count)
@@ -732,8 +858,10 @@ static bool photo_grid(const struct albums *a, const char *title)
     lcd_set_viewport(NULL);
     bool usb = false;
     draw_grid(a, title, sel, first);
+    lcd_update();
     for (;;)
     {
+        bool back = false;
         int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_PAGED_LIST |
                                        CONTEXT_LOCAL_LEFT_RIGHT,
                                        TIMEOUT_BLOCK, photo_grid_keys);
@@ -770,14 +898,25 @@ static bool photo_grid(const struct albums *a, const char *title)
             usb = result == PHOTO_VIEW_USB;
             if (result != PHOTO_VIEW_GRID)
                 break;
+            back = true;
         }
         else
             continue;
         int row_start = sel / GRID_COLS * GRID_COLS;
         first = MIN(row_start, MAX(first, row_start - GRID_PAGE + GRID_COLS));
-        draw_grid(a, title, sel, first);
+        if (back)
+            return_to_grid(a, title, sel, first);
+        else
+        {
+            draw_grid(a, title, sel, first);
+            lcd_update();
+        }
     }
     lcd_set_foreground(foreground);
+    if (subtitle_font >= 0)
+        font_unload(subtitle_font);
+    subtitle_font = -1;
+    extras_bar_release();
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     return usb;
 }
@@ -792,6 +931,36 @@ int stock_media_list_action(int action, struct gui_synclist *lists)
          action == ACTION_TREE_WPS))
         return ACTION_NONE;
     return action;
+}
+
+/* The Photos menu's pane: the main menu's cover slideshow, as on stock, or
+ * stock's No Photos picture when the library has no photos. */
+static void paint_no_photos(struct stock_canvas *band)
+{
+    stock_art_mask(band, STOCK_ART_NO_CONTENT_PHOTO_PREVIEW, 178, 44,
+                   0xffffff);
+}
+
+static enum list_pane_kind photos_pane(int row, void *data, int *art)
+{
+    (void)row;
+    (void)art;
+    if (((struct albums *)data)->indexed)
+        return LIST_PANE_ART;
+    struct menu_pane_content c = {
+        .kind = LIST_PANE_PICTURE, .art = -1, .baseline = 179,
+        .paint = paint_no_photos,
+    };
+    strlcpy(c.title, str(LANG_FRUIT_NO_PHOTOS), sizeof(c.title));
+    menu_pane_set_picture(&c);
+    return LIST_PANE_PICTURE;
+}
+
+static int photos_list_action(int action, struct gui_synclist *lists)
+{
+    if (action == ACTION_REDRAW)
+        gui_synclist_set_pane_callback(lists, photos_pane);
+    return stock_media_list_action(action, lists);
 }
 
 int stock_photos_screen(void)
@@ -823,9 +992,9 @@ int stock_photos_screen(void)
     ui_scene_open_page(&scene, "photos-push");
     struct simplelist_info info;
     simplelist_info_init(&info, str(LANG_FRUIT_PHOTOS),
-                         a.indexed ? a.album_count + 2 : 2, &a);
+                         a.indexed ? a.album_count + 1 : 2, &a);
     info.get_name = album_name;
-    info.action_callback = stock_media_list_action;
+    info.action_callback = photos_list_action;
     info.page_with_left_right = true;
     while (true)
     {
@@ -838,7 +1007,7 @@ int stock_photos_screen(void)
             break;
         if (info.selection == 1)
             rc = stock_photos_settings();
-        else if (!a.indexed || info.selection == a.album_count + 1)
+        else if (!a.indexed)
         {
             struct ui_scene files = {0};
             ui_scene_open_page(&files, "loose-photos-push");
@@ -970,8 +1139,11 @@ static bool media_picker(const struct settings_list *setting)
         choices = music_choices;
         count = ARRAYLEN(music_choices);
     }
-    char *title = setting->setting == &global_settings.photo_music
-                        ? str(LANG_PHOTO_MUSIC_PICKER) : str(setting->lang_id);
+    char *title = str(setting->lang_id);
+    if (setting->setting == &global_settings.photo_music)
+        title = str(LANG_PHOTO_MUSIC_PICKER);
+    else if (setting->setting == &global_settings.photo_duration)
+        title = str(LANG_PHOTO_DURATION_PICKER);
     struct simplelist_info info;
     struct ui_scene scene = {0};
     ui_scene_open_page(&scene, "media-choices-push");
@@ -981,7 +1153,10 @@ static bool media_picker(const struct settings_list *setting)
     for (int i = 0; i < count; i++)
         if (choices[i].value == option_value_as_int(setting))
             info.selection = i;
+    /* A picker's rows carry no chevron. */
+    push_current_activity(ACTIVITY_OPTIONSELECT);
     bool usb = simplelist_show_list(&info);
+    pop_current_activity();
     if (!usb && info.selection >= 0)
         *(int *)setting->setting = choices[info.selection].value;
     ui_scene_close_modal(&scene, !usb, "media-choices-pop");

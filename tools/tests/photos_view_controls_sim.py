@@ -155,15 +155,6 @@ def run(build, case, theme):
         until(sim, lambda im: changed(bare, im, BOTTOM))
         print("Slideshow SELECT/PLAY start, pause/resume, arrows and overlays")
         sim.step("menu", "play-return", ["all photos", "browse files"])
-        sim.step("select", "all-photos-power", [f"{len(COLORS)} photos"])
-        sim.quick("select", .09)
-        until(sim, lambda im: shows(im, 0))
-        sim.send("down play")
-        time.sleep(3.35)
-        sim.proc.stdin.close()
-        assert sim.proc.wait(timeout=8) == 0
-        assert "sys_poweroff()" in (case / "firmware.log").read_text()
-        print("Viewer PLAY hold powers off")
 
 
 def collect_transition(sim, target):

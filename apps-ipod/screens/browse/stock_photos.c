@@ -1006,6 +1006,8 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
             result = PHOTO_VIEW_USB;
             break;
         }
+        if (action == SYS_POWEROFF)
+            play_down = false;
         default_event_handler(action);
         now = current_tick;
         bool redraw = action == ACTION_REDRAW;

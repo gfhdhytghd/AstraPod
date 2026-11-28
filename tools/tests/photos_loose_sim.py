@@ -401,8 +401,12 @@ def run(build, evidence, theme, fixture):
         sim.tap("play")
         time.sleep(0.5)
         paused = sim.frame()[0]
+        body = (0, 24, 320, 196)
+        paused_photo = sim.image().crop(body).tobytes()
         time.sleep(4)
         report["paused_frames"] = sim.frame()[0] - paused
+        report["paused_photo_stable"] = (
+            paused_photo == sim.image().crop(body).tobytes())
         sim.save("slideshow-paused")
         sim.tap("menu")
         sim.text("slideshow-menu", ["all photos", "settings"])
@@ -469,8 +473,8 @@ def main():
     if report["placeholders_second_visit"] or \
             report["placeholders_after_restart"]:
         failures.append("thumbnails not drawn from the cache")
-    if report["paused_frames"] > 2:
-        failures.append("slideshow kept going while paused")
+    if not report["paused_photo_stable"]:
+        failures.append("slideshow changed the photo while paused")
     if not report["slideshow_advanced"]:
         failures.append("slideshow did not advance")
     if failures:

@@ -129,29 +129,31 @@ static inline void over(uint32_t *d, uint32_t s, enum rule rule)
     *d = out;
 }
 
+static inline uint32_t art_pixel(const struct stock_art *art, int i)
+{
+    unsigned n = art->colors <= 256 ? ((const uint8_t *)art->pixels)[i] :
+                                      ((const uint16_t *)art->pixels)[i];
+    return art->palette[n];
+}
+
 /* Columns sx to sx + width of image `id` with their left edge at screen
  * (x, y), drawn only between columns clip0 and clip1. */
 static void put_part(enum stock_art_id id, int sx, int width, int x, int y,
                      int clip0, int clip1, enum rule rule)
 {
     const struct stock_art *art = &stock_art[id];
-    clip0 = MAX(clip0, 0);
-    clip1 = MIN(clip1, LCD_WIDTH);
+    int left = MAX(x, MAX(clip0, 0));
+    int right = MIN(x + width, MIN(clip1, LCD_WIDTH));
+    if (left >= right)
+        return;
     for (int row = 0; row < art->height; row++)
     {
         uint32_t *out = layer_row(y + row);
         if (!out)
             continue;
-        for (int col = 0; col < width; col++)
-        {
-            int px = x + col, i = row * art->width + sx + col;
-            if (px < clip0 || px >= clip1)
-                continue;
-            unsigned n = art->colors <= 256 ?
-                ((const uint8_t *)art->pixels)[i] :
-                ((const uint16_t *)art->pixels)[i];
-            over(&out[px], art->palette[n], rule);
-        }
+        int i = row * art->width + sx + left - x;
+        for (int px = left; px < right; px++, i++)
+            over(&out[px], art_pixel(art, i), rule);
     }
 }
 
@@ -160,17 +162,39 @@ static void put(enum stock_art_id id, int x, int y, enum rule rule)
     put_part(id, 0, stock_art[id].width, x, y, 0, LCD_WIDTH, rule);
 }
 
+/* Repeat whole tiles along each visible row. */
+static void put_repeated(enum stock_art_id id, int x, int y, int width,
+                         enum rule rule)
+{
+    const struct stock_art *art = &stock_art[id];
+    int left = MAX(x, 0), right = MIN(x + width, LCD_WIDTH);
+    if (left >= right)
+        return;
+    int first = (left - x) % art->width;
+    for (int row = 0; row < art->height; row++)
+    {
+        uint32_t *out = layer_row(y + row);
+        if (!out)
+            continue;
+        int start = row * art->width, end = start + art->width;
+        int i = start + first;
+        for (int px = left; px < right; px++)
+        {
+            over(&out[px], art_pixel(art, i++), rule);
+            if (i == end)
+                i = start;
+        }
+    }
+}
+
 /* A strip `width` columns wide from x: `left`, then `centre` repeated, then
  * `right`, the order of their ids. */
 static void strip(enum stock_art_id centre, int x, int y, int width)
 {
     enum stock_art_id left = centre + 1, right = centre + 2;
     int lw = stock_art[left].width, rw = stock_art[right].width;
-    int cw = stock_art[centre].width;
     put(left, x, y, ICON);
-    for (int i = x + lw; i < x + width - rw; i += cw)
-        put_part(centre, 0, MIN(cw, x + width - rw - i), i, y, 0, LCD_WIDTH,
-                 ICON);
+    put_repeated(centre, x + lw, y, width - lw - rw, ICON);
     put(right, x + width - rw, y, ICON);
 }
 
@@ -178,12 +202,11 @@ static void strip(enum stock_art_id centre, int x, int y, int width)
  * image's right-hand columns, so the bar always ends on its end cap. */
 static void tile(enum stock_art_id id, int x, int y, int width)
 {
-    int w = stock_art[id].width, i = 0;
-    for (; i + w <= width; i += w)
-        put_part(id, 0, w, x + i, y, 0, LCD_WIDTH, BAR);
-    if (i < width)
-        put_part(id, w - (width - i), width - i, x + i, y, 0, LCD_WIDTH,
-                 BAR);
+    int w = stock_art[id].width;
+    int tail = width % w;
+    put_repeated(id, x, y, width - tail, BAR);
+    if (tail)
+        put_part(id, w - tail, tail, x + width - tail, y, 0, LCD_WIDTH, BAR);
 }
 
 static int text_width(int font, const char *text)
@@ -377,10 +400,24 @@ static void put_page(const struct page *p, int dx)
 static void compose_bottom(const struct page *now, const struct page *old,
                            int dx)
 {
-    int step = stock_art[STOCK_ART_VIDEO_OVERLAY].width;
-    memset(layer_row(BOTTOM_Y), 0, BOTTOM_ROWS * LCD_WIDTH * sizeof(*layer));
-    for (int x = 0; x < LCD_WIDTH; x += step)
-        put(STOCK_ART_VIDEO_OVERLAY, x, BOTTOM_Y, ICON);
+    const struct stock_art *art = &stock_art[STOCK_ART_VIDEO_OVERLAY];
+    for (int row = 0; row < BOTTOM_ROWS; row++)
+    {
+        uint32_t *out = layer_row(BOTTOM_Y + row);
+        int width = row < art->height ? MIN(art->width, LCD_WIDTH) : 0;
+        if (!width)
+        {
+            memset(out, 0, LCD_WIDTH * sizeof(*out));
+            continue;
+        }
+        for (int x = 0; x < width; x++)
+        {
+            uint32_t pixel = art_pixel(art, row * art->width + x);
+            out[x] = pixel >> 24 ? pixel : 0;
+        }
+        for (int x = width; x < LCD_WIDTH; x *= 2)
+            memcpy(out + x, out, MIN(x, LCD_WIDTH - x) * sizeof(*out));
+    }
     if (old)
         put_page(old, dx - LCD_WIDTH);
     put_page(now, dx);
@@ -663,7 +700,7 @@ static bool present(unsigned char *const planes[3],
     if ((!top_on && !bottom_on) || !prepare())
     {
 #if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE)
-        lcd_blit_video_timed(planes, timing);
+        lcd_blit_video_bands_timed(planes, 0, LCD_HEIGHT, timing);
 #else
         lcd_blit_yuv(planes, 0, 0, LCD_WIDTH, 0, 0, LCD_WIDTH, LCD_HEIGHT);
 #endif

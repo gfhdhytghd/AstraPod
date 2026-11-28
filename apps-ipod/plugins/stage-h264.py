@@ -652,13 +652,12 @@ static enum video_input_action video_input(bool *paused, long *start_tick,""")
         rb->hw_h264->present(planes, &timing);
     else
         rb->lcd_blit_yuv(planes, 0, 0, LCD_WIDTH, 0, 0, LCD_WIDTH, LCD_HEIGHT);
-    if (timing.submitted)
-    {
+    if (timing.submitted || timing.submit_us)
         video_measure(overlay ? STAGE_LCD_PREP_OSD : STAGE_LCD_PREP,
                       timing.submit_us - submitted);
+    if (timing.submitted)
         video_measure(overlay ? STAGE_LCD_OSD : STAGE_LCD,
-                      timing.complete_us - timing.submit_us);
-    }""")
+                      timing.complete_us - timing.submit_us);""")
     replace("""        rb->snprintf(right_text, sizeof(right_text), "%d%%", percent);
     }
     else""",

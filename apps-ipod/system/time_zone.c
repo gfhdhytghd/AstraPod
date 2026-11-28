@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "config.h"
+#include "string-extra.h"
 #include "system.h"
 #include "timefuncs.h"
 #include "settings/settings.h"

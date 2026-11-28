@@ -16,7 +16,6 @@ enum mode {
 };
 enum control_style { NO_CONTROLS, THEMED_CONTROLS, COMPACT_CONTROLS };
 static enum mode mode;
-static enum control_style controls;
 static volatile long current_tick;
 static unsigned int thread_id = 1;
 static unsigned int opens, closes, active, configured, decoded, drawn, seeks;
@@ -25,6 +24,7 @@ static bool sent_menu, sent_seek;
 static unsigned scrub_actions;
 static uint8_t picture[16 * 16 * 3 / 2];
 static unsigned control_action, resume_calls;
+static enum control_style controls;
 static int resume_choice;
 static long paused_at;
 static bool saw_timeout;

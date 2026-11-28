@@ -506,15 +506,15 @@ int video_h264_play(const char *filepath,""")
             """            long delay = compact ? HZ / 2 : HZ / 3;
             video_preview_seek(osd, position, duration, direction * step,
                                delay);""")
-    replace("""    case ACTION_WPS_PLAY:
-        video_set_paused(!*paused, paused, start_tick, pause_started,
-                         have_audio, cpu_boosted);
-        video_osd_show(osd, VIDEO_OVERLAY_PROGRESS);""",
-            """    case ACTION_WPS_PLAY:
-        video_set_paused(!*paused, paused, start_tick, pause_started,
-                         have_audio, cpu_boosted);
-        video_osd_show(osd, compact && osd->mode == VIDEO_OVERLAY_VOLUME ?
-                            VIDEO_OVERLAY_VOLUME : VIDEO_OVERLAY_PROGRESS);""")
+    replace("""        video_osd_show(osd, VIDEO_OVERLAY_PROGRESS);
+        *redraw = true;
+        break;
+    default:""",
+            """        video_osd_show(osd, compact && osd->mode == VIDEO_OVERLAY_VOLUME ?
+                            VIDEO_OVERLAY_VOLUME : VIDEO_OVERLAY_PROGRESS);
+        *redraw = true;
+        break;
+    default:""")
     replace("static void video_draw_themed_controls(",
             """static const char *video_picture_label(const struct video_osd *osd)
 {

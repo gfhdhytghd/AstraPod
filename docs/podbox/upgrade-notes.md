@@ -179,3 +179,14 @@
 - **Photos slideshows** now start with the original iPod's settings: 3
   seconds a picture, Random transitions, and PAL for TV Signal. If you
   saved your own values, your player keeps them.
+
+- **Videos looks like the original iPod's.** Video files outside iTunes
+  join Movies, TV Shows or Music Videos by the media kind in their MP4
+  tags; a file with none is a movie. The separate list of loose video
+  files is gone. A film with an embedded cover shows it once the player
+  has made a thumbnail in the background; until then, and for films with
+  no cover, the row shows the original iPod's picture. In the Videos
+  lists, Play/Pause plays the selected video, and Previous and Next do
+  nothing. In the video player, the Picture page is the original iPod's
+  Shuffle-style selector: turn the wheel a sixth of a turn to move
+  between Fit, Fill and Stretch.

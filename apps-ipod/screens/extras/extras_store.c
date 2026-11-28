@@ -469,11 +469,7 @@ bool extras_read_prop(struct extras_reader *r, char *line, size_t line_size,
                 line[n++] = (char)c;
         }
         c = rd_peek(r);
-        if (c == ' ' || c == '\t')
-        {
-            rd_getc(r);
-            continue;
-        }
+        bool continuation = c == ' ' || c == '\t';
         if (qp_continue && c >= 0 && n > 0 && line[n - 1] == '=')
         {
             const char *colon = memchr(line, ':', n);
@@ -481,8 +477,15 @@ bool extras_read_prop(struct extras_reader *r, char *line, size_t line_size,
                                      "QUOTED-PRINTABLE"))
             {
                 n--;
+                if (continuation)
+                    rd_getc(r);
                 continue;
             }
+        }
+        if (continuation)
+        {
+            rd_getc(r);
+            continue;
         }
         break;
     }
@@ -496,6 +499,7 @@ bool extras_read_prop(struct extras_reader *r, char *line, size_t line_size,
             (unsigned char)line[2] == 0xbf)
         {
             memmove(line, line + 3, n - 2);
+            *raw_start = 3;
         }
     }
     if (raw_end)

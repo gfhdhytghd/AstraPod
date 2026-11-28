@@ -214,6 +214,17 @@ static bool parse_ical_dt(const char *params, const char *val,
     return true;
 }
 
+/* Called only after parse_ical_dt has validated the value. */
+static int seconds_in_day(const char *value)
+{
+    while (*value == ' ' || *value == '\t')
+        value++;
+    if (!value[8])
+        return -1;
+    return parse_digits(value + 9, 2) * 3600 + parse_digits(value + 11, 2) * 60
+           + parse_digits(value + 13, 2);
+}
+
 /* Parse ISO-8601 duration in minutes (signed, for TRIGGER and DURATION). */
 static bool parse_duration_minutes(const char *s, int *out_minutes)
 {
@@ -225,7 +236,7 @@ static bool parse_duration_minutes(const char *s, int *out_minutes)
     if (*s != 'P' && *s != 'p')
         return false;
     s++;
-    int total = 0;
+    int64_t total = 0;
     bool in_time = false;
     bool any = false;
     while (*s)
@@ -238,9 +249,13 @@ static bool parse_duration_minutes(const char *s, int *out_minutes)
         }
         if (*s < '0' || *s > '9')
             break;
-        int n = 0;
+        int64_t n = 0;
         while (*s >= '0' && *s <= '9')
+        {
             n = n * 10 + (*s++ - '0');
+            if (n > INT32_MAX)
+                return false;
+        }
         any = true;
         if (*s == 'W' || *s == 'w') { total += n * 7 * 24 * 60; s++; }
         else if (*s == 'D' || *s == 'd') { total += n * 24 * 60; s++; }
@@ -249,7 +264,7 @@ static bool parse_duration_minutes(const char *s, int *out_minutes)
         else if (*s == 'S' || *s == 's') { total += n / 60; s++; }
         else break;
     }
-    if (!any)
+    if (!any || *s || total > INT32_MAX - 1440 * 2)
         return false;
     *out_minutes = sign * total;
     return true;
@@ -320,7 +335,9 @@ static void parse_rule_part(struct ical_event_idx *e, const char *key, char *v)
     else if (!strcasecmp(key, "UNTIL"))
     {
         e->has_until = parse_ical_dt(NULL, v, &e->until_date,
-                                    NULL, NULL, NULL, NULL, NULL, 0);
+                                    NULL, NULL, NULL, &e->until_mode, NULL, 0);
+        if (e->has_until)
+            e->until_seconds = seconds_in_day(v);
     }
     else if (!strcasecmp(key, "WKST"))
     {
@@ -367,6 +384,19 @@ static void parse_rule_part(struct ical_event_idx *e, const char *key, char *v)
                 if (n > 0) e->monthdays |= 1u << (n - 1);
                 else e->reverse_monthdays |= 1u << (-n - 1);
             }
+            else if (!*end && !strcasecmp(key, "BYYEARDAY") &&
+                     n && n >= -366 && n <= 366)
+            {
+                unsigned i = n > 0 ? n - 1 : -n - 1;
+                uint32_t *days = n > 0 ? e->year_days : e->reverse_year_days;
+                days[i / 32] |= 1u << (i % 32);
+            }
+            else if (!*end && !strcasecmp(key, "BYWEEKNO") &&
+                     n && n >= -53 && n <= 53)
+            {
+                if (n > 0) e->week_numbers |= UINT64_C(1) << (n - 1);
+                else e->reverse_week_numbers |= UINT64_C(1) << (-n - 1);
+            }
             else if (!*end && !strcasecmp(key, "BYSETPOS") && n && n >= -366 &&
                      n <= 366 && e->position_count < ARRAYLEN(e->positions))
                 e->positions[e->position_count++] = n;
@@ -407,6 +437,7 @@ static void scan_recurrence_dates(struct ical_index *idx, const char *params,
         if (parse_ical_dt(params, item, &date.date, &hour, &min,
                           NULL, NULL, NULL, 0))
         {
+            date.seconds = seconds_in_day(item);
             if (period && !excluded)
             {
                 int duration, end_hour, end_min;
@@ -462,7 +493,7 @@ static void scan_ics_file(struct ical_index *idx, int file_idx)
 
     enum { COMP_NONE, COMP_EVENT, COMP_TODO } comp = COMP_NONE;
     int valarm_depth = 0;
-    uint32_t comp_start = 0;
+    uint32_t comp_start = 0, calendar_start = 0;
     bool have_start = false, have_end = false;
     struct ical_event_idx ev;
     struct ical_todo_idx td;
@@ -471,7 +502,7 @@ static void scan_ics_file(struct ical_index *idx, int file_idx)
     bool end_is_date = false;
     int dur_mins = 0;
     bool have_dur = false;
-    char summary[160];
+    char summary[160], uid[128];
 
     while (extras_read_prop(&r, line, sizeof(line), &raw_start, &raw_end,
                             false))
@@ -482,18 +513,21 @@ static void scan_ics_file(struct ical_index *idx, int file_idx)
         if (!strcasecmp(name, "BEGIN"))
         {
             char *v = extras_trim(val);
-            if (comp == COMP_NONE && !strcasecmp(v, "VEVENT"))
+            if (comp == COMP_NONE && !strcasecmp(v, "VCALENDAR"))
+                calendar_start = raw_start;
+            else if (comp == COMP_NONE && !strcasecmp(v, "VEVENT"))
             {
                 comp = COMP_EVENT;
                 comp_start = raw_start;
                 valarm_depth = 0;
                 memset(&ev, 0, sizeof(ev));
                 ev.file_idx = (uint8_t)file_idx;
+                ev.calendar_start = calendar_start;
                 ev.interval = 1;
                 ev.xdate_start = idx->xdate_count;
                 ev.span_days = 1;
                 have_start = have_end = have_dur = false;
-                summary[0] = '\0';
+                summary[0] = uid[0] = '\0';
             }
             else if (comp == COMP_NONE && !strcasecmp(v, "VTODO"))
             {
@@ -519,7 +553,8 @@ static void scan_ics_file(struct ical_index *idx, int file_idx)
             }
             else if (comp == COMP_EVENT && !strcasecmp(v, "VEVENT"))
             {
-                if (have_start && idx->event_count < ICAL_MAX_EVENTS)
+                if ((have_start || (ev.detached && ev.cancelled)) &&
+                    idx->event_count < ICAL_MAX_EVENTS)
                 {
                     ev.comp_start = comp_start;
                     ev.comp_end = raw_end;
@@ -548,17 +583,17 @@ static void scan_ics_file(struct ical_index *idx, int file_idx)
                                       dur_mins;
                             ev.end_hour = (uint8_t)((tot / 60) % 24);
                             ev.end_min = (uint8_t)(tot % 60);
-                            ev.span_days = MAX(1, tot / (24 * 60) + 1);
+                            ev.span_days = MAX(1, (tot + 1439) / 1440);
                         }
                     }
                     else if (!ev.all_day)
                     {
-                        int tot = ev.start_hour * 60 + ev.start_min + 60;
-                        ev.end_hour = (uint8_t)((tot / 60) % 24);
-                        ev.end_min = (uint8_t)(tot % 60);
+                        ev.end_hour = ev.start_hour;
+                        ev.end_min = ev.start_min;
                     }
                     ev.xdate_end = idx->xdate_count;
                     ev.summary_off = pool_add(idx, summary);
+                    ev.uid_off = pool_add(idx, uid);
                     idx->events[idx->event_count++] = ev;
                 }
                 else
@@ -593,16 +628,28 @@ static void scan_ics_file(struct ical_index *idx, int file_idx)
                 extras_unescape_text(val);
                 strlcpy(summary, extras_trim(val), sizeof(summary));
             }
+            else if (!strcasecmp(name, "UID"))
+                strlcpy(uid, extras_trim(val), sizeof(uid));
+            else if (!strcasecmp(name, "STATUS"))
+                ev.cancelled = !strcasecmp(extras_trim(val), "CANCELLED");
+            else if (!strcasecmp(name, "RECURRENCE-ID"))
+            {
+                ev.detached = parse_ical_dt(params, val, &ev.recurrence_id,
+                                            NULL, NULL, NULL, NULL, NULL, 0);
+                if (ev.detached)
+                    ev.recurrence_seconds = seconds_in_day(val);
+            }
             else if (!strcasecmp(name, "DTSTART"))
             {
                 int H = 0, M = 0;
                 bool is_date = false;
                 if (parse_ical_dt(params, val, &ev.start_date, &H, &M,
-                                  &is_date, NULL, NULL, 0))
+                                  &is_date, &ev.start_mode, NULL, 0))
                 {
                     ev.all_day = is_date ? 1 : 0;
                     ev.start_hour = (uint8_t)H;
                     ev.start_min = (uint8_t)M;
+                    ev.start_seconds = seconds_in_day(val);
                     have_start = true;
                 }
             }
@@ -701,6 +748,32 @@ void ical_scan(struct ical_index *idx, const char *dir_path)
 
 /* ---- Recurrence & day query ---- */
 
+static int days_since_week_start(const struct ical_event_idx *e,
+                                 const struct extras_date *d)
+{
+    return (extras_week_day(d) + 7 - e->week_start) % 7;
+}
+
+static struct extras_date first_week_start(const struct ical_event_idx *e,
+                                             int year)
+{
+    struct extras_date date = { year, 1, 4 };
+    extras_step_days(&date, -days_since_week_start(e, &date));
+    return date;
+}
+
+static int week_year(const struct ical_event_idx *e,
+                     const struct extras_date *day)
+{
+    struct extras_date first = first_week_start(e, day->year);
+    if (extras_date_cmp(day, &first) < 0)
+        return day->year - 1;
+    struct extras_date next = first_week_start(e, day->year + 1);
+    if (extras_date_cmp(day, &next) >= 0)
+        return day->year + 1;
+    return day->year;
+}
+
 static bool rule_day_matches(const struct ical_event_idx *e,
                              const struct extras_date *d)
 {
@@ -711,6 +784,32 @@ static bool rule_day_matches(const struct ical_event_idx *e,
         !(e->monthdays & (1u << (d->day - 1))) &&
         !(e->reverse_monthdays & (1u << (month_length - d->day))))
         return false;
+
+    bool week_filter = e->week_numbers || e->reverse_week_numbers;
+    if (week_filter)
+    {
+        int year = week_year(e, d);
+        struct extras_date first = first_week_start(e, year);
+        struct extras_date next = first_week_start(e, year + 1);
+        int week = extras_date_days_between(&first, d) / 7;
+        int reverse = (extras_date_days_between(d, &next) - 1) / 7;
+        if (!(e->week_numbers & (UINT64_C(1) << week)) &&
+            !(e->reverse_week_numbers & (UINT64_C(1) << reverse)))
+            return false;
+    }
+
+    uint32_t year_filter = 0;
+    for (unsigned i = 0; i < ARRAYLEN(e->year_days); i++)
+        year_filter |= e->year_days[i] | e->reverse_year_days[i];
+    if (year_filter)
+    {
+        struct extras_date jan = { d->year, 1, 1 };
+        unsigned day = extras_date_days_between(&jan, d);
+        unsigned reverse = 364 + extras_leap_year(d->year) - day;
+        if (!(e->year_days[day / 32] & (1u << (day % 32))) &&
+            !(e->reverse_year_days[reverse / 32] & (1u << (reverse % 32))))
+            return false;
+    }
 
     if (e->byday_mask || e->ordinal_count)
     {
@@ -735,6 +834,8 @@ static bool rule_day_matches(const struct ical_event_idx *e,
     }
     if (e->repeat == ICAL_REPEAT_WEEKLY)
         return extras_week_day(d) == extras_week_day(&e->start_date);
+    if (year_filter || week_filter)
+        return true;
     if (e->repeat == ICAL_REPEAT_YEARLY && !e->bymonth_mask &&
         !e->monthdays && !e->reverse_monthdays && d->month != e->start_date.month)
         return false;
@@ -742,12 +843,6 @@ static bool rule_day_matches(const struct ical_event_idx *e,
         !e->reverse_monthdays)
         return d->day == e->start_date.day;
     return true;
-}
-
-static int days_since_week_start(const struct ical_event_idx *e,
-                                 const struct extras_date *d)
-{
-    return (extras_week_day(d) + 7 - e->week_start) % 7;
 }
 
 static bool rule_position_matches(const struct ical_event_idx *e,
@@ -770,8 +865,18 @@ static bool rule_position_matches(const struct ical_event_idx *e,
     }
     else if (e->repeat == ICAL_REPEAT_YEARLY)
     {
-        day.month = day.day = 1;
-        length = 365 + extras_leap_year(day.year);
+        if (e->week_numbers || e->reverse_week_numbers)
+        {
+            int year = week_year(e, d);
+            day = first_week_start(e, year);
+            struct extras_date next = first_week_start(e, year + 1);
+            length = extras_date_days_between(&day, &next);
+        }
+        else
+        {
+            day.month = day.day = 1;
+            length = 365 + extras_leap_year(day.year);
+        }
     }
     int before = 0, after = 0;
     for (int i = 0; i < length; i++, extras_step_days(&day, 1))
@@ -793,9 +898,15 @@ static bool rule_starts_on(const struct ical_event_idx *e,
 {
     if (days == 0)
         return true; /* DTSTART is the first occurrence. */
-    if (days < 0 || !e->repeat ||
-        (e->has_until && extras_date_cmp(d, &e->until_date) > 0))
+    if (days < 0 || !e->repeat || e->detached)
         return false;
+    if (e->has_until)
+    {
+        int order = extras_date_cmp(d, &e->until_date);
+        if (order > 0 || (order == 0 && e->start_mode == e->until_mode &&
+                          e->start_seconds > e->until_seconds))
+            return false;
+    }
     int period = days;
     switch (e->repeat)
     {
@@ -807,21 +918,47 @@ static bool rule_starts_on(const struct ical_event_idx *e,
                      d->month - e->start_date.month;
             break;
         case ICAL_REPEAT_YEARLY:
-            period = d->year - e->start_date.year;
+            if (e->week_numbers || e->reverse_week_numbers)
+                period = week_year(e, d) - week_year(e, &e->start_date);
+            else
+                period = d->year - e->start_date.year;
             break;
     }
-    return period % MAX(1u, e->interval) == 0 && rule_day_matches(e, d) &&
+    return period >= 0 && (uint32_t)period % MAX(1u, e->interval) == 0 &&
+           rule_day_matches(e, d) &&
            rule_position_matches(e, d);
+}
+
+static bool matching_time(int a, int b)
+{
+    return a < 0 || b < 0 || a == b;
 }
 
 static bool is_excluded(const struct ical_index *idx,
                         const struct ical_event_idx *e,
-                        const struct extras_date *date)
+                        const struct extras_date *date, int seconds)
 {
     for (int i = e->xdate_start; i < e->xdate_end; i++)
         if (idx->xdates[i].excluded &&
-            extras_date_cmp(date, &idx->xdates[i].date) == 0)
+            extras_date_cmp(date, &idx->xdates[i].date) == 0 &&
+            matching_time(idx->xdates[i].seconds, seconds))
             return true;
+
+    if (e->detached || e->uid_off == POOL_NONE ||
+        (e->repeat == ICAL_REPEAT_NONE && e->xdate_start == e->xdate_end))
+        return false;
+
+    const char *uid = ical_pool_str(idx, e->uid_off);
+    for (int i = 0; i < idx->event_count; i++)
+    {
+        const struct ical_event_idx *other = &idx->events[i];
+        if (other->detached && other->file_idx == e->file_idx &&
+            other->calendar_start == e->calendar_start &&
+            extras_date_cmp(date, &other->recurrence_id) == 0 &&
+            matching_time(other->recurrence_seconds, seconds) &&
+            !strcmp(uid, ical_pool_str(idx, other->uid_off)))
+            return true;
+    }
     return false;
 }
 
@@ -829,6 +966,8 @@ bool ical_event_occurs_on(const struct ical_index *idx,
                           const struct ical_event_idx *e,
                           const struct extras_date *d)
 {
+    if (e->cancelled)
+        return false;
     int span = MAX(1, e->span_days);
     for (int i = e->xdate_start; i < e->xdate_end; i++)
     {
@@ -836,7 +975,7 @@ bool ical_event_occurs_on(const struct ical_index *idx,
         int offset = extras_date_days_between(&x->date, d);
         if (!x->excluded && offset >= 0 &&
             offset < (x->span_days ? x->span_days : span) &&
-            !is_excluded(idx, e, &x->date))
+            !is_excluded(idx, e, &x->date, x->seconds))
             return true;
     }
 
@@ -848,7 +987,8 @@ bool ical_event_occurs_on(const struct ical_index *idx,
     extras_step_days(&start, first - days);
     for (int day = first; day <= days; day++, extras_step_days(&start, 1))
     {
-        if (!rule_starts_on(e, &start, day) || is_excluded(idx, e, &start))
+        if (!rule_starts_on(e, &start, day) ||
+            is_excluded(idx, e, &start, e->start_seconds))
             continue;
         if (!e->rrule_count || day == 0)
             return true;
@@ -1206,7 +1346,7 @@ static bool write_event_dt(int fd, const char *prop,
     }
     if (mode == ICAL_TIME_TZID && tzid && *tzid)
     {
-        const char *quote = strpbrk(tzid, ":;,") ? "\"" : "";
+        const char *quote = tzid[strcspn(tzid, ":;,")] ? "\"" : "";
         snprintf(line, sizeof(line),
                  "%s;TZID=%s%s%s:%04d%02d%02dT%02d%02d00",
                  prop, quote, tzid, quote, d->year, d->month, d->day,

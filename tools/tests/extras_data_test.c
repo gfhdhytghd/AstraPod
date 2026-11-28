@@ -491,6 +491,66 @@ static void test_recurrence_sets(const char *dir)
     puts("PASS: test_recurrence_sets");
 }
 
+static void test_detached_recurrence(const char *dir)
+{
+    const char fixture[] =
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+        "BEGIN:VEVENT\r\nUID:daily@example.org\r\n"
+        "DTSTART:20240601T090000Z\r\n"
+        "SUMMARY:Daily\r\n"
+        "RRULE:FREQ=DAILY;UNTIL=20240605T080000Z\r\n"
+        "EXDATE:20240602T090000Z\r\n"
+        "RDATE:20240602T100000Z\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:daily@example.org\r\n"
+        "RECURRENCE-ID:20240603T090000Z\r\n"
+        "DTSTART:20240605T140000Z\r\nSUMMARY:Moved to Thursday\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:daily@example.org\r\n"
+        "RECURRENCE-ID:20240604T090000Z\r\n"
+        "STATUS:CANCELLED\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:week-year@example.org\r\n"
+        "DTSTART;VALUE=DATE:20241230\r\n"
+        "RRULE:FREQ=YEARLY;BYWEEKNO=1;BYDAY=MO;COUNT=2\r\n"
+        "SUMMARY:Week One\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:year-day@example.org\r\n"
+        "DTSTART;VALUE=DATE:20241230\r\n"
+        "RRULE:FREQ=YEARLY;BYYEARDAY=-2\r\n"
+        "SUMMARY:Year End\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    char path[MAX_PATH];
+    assert(snprintf(path, sizeof(path), "%s/Outlook.ics", dir) <
+           (int)sizeof(path));
+    write_file_str(path, fixture);
+    struct ical_index idx;
+    ical_scan(&idx, dir);
+    const struct ical_event_idx *daily = NULL, *moved = NULL;
+    const struct ical_event_idx *week = NULL, *year = NULL;
+    for (int i = 0; i < idx.event_count; i++)
+    {
+        const char *title = ical_pool_str(&idx, idx.events[i].summary_off);
+        if (!strcmp(title, "Daily")) daily = &idx.events[i];
+        if (!strcmp(title, "Moved to Thursday")) moved = &idx.events[i];
+        if (!strcmp(title, "Week One")) week = &idx.events[i];
+        if (!strcmp(title, "Year End")) year = &idx.events[i];
+    }
+    assert(daily && moved && week && year);
+    assert(ical_event_occurs_on(&idx, daily,
+                                &(struct extras_date){2024, 6, 2}));
+    for (int day = 3; day <= 5; day++)
+        assert(!ical_event_occurs_on(&idx, daily,
+                                     &(struct extras_date){2024, 6, day}));
+    assert(ical_event_occurs_on(&idx, moved,
+                                &(struct extras_date){2024, 6, 5}));
+    assert(ical_event_occurs_on(&idx, week,
+                                &(struct extras_date){2025, 12, 29}));
+    assert(!ical_event_occurs_on(&idx, week,
+                                 &(struct extras_date){2027, 1, 4}));
+    assert(ical_event_occurs_on(&idx, year,
+                                &(struct extras_date){2025, 12, 30}));
+    assert(!ical_event_occurs_on(&idx, year,
+                                 &(struct extras_date){2025, 12, 31}));
+    assert(remove(path) == 0);
+    puts("PASS: test_detached_recurrence");
+}
+
 static void test_vcard_row_preservation(const char *dir)
 {
     static const char fixture[] =
@@ -568,6 +628,7 @@ int main(void)
     test_ical_vtodo_roundtrip(cal_dir);
     test_vcard_roundtrip_and_multicard(con_dir);
     test_recurrence_sets(cal_dir);
+    test_detached_recurrence(cal_dir);
     test_vcard_row_preservation(con_dir);
     test_vcard_windows_charset(con_dir);
 

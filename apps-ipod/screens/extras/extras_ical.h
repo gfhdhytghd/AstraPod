@@ -17,7 +17,7 @@
 #define ICAL_MAX_EVENTS     256
 #define ICAL_MAX_TODOS      256
 #define ICAL_MAX_XDATES     512
-#define ICAL_POOL_BYTES     16384
+#define ICAL_POOL_BYTES     65535
 
 enum ical_repeat {
     ICAL_REPEAT_NONE = 0,
@@ -53,6 +53,7 @@ struct ical_event_idx {
     struct extras_date start_date;
     int span_days;                   /* >= 1 */
     uint8_t all_day;
+    int start_seconds;              /* -1 for DATE */
     uint8_t start_hour, start_min;
     uint8_t end_hour, end_min;
     uint8_t repeat;                  /* enum ical_repeat */
@@ -65,9 +66,18 @@ struct ical_event_idx {
     int16_t positions[16];           /* BYSETPOS */
     uint8_t position_count;
     uint8_t week_start;
+    uint32_t year_days[12], reverse_year_days[12];
+    uint64_t week_numbers, reverse_week_numbers;
+    enum ical_time_mode start_mode, until_mode;
     uint32_t rrule_count;            /* 0 = unlimited */
     uint8_t has_until;
     struct extras_date until_date;
+    int until_seconds;
+    struct extras_date recurrence_id;
+    int recurrence_seconds;
+    uint32_t calendar_start;
+    bool detached, cancelled;
+    uint16_t uid_off;
     uint16_t xdate_start, xdate_end;  /* Half-open range in index */
     uint8_t alarm;                   /* enum ical_alarm */
     uint16_t summary_off;            /* offset into pool */
@@ -87,6 +97,7 @@ struct ical_todo_idx {
 struct ical_xdate {
     struct extras_date date;
     bool excluded;
+    int seconds;                    /* -1 for DATE */
     int span_days;                   /* 0 = use the event duration */
 };
 

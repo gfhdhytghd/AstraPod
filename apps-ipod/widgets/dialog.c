@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "audio.h"
+#include "bidi.h"
 #include "lcd.h"
 #include "font.h"
 #include "kernel.h"
@@ -32,6 +33,7 @@
 #include "ui/sheet.h"
 #include "ui/scene.h"
 #include "ui/statusbar.h"
+#include <limits.h>
 #include <string.h>
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
@@ -59,18 +61,18 @@ static const struct gloss_fill classic_alert_body_trans = {
 static const struct gloss_fill classic_alert_body_opaque = {
     0xff284578, 0xff1a325c, 0xff0c1b3a, 0xff071228
 };
-/* Two-half split-gloss 2009 capsule fills: darker navy (Cancel / left) vs
- * brighter steel-cerulean (Default / right). */
-static const struct gloss_fill classic_cap_sec_top = {
+/* Navy split gloss for direct actions. The lighter fill marks actual focus
+ * in dialogs that navigate between controls. */
+static const struct gloss_fill classic_cap_navy_top = {
     0x66ffffff, 0xdc364e76, 0xe01e3456, 0xe21c3050
 };
-static const struct gloss_fill classic_cap_sec_bot = {
+static const struct gloss_fill classic_cap_navy_bot = {
     0xe611223e, 0xe611223e, 0xe81a3054, 0xea1f365c
 };
-static const struct gloss_fill classic_cap_pri_top = {
+static const struct gloss_fill classic_cap_focus_top = {
     0x8affffff, 0xe2648cc6, 0xe438609c, 0xe6325892
 };
-static const struct gloss_fill classic_cap_pri_bot = {
+static const struct gloss_fill classic_cap_focus_bot = {
     0xea204684, 0xea204684, 0xec305ea2, 0xee3868ae
 };
 static const struct gloss_fill classic_well_light = {
@@ -301,7 +303,7 @@ void dialog_draw_popup_panel(struct screen *screen, int x, int y,
 }
 
 static void draw_alert_capsule(struct screen *screen, int x, int y,
-                               int w, int h, bool primary)
+                               int w, int h, bool focused)
 {
     if (w <= 6 || h <= 6)
         return;
@@ -312,11 +314,11 @@ static void draw_alert_capsule(struct screen *screen, int x, int y,
     int mid = h / 2;
 
     /* Subtle bottom outer catchlight below the bevel. */
-    gloss_outline(&s, gx, gy + 1, w, h, r, primary ? 0x38d2e4ff : 0x2cc8dcff);
+    gloss_outline(&s, gx, gy + 1, w, h, r, focused ? 0x38d2e4ff : 0x2cc8dcff);
     gloss_rect(&s, gx, gy, w, mid, r, 0,
-               primary ? &classic_cap_pri_top : &classic_cap_sec_top);
+               focused ? &classic_cap_focus_top : &classic_cap_navy_top);
     gloss_rect(&s, gx, gy + mid, w, h - mid, 0, r,
-               primary ? &classic_cap_pri_bot : &classic_cap_sec_bot);
+               focused ? &classic_cap_focus_bot : &classic_cap_navy_bot);
     gloss_outline(&s, gx, gy, w, h, r, 0xd2060f22);
 }
 
@@ -382,193 +384,233 @@ static void draw_hint_tri_scroll(struct screen *screen, int x, int cy, unsigned 
     screen->set_drawmode(prev_mode);
 }
 
+static bool glyph_row_has_ink(const struct font *font,
+                              const struct font_glyph *glyph, int row)
+{
+    for (int col = 0; col < glyph->width; col++)
+    {
+        unsigned pixel = row * glyph->width + col;
+        if (glyph->coverage8)
+        {
+            if (glyph->bits[pixel])
+                return true;
+        }
+        else if (glyph->rgb || font->depth)
+        {
+            const unsigned char *mask = glyph->rgb ? glyph->rgb : glyph->bits;
+            unsigned channels = glyph->rgb ? 3 : 1;
+            for (unsigned sample = pixel * channels; sample < (pixel + 1) * channels; sample++)
+            {
+                if (((mask[sample / 2] >> (4 * (sample % 2))) & 15) != 15)
+                    return true;
+            }
+        }
+        else if (glyph->bits[(row / 8) * glyph->width + col] & (1u << (row % 8)))
+            return true;
+    }
+    return false;
+}
+
+/* Centre the visible ink on the gloss join. The glyph run places PBF ink
+ * relative to the ascent, and scanning the mask also excludes RB12 leading. */
+static int capsule_text_y(int font_id, const char *text, int h)
+{
+    font_lock(font_id, true);
+    struct font *font = font_get(font_id);
+    const ucschar_t *ch = bidi_l2v((const unsigned char *)text, 1);
+    struct font_run run = {0};
+    int top = INT_MAX, bottom = INT_MIN;
+
+    for (; ch && *ch; ch++)
+    {
+        struct font_glyph glyph;
+        font_run_next(font, &run, *ch, &glyph);
+        if (!glyph.bits || !glyph.width)
+            continue;
+        for (int row = 0; row < glyph.height; row++)
+        {
+            int gy = glyph.y + row;
+            if ((gy < top || gy >= bottom) && glyph_row_has_ink(font, &glyph, row))
+            {
+                top = MIN(top, gy);
+                bottom = MAX(bottom, gy + 1);
+            }
+        }
+    }
+    int y = top < bottom ? (h - (bottom - top)) / 2 - top
+                         : (h - (int)font->height) / 2;
+    font_lock(font_id, false);
+    return y;
+}
+
 static void draw_capsule_label(struct screen *screen, int x, int y, int w, int h,
                                const char *label, int font)
 {
-    int old_font = (*screen->current_viewport)->font;
-    if (font >= 0)
-        screen->setfont(font);
-    int lw = 0, lh = 0;
-    screen->getstringsize((const unsigned char *)label, &lw, &lh);
+    if (w <= 0)
+        return;
     struct viewport *cur = *screen->current_viewport;
     struct viewport tvp = *cur;
-    tvp.x = cur->x + x + 6;
-    tvp.y = cur->y + y + (h - lh) / 2 - 1;
-    tvp.width = MAX(1, w - 12);
-    tvp.height = lh + 1;
+    tvp.x = cur->x + x;
+    tvp.y = cur->y + y;
+    tvp.width = w;
+    tvp.height = h;
+    tvp.font = font;
     struct viewport *prev = screen->set_viewport(&tvp);
-    int lx = lw < tvp.width ? (tvp.width - lw) / 2 : 0;
-    dialog_draw_shadow_text(screen, lx, 1, label,
+    int lw;
+    screen->getstringsize((const unsigned char *)label, &lw, NULL);
+    dialog_draw_shadow_text(screen, MAX(0, (w - lw) / 2),
+                            capsule_text_y(font, label, h), label,
                             LCD_RGBPACK(255, 255, 255),
                             LCD_RGBPACK(5, 12, 26), -1);
     screen->set_viewport(prev);
-    if (font >= 0)
-        screen->setfont(old_font);
 }
 
-static void draw_key_legend(struct screen *screen, int x, int y, int w,
-                            const char *hint, int arrow_dir, int hint_font)
+static const unsigned capsule_key_fg = LCD_RGBPACK(164, 186, 220);
+
+static void draw_capsule_key(struct screen *screen, int x, int y, int w, int h,
+                             const char *hint, int arrow_dir, int font)
 {
     int old_font = (*screen->current_viewport)->font;
     unsigned prev_fg = screen->get_foreground();
     int prev_mode = (*screen->current_viewport)->drawmode;
-    unsigned hint_fg = LCD_RGBPACK(164, 186, 220);
-
-    if (hint_font >= 0)
-        screen->setfont(hint_font);
-    int hw = 0, hh = 0;
-    if (hint && *hint)
-        screen->getstringsize((const unsigned char *)hint, &hw, &hh);
-    else
-        hh = font_get((*screen->current_viewport)->font)->height;
-
-    int arrow_w = arrow_dir != 0 ? (hw > 0 ? 8 : 4) : 0;
-    int total_w = hw + arrow_w;
-    int hx = x + MAX(0, (w - total_w) / 2);
-    int cy = y + hh / 2;
+    screen->setfont(font);
     screen->set_drawmode(DRMODE_FG);
-    screen->set_foreground(hint_fg);
+    screen->set_foreground(capsule_key_fg);
     if (arrow_dir < 0)
     {
-        draw_hint_tri_left(screen, hx, cy, hint_fg);
-        if (hint && *hint)
-            screen->putsxy(hx + 8, y, (const unsigned char *)hint);
+        draw_hint_tri_left(screen, x, y + h / 2, capsule_key_fg);
+        x += 8;
     }
-    else if (arrow_dir > 0)
-    {
-        if (hint && *hint)
-            screen->putsxy(hx, y, (const unsigned char *)hint);
-        draw_hint_tri_right(screen, hx + hw + (hw > 0 ? 4 : 0), cy, hint_fg);
-    }
-    else if (hint && *hint)
-    {
-        screen->putsxy(hx, y, (const unsigned char *)hint);
-    }
-
+    screen->putsxy(x, y + capsule_text_y(font, hint, h),
+                   (const unsigned char *)hint);
+    if (arrow_dir > 0)
+        draw_hint_tri_right(screen, x + w - 4, y + h / 2, capsule_key_fg);
     screen->set_foreground(prev_fg);
     screen->set_drawmode(prev_mode);
     screen->setfont(old_font);
 }
 
-void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y,
-                                   int w, int h,
+#define CAPSULE_TEXT_PAD 6
+#define CAPSULE_TEXT_GAP 5
+
+struct capsule_widths {
+    int label;
+    int hint;
+};
+
+static struct capsule_widths measure_capsule(const char *label, const char *hint,
+                                             int arrow_dir, int label_font,
+                                             int hint_font)
+{
+    struct capsule_widths size;
+    font_getstringsize((const unsigned char *)label, &size.label, NULL, label_font);
+    font_getstringsize((const unsigned char *)hint, &size.hint, NULL, hint_font);
+    if (arrow_dir)
+        size.hint += 8;
+    return size;
+}
+
+/* The action and its hardware legend share the capsule's centre line. */
+static void draw_footer_capsule(struct screen *screen, int x, int y, int w,
+                               const char *label, const char *hint,
+                               int arrow_dir, int label_font, int hint_font,
+                               struct capsule_widths size)
+{
+    const int pad = CAPSULE_TEXT_PAD;
+    const int gap = CAPSULE_TEXT_GAP;
+    const int h = DIALOG_POPUP_BUTTON_H;
+    int lw = MAX(0, MIN(size.label, w - 2 * pad - gap - size.hint));
+    int start = x + MAX(pad, (w - (lw + gap + size.hint)) / 2);
+
+    draw_alert_capsule(screen, x, y, w, h, false);
+    int label_x = arrow_dir < 0 ? start + size.hint + gap : start;
+    int hint_x = arrow_dir < 0 ? start : start + lw + gap;
+    draw_capsule_label(screen, label_x, y, lw, h, label, label_font);
+    draw_capsule_key(screen, hint_x, y, size.hint, h, hint, arrow_dir, hint_font);
+}
+
+void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y, int w,
                                    const char *left_label,
                                    const char *left_hint, bool left_arrow,
                                    const char *right_label,
                                    const char *right_hint, bool right_arrow,
                                    int label_font, int hint_font)
 {
-    (void)h;
     if (w <= 32)
         return;
     const int pad = 12;
     const int gap = 8;
-    const int bh = 28;
-    int bw = (w - 2 * pad - gap) / 2;
+    int available = w - 2 * pad - gap;
+    int lw = available / 2;
+    int rw = available - lw;
+    int left_dir = left_arrow ? -1 : 0;
+    int right_dir = right_arrow ? 1 : 0;
+    struct capsule_widths left = measure_capsule(left_label, left_hint, left_dir,
+                                                label_font, hint_font);
+    struct capsule_widths right = measure_capsule(right_label, right_hint, right_dir,
+                                                 label_font, hint_font);
+    int inset = 2 * CAPSULE_TEXT_PAD + CAPSULE_TEXT_GAP;
+    int extra_left = lw - (left.label + left.hint + inset);
+    int extra_right = rw - (right.label + right.hint + inset);
+    /* Let a longer label use spare space from the other capsule. */
+    if (extra_left < 0 && extra_right > 0)
+        lw += MIN(-extra_left, extra_right);
+    else if (extra_right < 0 && extra_left > 0)
+        lw -= MIN(-extra_right, extra_left);
+    rw = available - lw;
     int lx = x + pad;
-    int rx = lx + bw + gap;
+    int rx = lx + lw + gap;
 
-    draw_alert_capsule(screen, lx, y, bw, bh, false);
-    draw_alert_capsule(screen, rx, y, bw, bh, true);
-    draw_capsule_label(screen, lx, y, bw, bh, left_label, label_font);
-    draw_capsule_label(screen, rx, y, bw, bh, right_label, label_font);
-
-    int hy = y + bh + 4;
-    draw_key_legend(screen, lx, hy, bw, left_hint, left_arrow ? -1 : 0, hint_font);
-    draw_key_legend(screen, rx, hy, bw, right_hint, right_arrow ? 1 : 0, hint_font);
+    draw_footer_capsule(screen, lx, y, lw, left_label, left_hint,
+                        left_dir, label_font, hint_font, left);
+    draw_footer_capsule(screen, rx, y, rw, right_label, right_hint,
+                        right_dir, label_font, hint_font, right);
 }
 
 void dialog_draw_popup_single_footer(struct screen *screen, int x, int y,
-                                     int w, int h, const char *label,
-                                     const char *hint, bool scrollable,
-                                     int label_font, int hint_font)
+                                     int w, const char *label, const char *hint,
+                                     bool scrollable, int label_font, int hint_font)
 {
-    (void)h;
     if (w <= 32)
         return;
-    const int bh = 28;
     int bw = MIN(156, w - 24);
     int bx = x + (w - bw) / 2;
-
-    draw_alert_capsule(screen, bx, y, bw, bh, true);
-    draw_capsule_label(screen, bx, y, bw, bh, label, label_font);
-
-    int old_font = (*screen->current_viewport)->font;
-    unsigned prev_fg = screen->get_foreground();
-    int prev_mode = (*screen->current_viewport)->drawmode;
-    unsigned hint_fg = LCD_RGBPACK(164, 186, 220);
-    int hy = y + bh + 4;
-
-    if (hint_font >= 0)
-        screen->setfont(hint_font);
-    int hh = font_get((*screen->current_viewport)->font)->height;
-    screen->set_drawmode(DRMODE_FG);
-    screen->set_foreground(hint_fg);
+    struct capsule_widths size = measure_capsule(label, hint, 0, label_font, hint_font);
+    draw_footer_capsule(screen, bx, y, bw, label, hint, 0, label_font, hint_font, size);
 
     if (scrollable)
     {
-        draw_hint_tri_scroll(screen, x + 14, hy + hh / 2, hint_fg);
-        screen->putsxy(x + 23, hy, (const unsigned char *)"Scroll");
-        if (hint && *hint)
-        {
-            int hw = 0;
-            screen->getstringsize((const unsigned char *)hint, &hw, NULL);
-            screen->putsxy(x + w - 14 - hw, hy, (const unsigned char *)hint);
-        }
+        int hy = y + DIALOG_POPUP_BUTTON_H + 4;
+        int hh = font_get(hint_font)->height;
+        draw_hint_tri_scroll(screen, x + 14, hy + hh / 2, capsule_key_fg);
+        draw_capsule_key(screen, x + 23, hy, 0, hh, "Scroll", 0, hint_font);
     }
-    else if (hint && *hint)
-    {
-        draw_key_legend(screen, x + 12, hy, w - 24, hint, 0, hint_font);
-    }
-
-    screen->set_foreground(prev_fg);
-    screen->set_drawmode(prev_mode);
-    screen->setfont(old_font);
 }
 
 void dialog_draw_popup_action_row(struct screen *screen, int x, int y,
                                   int w, int h, const char *key_text,
-                                  bool key_arrow_right,
-                                  const char *action_text, bool primary,
+                                  bool key_arrow_right, const char *action_text,
                                   int key_font, int label_font)
 {
-    draw_alert_capsule(screen, x, y, w, h, primary);
-
-    int old_font = (*screen->current_viewport)->font;
-    unsigned prev_fg = screen->get_foreground();
-    int prev_mode = (*screen->current_viewport)->drawmode;
-    unsigned key_fg = primary ? LCD_RGBPACK(196, 214, 242)
-                              : LCD_RGBPACK(164, 186, 220);
-
-    screen->set_drawmode(DRMODE_FG);
-    if (key_font >= 0)
-        screen->setfont(key_font);
-    int kh = 0;
-    screen->getstringsize((const unsigned char *)key_text, NULL, &kh);
+    int kw, lw;
+    font_getstringsize((const unsigned char *)key_text, &kw, NULL, key_font);
+    font_getstringsize((const unsigned char *)action_text, &lw, NULL, label_font);
     int kx = x + 10;
-    int ky = y + (h - kh) / 2;
-    screen->set_foreground(key_fg);
+    if (key_arrow_right)
+        kw += 8;
+    int left = MAX(x + 74, kx + kw + 6);
+    int ax = MAX(left, MIN(x + (w - lw) / 2, x + w - 8 - lw));
+
+    draw_alert_capsule(screen, x, y, w, h, false);
     if (key_arrow_right)
     {
-        draw_hint_tri_right(screen, kx, y + h / 2, key_fg);
+        draw_hint_tri_right(screen, kx, y + h / 2, capsule_key_fg);
         kx += 8;
+        kw -= 8;
     }
-    screen->putsxy(kx, ky, (const unsigned char *)key_text);
-
-    if (label_font >= 0)
-        screen->setfont(label_font);
-    int lw = 0, lh = 0;
-    screen->getstringsize((const unsigned char *)action_text, &lw, &lh);
-    int ax = x + MAX(74, (w - lw) / 2);
-    if (ax + lw > x + w - 8)
-        ax = x + w - 8 - lw;
-    dialog_draw_shadow_text(screen, ax, y + (h - lh) / 2, action_text,
-                            LCD_RGBPACK(255, 255, 255),
-                            LCD_RGBPACK(5, 12, 26), -1);
-
-    screen->set_foreground(prev_fg);
-    screen->set_drawmode(prev_mode);
-    screen->setfont(old_font);
+    draw_capsule_key(screen, kx, y, kw, h, key_text, 0, key_font);
+    draw_capsule_label(screen, ax, y, MIN(lw, x + w - 8 - ax), h,
+                       action_text, label_font);
 }
 
 static void fill_selection_gradient(struct screen *screen, int x, int y,
@@ -759,7 +801,7 @@ static void draw_button_content(struct screen *screen, int x, int y,
                                 enum dialog_button_align align,
                                 const struct bitmap *icon,
                                 int scroll_px, int *overflow_out,
-                                bool selected, bool colour,
+                                bool selected, bool colour, bool capsule,
                                 unsigned fill, unsigned text)
 {
     struct viewport *cur = *screen->current_viewport;
@@ -789,9 +831,9 @@ static void draw_button_content(struct screen *screen, int x, int y,
      * clipped to it however wide the label is. */
     tvp = *cur;                        /* flags and buffer come with it */
     tvp.x = cur->x + x + BTN_PAD_X + icon_w;
-    tvp.y = cur->y + y + (h - lh) / 2;
+    tvp.y = cur->y + y + (capsule ? 0 : (h - lh) / 2);
     tvp.width = w - 2 * BTN_PAD_X - icon_w;
-    tvp.height = lh;
+    tvp.height = capsule ? h : lh;
     if (tvp.width < 1 || tvp.height < 1)
         return;
 
@@ -821,7 +863,8 @@ static void draw_button_content(struct screen *screen, int x, int y,
 
     screen->set_drawmode(selected && !colour ? DRMODE_SOLID | DRMODE_INVERSEVID
                                              : DRMODE_FG);
-    screen->putsxy(tx, 0, (const unsigned char *)label);
+    int ty = capsule ? capsule_text_y(tvp.font, label, h) : 0;
+    screen->putsxy(tx, ty, (const unsigned char *)label);
 
     screen->set_drawmode(DRMODE_SOLID);
     screen->set_viewport(prev);
@@ -839,6 +882,7 @@ void dialog_draw_button_ex(struct screen *screen,
     int bw = style->button_border_width;
     int old_font = (*screen->current_viewport)->font;
     bool colour = screen->depth > 1;
+    bool capsule = false;
     unsigned fill = 0, text = 0, box_fg = 0;
     int lw, lh;
 
@@ -863,6 +907,7 @@ void dialog_draw_button_ex(struct screen *screen,
         }
         else if (style->popup)
         {
+            capsule = true;
             draw_alert_capsule(screen, x, y, w, h, selected);
             fill = selected ? LCD_RGBPACK(56, 98, 152)
                             : LCD_RGBPACK(25, 48, 86);
@@ -934,7 +979,7 @@ void dialog_draw_button_ex(struct screen *screen,
     }
 
     draw_button_content(screen, x, y, w, h, lw, lh, label, align, icon,
-                        scroll_px, overflow_out, selected, colour, fill, text);
+                        scroll_px, overflow_out, selected, colour, capsule, fill, text);
 
     if (colour)
         screen->set_foreground(box_fg);      /* restore for the rest of the box */

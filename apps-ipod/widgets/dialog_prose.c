@@ -89,7 +89,7 @@ static void prose_measure(struct dialog *d, struct screen *s,
         const int pad_bot = 10;
         int hfont = p->head_font >= 0 ? p->head_font : box->font;
         int hdr_h = p->title ? (font_get(hfont)->height + 8) : 0;
-        int foot_h = 28 + 4 + fh + 8;
+        int foot_h = DIALOG_POPUP_FOOTER_H + (p->cancel ? 0 : 4 + fh);
         int box_w = MIN(sw - 32, 282);
         int text_w = box_w - 2 * pad_x - PROSE_BAR_W - PROSE_BAR_GAP;
         d->style.box_margin = 0;
@@ -163,7 +163,7 @@ static void prose_draw(struct dialog *d, struct screen *s,
         int kfont = content->font;
         int hch = font_get(hfont)->height;
         int hdr_h = p->title ? (hch + 8) : 0;
-        int foot_h = 28 + 4 + fh + 8;
+        int foot_h = DIALOG_POPUP_FOOTER_H + (p->cancel ? 0 : 4 + fh);
         int foot_y = content->height - foot_h;
         int body_top = pad_top + hdr_h;
         int body_h = foot_y - body_top - pad_bot;
@@ -227,12 +227,16 @@ static void prose_draw(struct dialog *d, struct screen *s,
         }
 
         if (!p->cancel)
-            dialog_draw_popup_single_footer(s, 0, foot_y, content->width,
-                                            foot_h, p->accept, "SELECT / MENU",
-                                            p->lines > p->visible, bfont, kfont);
+        {
+            bool scrollable = p->lines > p->visible;
+            int single_y = scrollable ? foot_y : content->height - DIALOG_POPUP_FOOTER_H;
+            dialog_draw_popup_single_footer(s, 0, single_y, content->width,
+                                            p->accept, "SELECT / MENU",
+                                            scrollable, bfont, kfont);
+        }
         else
             dialog_draw_popup_pair_footer(s, 0, foot_y, content->width,
-                                          foot_h, p->cancel, "/ MENU", true,
+                                          p->cancel, "/ MENU", true,
                                           p->accept, "SELECT /", true,
                                           bfont, kfont);
         return;

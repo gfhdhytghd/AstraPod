@@ -70,21 +70,21 @@ void dialog_draw_glass_panel(struct screen *screen, int x, int y,
                              int w, int h, int r, bool opaque);
 void dialog_draw_popup_panel(struct screen *screen, int x, int y,
                              int w, int h, bool opaque);
-void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y,
-                                   int w, int h,
+#define DIALOG_POPUP_BUTTON_H 28
+#define DIALOG_POPUP_FOOTER_H (DIALOG_POPUP_BUTTON_H + 8)
+
+void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y, int w,
                                    const char *left_label,
                                    const char *left_hint, bool left_arrow,
                                    const char *right_label,
                                    const char *right_hint, bool right_arrow,
                                    int label_font, int hint_font);
 void dialog_draw_popup_single_footer(struct screen *screen, int x, int y,
-                                     int w, int h, const char *label,
-                                     const char *hint, bool scrollable,
-                                     int label_font, int hint_font);
+                                     int w, const char *label, const char *hint,
+                                     bool scrollable, int label_font, int hint_font);
 void dialog_draw_popup_action_row(struct screen *screen, int x, int y,
                                   int w, int h, const char *key_text,
-                                  bool key_arrow_right,
-                                  const char *action_text, bool primary,
+                                  bool key_arrow_right, const char *action_text,
                                   int key_font, int label_font);
 void dialog_draw_progress(struct screen *screen, int x, int y, int w, int h,
                           int current, int total);

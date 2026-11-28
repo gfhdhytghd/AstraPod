@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Headless simulator tests for Classic / Fruit Company / Scrim dialogs.
+"""Headless simulator tests for navy glass dialogs and Scrim.
 
-Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [--themes classic,fruit-company,scrim]
+Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [--themes THEME,THEME,...]
 
 For each theme, opens and screenshots:
   - USB Disk Mode consent (one-press MENU = Charge Only, SELECT = Connect; PLAY stays open)
@@ -13,7 +13,9 @@ For each theme, opens and screenshots:
   - Search dialog (full-screen stock page under Classic/Fruit)
 
 Verifies every dialog opens, answers with one key press per mapped key, and
-dismisses cleanly restoring the screen underneath.
+dismisses cleanly restoring the screen underneath. For navy glass capsules,
+measures the visible ink of each action and hardware legend against the button
+centre, and compares the fill across buttons in the same dialog.
 """
 
 import argparse
@@ -22,13 +24,15 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from statistics import median
 
-from PIL import ImageChops, ImageStat
+from PIL import Image, ImageChops, ImageStat
 
 from ui_menu_sim import FPS, Screen, process
 from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
 
 STATUS_H = 20
+CAPSULE_H = 28
 
 
 def differ(a, b, box=None):
@@ -48,6 +52,94 @@ def is_dimmed_popup(before, during):
     return d_mean < b_mean * 0.85 and d_mean > 20
 
 
+def capsule_tops(frame, left, right):
+    """Find the rim, split gloss and catchlight in 28-pixel runs."""
+    first_row = 70
+    green = [
+        median(frame.getpixel((x, y))[1] for x in range(left + 8, right - 8))
+        for y in range(first_row, 211)
+    ]
+    return [
+        y + first_row for y in range(len(green) - CAPSULE_H)
+        if green[y + 1] - green[y] >= 20
+        and green[y + 13] - green[y + 14] >= 8
+        and green[y + 26] - green[y + 27] >= 20
+        and green[y + 28] - green[y + 27] >= 20
+    ]
+
+
+def capsule_pixels(frame, left, top, right, hint_left):
+    # The bevel occupies the outer rows. White cores identify the action's
+    # horizontal span, so its antialiased ink and the muted legend can be
+    # measured separately. The red threshold is above the gloss fill.
+    pixels = [
+        (x, y, frame.getpixel((x, y))[0])
+        for y in range(top + 2, top + CAPSULE_H - 2)
+        for x in range(left + 5, right - 5)
+    ]
+    cores = [x for x, _, red in pixels if red >= 224]
+    if not cores:
+        return {"action_dy": None, "hint_dy": None}
+    x0, x1 = min(cores), max(cores)
+    centre = top + (CAPSULE_H - 1) / 2
+
+    def offset(ys):
+        return (min(ys) + max(ys)) / 2 - centre if ys else None
+
+    return {
+        "action_dy": offset([y for x, y, red in pixels
+                             if x0 - 1 <= x <= x1 + 1 and red >= 112]),
+        "hint_dy": offset([y for x, y, red in pixels if red >= 112
+                           and (x < x0 - 1 if hint_left else x > x1 + 1)]),
+    }
+
+
+def capsule_fill(frame, left, top, right):
+    # Sample near both side edges, away from the ink. RGB565 rounding and
+    # the backdrop visible through the tint can shift channels slightly.
+    xs = (left + 3, left + 4, right - 5, right - 4)
+    return [tuple(median(frame.getpixel((x, top + dy))[ch] for x in xs)
+                  for ch in range(3))
+            for dy in (4, 10, 14, 23)]
+
+
+def check_button_pixels(out, theme):
+    measurements = {}
+    results = {}
+    for kind, suffix, columns, expected in (
+        ("usb", "01-usb", [(36, 284, True)], [2]),
+        ("yesno", "02-yesno", [(36, 156, True), (164, 284, False)], [1, 1]),
+        ("prose", "04-prose", [(82, 238, False)], [1]),
+    ):
+        with Image.open(out / f"{theme}-{suffix}.png") as image:
+            frame = image.convert("RGB")
+        capsules = []
+        counts = []
+        for left, right, hint_left in columns:
+            tops = capsule_tops(frame, left, right)
+            counts.append(len(tops))
+            for top in tops:
+                reading = capsule_pixels(frame, left, top, right, hint_left)
+                reading["button"] = [left, top, right, top + CAPSULE_H]
+                reading["fill"] = capsule_fill(frame, left, top, right)
+                capsules.append(reading)
+        measurements[kind] = capsules
+        results[f"{kind}_button_ink_centered"] = counts == expected and all(
+            reading[key] is not None and abs(reading[key]) <= 1
+            for reading in capsules for key in ("action_dy", "hint_dy")
+        )
+        if sum(expected) > 1:
+            results[f"{kind}_buttons_same_fill"] = counts == expected and all(
+                abs(a - b) <= 16
+                for reading in capsules[1:]
+                for ref, actual in zip(capsules[0]["fill"], reading["fill"])
+                for a, b in zip(ref, actual)
+            )
+    (out / f"{theme}-button-pixels.json").write_text(
+        json.dumps(measurements, indent=2) + "\n")
+    return results
+
+
 def settle(s, steps=45):
     time.sleep(3 / FPS)
     last = s.frame()
@@ -63,6 +155,17 @@ def settle(s, steps=45):
             same = 0
             last = cur
     return last
+
+
+def open_usb(s, before):
+    s.tap("u")
+    # The USB event is posted by the simulator's USB thread. Give it time to
+    # reach the UI before deciding that a stable frame is the prompt.
+    for _ in range(10):
+        time.sleep(0.1)
+        if differ(before, s.frame(), (0, 36, 320, 240)):
+            break
+    return settle(s)
 
 
 def open_explain(s):
@@ -111,8 +214,7 @@ def run_theme(binary, simdisk, env, out, theme):
             home.save(out / f"{theme}-00-home.png")
 
             # 1. USB Disk Mode consent: MENU = Charge Only (leaves screen intact)
-            s.tap("u")
-            usb = settle(s)
+            usb = open_usb(s, home)
             usb.save(out / f"{theme}-01-usb.png")
             res["usb_opened"] = differ(home, usb)
             if classic:
@@ -389,8 +491,7 @@ def run_theme(binary, simdisk, env, out, theme):
 
             # Final check: USB SELECT = Connect (one press enters USB connected mode)
             before_usb_sel = settle(s)
-            s.tap("u")
-            usb2 = settle(s)
+            usb2 = open_usb(s, before_usb_sel)
             res["usb_reopened"] = differ(before_usb_sel, usb2)
             s.tap("Return")
             usb_conn = settle(s)
@@ -408,7 +509,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("binary", "simdisk", "out"):
         parser.add_argument(name, type=lambda p: Path(p).resolve())
-    parser.add_argument("--themes", default="classic,fruit-company,scrim")
+    parser.add_argument("--themes", default="classic,fruit-company,fruit-company-ultra,scrim")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     result = {}
@@ -436,6 +537,8 @@ def main():
             for theme in args.themes.split(","):
                 print(f"Testing {theme}...", flush=True)
                 result[theme] = run_theme(args.binary, args.simdisk, env, args.out, theme)
+                if theme != "scrim":
+                    result[theme].update(check_button_pixels(args.out, theme))
                 (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
 
     failed = [t for t, r in result.items() if not all(r.values())]

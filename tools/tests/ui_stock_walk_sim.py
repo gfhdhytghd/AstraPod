@@ -434,7 +434,7 @@ EXTRAS = [
         row("All", inner=levels("Extras/Calendars/All", ["Day"], "menu")),
         row("To Do's"), row("Alarms", "none"),
     ]),
-    row("Contacts", "none"),
+    row("Contacts"),
     row("Alarms", "menu", [
         row("New Alarm", "menu", [
             row("Alarm", "none"), row("Date"), row("Time"), row("Repeat"),

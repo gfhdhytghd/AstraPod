@@ -28,7 +28,7 @@ pre=r'''
 #define MT_MENU 2
 #define TAGNAVI_MAIN_MENU_SLOTS 1
 struct menu_item_ex{unsigned int flags;const struct menu_item_ex**submenus;const void*callback_and_desc;};
-static struct menu_item_ex root_menu_,db_browser,cider_item,shortcut_menu,menu_,podcasts_item,other,tag;
+static struct menu_item_ex root_menu_,db_browser,cider_item,shortcut_menu,menu_,podcasts_item,calendars_item,contacts_item,other,tag;
 static int root_menu_desc;
 struct menu_table{const char*string;const struct menu_item_ex*item;};
 static struct menu_table menu_table[]={

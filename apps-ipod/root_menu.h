@@ -152,6 +152,8 @@ enum {
      * theme's menu can open it by returning this code; the main-menu row
      * exists only where there is a video player (HAVE_VIDEO_PLAYER). */
     GO_TO_VIDEOS,
+    GO_TO_CALENDARS,
+    GO_TO_CONTACTS,
 };
 extern struct menu_item_ex root_menu_;
 

@@ -17825,6 +17825,20 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_EXTRAS_DISCARD
+  desc: Button dismissing an Extras editor without saving
+  user: core
+  <source>
+    *: "Discard"
+  </source>
+  <dest>
+    *: "Discard"
+  </dest>
+  <voice>
+    *: "Discard"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_KBD_DISCARD
   desc: Prompt shown when cancelling the text editor after changes were made
   user: core

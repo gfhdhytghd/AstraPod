@@ -94,9 +94,14 @@ When appending a new `VEVENT` or `VTODO` to an existing `/Calendars/AstraPod.ics
 | Device-created timed event (no TZID yet) | Floating local time `DTSTART:YYYYMMDDTHHMMSS` / `DTEND:YYYYMMDDTHHMMSS` |
 
 **Time Zone Hook (`t3/time-zone` integration):**
-Firmware resolves the device time zone through `extras_device_tzid()`. Until the parallel `t3/time-zone` branch lands a Time Zone setting, `extras_device_tzid()` returns `NULL` and newly created timed events use RFC 5545 floating local time (`YYYYMMDDTHHMMSS`). Once `t3/time-zone` supplies an IANA TZID (e.g., `America/New_York`), `extras_device_tzid()` returns it and newly created timed events automatically emit `;TZID=<tzid>`.
+Firmware resolves the device time zone through `extras_device_tzid()`.
+With the Time Zone setting, this hook returns the IANA TZID without its
+optional POSIX rule suffix. Revision and completion timestamps then use
+the UTC RTC via `get_time_utc()`.
 
-`DTSTAMP`, `LAST-MODIFIED`, and `COMPLETED` are formatted as `YYYYMMDDTHHMMSSZ` (currently stamped from the device clock; once `t3/time-zone` provides UTC offset, converted to UTC via the same hook).
+Without the Time Zone setting, new timed events use floating local time and
+revision timestamps follow the base firmware clock. Imported UTC, floating,
+and TZID event values retain their original time representation on edit.
 
 ### 6.3 `VEVENT` Field Mapping
 

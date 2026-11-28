@@ -41,9 +41,9 @@
 #define PHYS(x)     ((uint32_t)(uintptr_t)S5L8702_PHYSICAL_ADDR(x))
 #define UNCACHED(x) S5L8702_UNCACHED_ADDR(x)
 
-/* The descriptor stores L0's active reference count minus one in 4 bits.
- * There is a separate output address after the 17 reference slots. */
-#define MAX_REF_FRAMES  16
+/* S5L8702 produces incorrect pictures on tested streams with seven or
+ * more references, even though the L0 field can represent up to sixteen. */
+#define MAX_REF_FRAMES  6
 #define MAX_DPB_FRAMES  (MAX_REF_FRAMES + 1)
 #define LEVEL_30_DPB_MBS 8100
 #define BS_DMA_SIZE     262144

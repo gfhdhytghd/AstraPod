@@ -95,6 +95,18 @@ void piezo_button_beep(bool beep, bool force)
     }
 }
 
+/* A square wave of frequency Hz for duration ms, replacing any beep that is
+ * sounding. Timer A counts at 100 kHz and interrupts once per wave. */
+void piezo_play(unsigned int frequency, unsigned int duration)
+{
+    piezo_stop();
+    if (frequency < 2 || duration == 0)
+        return;
+    unsigned int cycles = (50000 + frequency / 2) / frequency;
+    unsigned int periods = (duration * frequency + 999) / 1000;
+    piezo_start(MAX(cycles, 1u), MIN(periods, 0xffffu));
+}
+
 #ifdef BOOTLOADER
 void piezo_tone(uint32_t period /*uS*/, int32_t duration /*ms*/)
 {

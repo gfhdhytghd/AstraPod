@@ -30,6 +30,7 @@
 #include "pcm_waveform.h"
 #include "sound.h"
 #include "timer.h"
+#include "piezo.h"
 #include "speech/language.h"
 #include "lang.h"
 #include "system/activity.h"

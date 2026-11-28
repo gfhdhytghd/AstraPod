@@ -108,6 +108,12 @@ void piezo_button_beep(bool beep, bool force)
     (void)force;
 }
 
+void piezo_play(unsigned int frequency, unsigned int duration)
+{
+    (void)frequency;
+    (void)duration;
+}
+
 /* main.c's storage-failure screen. Defined per target under firmware/target/,
  * none of which is built here. */
 bool dbg_ports(void)

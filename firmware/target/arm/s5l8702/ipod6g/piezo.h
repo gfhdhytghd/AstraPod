@@ -25,6 +25,7 @@ void piezo_stop(void);
 void piezo_clear(void);
 bool piezo_busy(void);
 void piezo_button_beep(bool beep, bool force);
+void piezo_play(unsigned int frequency, unsigned int duration);
 
 #ifdef BOOTLOADER
 #include <inttypes.h>

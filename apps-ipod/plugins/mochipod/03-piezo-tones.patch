@@ -1,0 +1,16 @@
+Play the tones on the click-wheel piezo instead of mixing them into the
+headphone output. The piezo has no volume, so the sound level setting
+no longer changes how loud they are; mute still silences them.
+
+diff --git a/src/platform/rockbox.c b/src/platform/rockbox.c
+--- a/src/platform/rockbox.c
++++ b/src/platform/rockbox.c
+@@ -331,7 +331,7 @@
+             if (pet.muted) sound=(Sound){0};
+             if (sound.cue) {
+                 unsigned hz=sound_note(&sound);
+-                if (hz) rb->beep_play(hz, sound_duration(sound.cue), 400u<<pet.sound_level);
++                if (hz) rb->piezo_play(hz, sound_duration(sound.cue));
+             }
+             if (redraw || invalidate_lcd || last_minute!=pet.last || ui.page!=before_tick.page ||
+                 ui.page==HOME || ui.page==PLAYING || ui.page==WEDDING || ui.page==NOTICE ||

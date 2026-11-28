@@ -460,3 +460,7 @@ ROCK_SLOT(bool (*app_tray_register12)(const struct rock_tray_icon12 *, unsigned)
  * number in refreshes since the start. */
 ROCK_SLOT(void (*frame_start)(void), frame_start, rock_frame_start)
 ROCK_SLOT(unsigned int (*frame_next)(void), frame_next, rock_frame_next)
+
+/* Square wave on the click-wheel piezo: Hz, ms. No volume. */
+ROCK_SLOT(void (*piezo_play)(unsigned int, unsigned int), piezo_play,
+          piezo_play)

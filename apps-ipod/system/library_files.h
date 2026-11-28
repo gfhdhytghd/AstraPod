@@ -120,7 +120,7 @@
 #define LIB_UNREADABLE_MAGIC 0x44524e55u    /* "UNRD" */
 #define LIB_UNREADABLE_VERSION 1
 #define LIB_VIDEO_INDEX_MAGIC 0x58444956u   /* "VIDX" */
-#define LIB_VIDEO_INDEX_VERSION 1
+#define LIB_VIDEO_INDEX_VERSION 2
 
 /* One line in logs/upgrade.log, for a carry-over made outside the steps */
 void library_files_log(const char *fmt, ...);

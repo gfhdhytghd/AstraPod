@@ -34964,6 +34964,34 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_VIDEO_SEASONS
+  desc: Stock TV Shows list: a show's season count
+  user: core
+  <source>
+    *: "%d Seasons"
+  </source>
+  <dest>
+    *: "%d Seasons"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_SEASON
+  desc: Stock TV show seasons list: one season's row and title
+  user: core
+  <source>
+    *: "Season %d"
+  </source>
+  <dest>
+    *: "Season %d"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
   id: LANG_FRUIT_NO_MOVIES
   desc: Stock Videos menu side pane: no movies
   user: core

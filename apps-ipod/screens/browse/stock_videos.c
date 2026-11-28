@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "config.h"
 #include "core_alloc.h"
 #include "draw/bmp.h"
@@ -44,6 +45,8 @@
  * shorter one with none */
 #define COVER_ROW 55
 #define EPISODE_ROW 44
+/* iTunes' times count from 1904 */
+#define MAC_EPOCH 2082844800u
 
 struct video_track {
     uint32_t id;
@@ -58,9 +61,14 @@ struct video_track {
     uint32_t season;
     uint32_t episode;
     uint32_t duration_ms;
+    uint32_t released;          /* VIDEO_DATE(), 0 for none */
     uint64_t art_key;           /* a loose video's cover thumbnail */
     bool loose;                 /* strings are in loose_text, not the db */
 };
+
+/* How a list of videos draws its rows: with covers, as one season's
+ * episodes with their release dates, or as a playlist's, bare */
+enum track_rows { ROWS_COVERED, ROWS_EPISODES, ROWS_PLAYLIST };
 
 struct cover_slot {
     int track;                  /* -1 for none */
@@ -83,11 +91,12 @@ struct videos {
     int row_count;
     int row_capacity;
     off_t *playlists;
+    int *playlist_sizes;        /* each playlist's videos */
     int playlist_count;
     char *loose_text;
     size_t loose_used, loose_size;
     int capacity;
-    bool episodes;              /* the rows are one show's episodes */
+    enum track_rows style;
 };
 
 static bool text_at(const struct videos *v, off_t at, char *buf, size_t n)
@@ -202,6 +211,16 @@ static void read_tracks(struct videos *v, const struct stock_record *list,
             continue;
         read_dbid(&v->db, at + 112, &item.dbid);
         stock_db_u32(&v->db, at + 40, &item.duration_ms);
+        uint32_t released;
+        if (track.body - at >= 144 && stock_db_u32(&v->db, at + 140, &released)
+            && released >= MAC_EPOCH)
+        {
+            time_t when = released - MAC_EPOCH;
+            struct tm tm;
+            gmtime_r(&when, &tm);
+            item.released = VIDEO_DATE(tm.tm_year + 1900, tm.tm_mon + 1,
+                                       tm.tm_mday);
+        }
         if (track.body - at >= 220)
         {
             stock_db_u32(&v->db, at + 212, &item.season);
@@ -231,8 +250,10 @@ static void read_tracks(struct videos *v, const struct stock_record *list,
     }
 }
 
+/* The playlist's videos into `rows`, at most `limit`; with no `rows`, only
+ * counted */
 static int playlist_members(struct videos *v, const struct stock_record *playlist,
-                            bool stop_at_first)
+                            int *rows, int limit)
 {
     struct stock_record r;
     uint32_t metadata, count;
@@ -249,7 +270,7 @@ static int playlist_members(struct videos *v, const struct stock_record *playlis
         p = r.end;
     }
     int shown = 0;
-    while (count-- && shown < v->row_capacity)
+    while (count-- && shown < limit)
     {
         uint32_t id;
         if (!stock_record_read(&v->db, p, playlist->end, "mhip", &r) ||
@@ -258,9 +279,9 @@ static int playlist_members(struct videos *v, const struct stock_record *playlis
         int row = by_id(v, id);
         if (row >= 0)
         {
-            if (stop_at_first)
-                return 1;
-            v->rows[shown++] = row;
+            if (rows)
+                rows[shown] = row;
+            shown++;
         }
         p = r.end;
         if (r.body == r.end)
@@ -273,7 +294,8 @@ static int playlist_members(struct videos *v, const struct stock_record *playlis
     return shown;
 }
 
-static void read_playlists(struct videos *v)
+/* The playlists holding a video, and with `sizes` how many each holds */
+static void read_playlists(struct videos *v, bool sizes)
 {
     struct stock_record list, playlist;
     if (!stock_db_list(&v->db, 3, "mhlp", &list) &&
@@ -286,8 +308,14 @@ static void read_playlists(struct videos *v)
         if (!stock_record_read(&v->db, at, list.end, "mhyp", &playlist) ||
             playlist.body - at < 24 || !stock_db_u32(&v->db, at + 20, &flags))
             break;
-        if (!(flags & 0xff) && playlist_members(v, &playlist, true))
-            v->playlists[v->playlist_count++] = at;
+        int held;
+        if (flags & 0xff ||
+            !(held = playlist_members(v, &playlist, NULL,
+                                      sizes ? MEDIA_LIMIT : 1)))
+            continue;
+        if (sizes)
+            v->playlist_sizes[v->playlist_count] = held;
+        v->playlists[v->playlist_count++] = at;
     }
 }
 
@@ -327,19 +355,42 @@ static const char *format_length(uint32_t ms, char *buf, size_t size)
     return buf;
 }
 
-/* The line under a video's title: an episode's release date, a music
- * video's artist, or a film's length */
+/* A release date as stock writes it, "March 8, 2026", or as much of it
+ * as is known */
+static const char *format_date(uint32_t date, char *buf, size_t size)
+{
+    unsigned year = VIDEO_DATE_YEAR(date), month = VIDEO_DATE_MONTH(date);
+    unsigned day = VIDEO_DATE_DAY(date);
+    if (!date)
+        return str(LANG_VIDEO_UNKNOWN_RELEASE);
+    if (!month)
+        snprintf(buf, size, "%u", year);
+    else if (!day)
+        snprintf(buf, size, "%s %u",
+                 str(LANG_EXTRAS_CALENDARS_JANUARY + month - 1), year);
+    else
+        snprintf(buf, size, "%s %u, %u",
+                 str(LANG_EXTRAS_CALENDARS_JANUARY + month - 1), day, year);
+    return buf;
+}
+
+/* The line under a video's title: in a season, the episode's release
+ * date; else a music video's artist, an episode's show, or a film's
+ * length */
 static const char *video_value(int row, void *data, char *buf, size_t size)
 {
     const struct videos *v = data;
     if (row >= v->row_count)
         return NULL;
     const struct video_track *t = &v->tracks[v->rows[row]];
-    if (v->episodes)
-        return str(LANG_VIDEO_UNKNOWN_RELEASE);
+    if (v->style == ROWS_EPISODES)
+        return format_date(t->released, buf, size);
     if (t->media & STOCK_MUSIC_VIDEO)
         return track_text(v, t, t->artist, buf, size) ? buf :
                (const char *)str(LANG_VIDEO_UNKNOWN_ARTIST);
+    if (t->media & STOCK_TV_SHOW)
+        return track_text(v, t, t->show, buf, size) ? buf :
+               (const char *)str(LANG_VIDEO_UNKNOWN_SHOW);
     return t->duration_ms ? format_length(t->duration_ms, buf, size) : NULL;
 }
 
@@ -492,9 +543,9 @@ static int show_tracks(struct videos *v, char *title)
     info.get_value = video_value;
     info.get_kind = video_kind;
     info.action_callback = videos_list_action;
-    info.get_albumart = v->episodes ? NULL : video_cover;
+    info.get_albumart = v->style == ROWS_COVERED ? video_cover : NULL;
     info.video_rows = true;
-    info.row_height = v->episodes ? EPISODE_ROW : COVER_ROW;
+    info.row_height = v->style == ROWS_COVERED ? COVER_ROW : EPISODE_ROW;
     info.selection = 0;
     while (true)
     {
@@ -539,13 +590,31 @@ static enum list_row_kind video_folder_kind(int row, void *data)
     return LIST_ROW_MENU;
 }
 
+/* "N Videos" */
+static const char *count_value(int count, char *buf, size_t size)
+{
+    if (count == 1)
+        return str(LANG_VIDEO_ONE_VIDEO);
+    snprintf(buf, size, str(LANG_VIDEO_COUNT), count);
+    return buf;
+}
+
+static const char *playlist_value(int row, void *data, char *buf, size_t size)
+{
+    const struct videos *v = data;
+    return count_value(v->playlist_sizes[row], buf, size);
+}
+
 static int show_playlists(struct videos *v, char *title)
 {
     struct simplelist_info info;
     simplelist_info_init(&info, title, v->playlist_count, v);
     info.get_name = playlist_title;
+    info.get_value = playlist_value;
     info.get_kind = video_folder_kind;
     info.action_callback = stock_media_list_action;
+    info.video_rows = true;
+    info.row_height = EPISODE_ROW;
     while (true)
     {
         if (simplelist_show_list(&info))
@@ -574,11 +643,13 @@ static int show_playlists(struct videos *v, char *title)
                 v->row_capacity = capacity;
             }
         }
-        v->row_count = playlist_members(v, &playlist, false);
+        v->row_count = playlist_members(v, &playlist, v->rows, v->row_capacity);
         const char *label = playlist_title(row, v, name, sizeof(name));
         if (label != name)
             snprintf(name, sizeof(name), "%s", label);
+        v->style = ROWS_PLAYLIST;
         int rc = show_tracks(v, name);
+        v->style = ROWS_COVERED;
         if (row_handle > 0)
         {
             v->rows = previous_rows;
@@ -601,8 +672,17 @@ struct video_group_entry {
 struct video_groups {
     struct videos *v;
     struct video_group_entry *entries;
-    int *first;
+    int *first;                 /* each group's first entry, then the end */
+    int *seasons;               /* each group's seasons */
     bool all;
+};
+
+/* A show's seasons, the first entry of each and then the show's end */
+#define MAX_SEASONS 64
+struct video_seasons {
+    const struct video_groups *groups;
+    int count;
+    int first[MAX_SEASONS + 1];
 };
 
 static int compare_group(const void *left, const void *right)
@@ -629,15 +709,25 @@ static const char *group_title(int row, void *data, char *buf, size_t size)
     return groups->entries[groups->first[row - groups->all]].name;
 }
 
-/* A show's episode count */
-static const char *group_value(int row, void *data, char *buf, size_t size)
+static const char *episodes_value(int episodes, char *buf, size_t size)
 {
-    const struct video_groups *groups = data;
-    int episodes = groups->first[row + 1] - groups->first[row];
     if (episodes == 1)
         return str(LANG_VIDEO_ONE_EPISODE);
     snprintf(buf, size, str(LANG_VIDEO_EPISODES), episodes);
     return buf;
+}
+
+/* A show's seasons, or its episodes when it has one season */
+static const char *group_value(int row, void *data, char *buf, size_t size)
+{
+    const struct video_groups *groups = data;
+    if (groups->seasons[row] > 1)
+    {
+        snprintf(buf, size, str(LANG_VIDEO_SEASONS), groups->seasons[row]);
+        return buf;
+    }
+    return episodes_value(groups->first[row + 1] - groups->first[row], buf,
+                          size);
 }
 
 /* A show's cover is its first episode's */
@@ -654,17 +744,83 @@ static int group_action(int action, struct gui_synclist *lists)
     return stock_media_list_action(fresh_covers(groups->v, action), lists);
 }
 
+static const char *season_title(int row, void *data, char *buf, size_t size)
+{
+    const struct video_seasons *seasons = data;
+    const struct video_group_entry *e =
+        &seasons->groups->entries[seasons->first[row]];
+    snprintf(buf, size, str(LANG_VIDEO_SEASON), (int)e->season);
+    return buf;
+}
+
+static const char *season_value(int row, void *data, char *buf, size_t size)
+{
+    const struct video_seasons *seasons = data;
+    return episodes_value(seasons->first[row + 1] - seasons->first[row], buf,
+                          size);
+}
+
+/* The episodes of entries [first, end) */
+static int show_episodes(struct videos *v, const struct video_groups *groups,
+                         int first, int end, char *title)
+{
+    v->row_count = 0;
+    for (int i = first; i < end; i++)
+        v->rows[v->row_count++] = groups->entries[i].track;
+    v->style = ROWS_EPISODES;
+    int rc = show_tracks(v, title);
+    v->style = ROWS_COVERED;
+    return rc;
+}
+
+/* The seasons of the show of entries [first, end), each opening its
+ * episodes */
+static int show_seasons(struct videos *v, const struct video_groups *groups,
+                        int first, int end, char *title)
+{
+    struct video_seasons seasons = {.groups = groups};
+    for (int i = first; i < end && seasons.count < MAX_SEASONS; i++)
+        if (i == first ||
+            groups->entries[i].season != groups->entries[i - 1].season)
+            seasons.first[seasons.count++] = i;
+    seasons.first[seasons.count] = end;
+
+    struct simplelist_info info;
+    simplelist_info_init(&info, title, seasons.count, &seasons);
+    info.get_name = season_title;
+    info.get_value = season_value;
+    info.get_kind = video_folder_kind;
+    info.action_callback = stock_media_list_action;
+    info.video_rows = true;
+    info.row_height = EPISODE_ROW;
+    while (true)
+    {
+        if (simplelist_show_list(&info))
+            return MENU_ATTACHED_USB;
+        int row = info.selection;
+        if (row < 0)
+            return 0;
+        char name[32];
+        season_title(row, &seasons, name, sizeof(name));
+        int rc = show_episodes(v, groups, seasons.first[row],
+                               seasons.first[row + 1], name);
+        if (rc)
+            return rc;
+    }
+}
+
 static int show_groups(struct videos *v, char *title, bool television)
 {
     int count = v->row_count;
     int handle = core_alloc(count * sizeof(struct video_group_entry) +
-                            (count + 1) * sizeof(int));
+                            (2 * count + 1) * sizeof(int));
     if (handle <= 0)
         return show_tracks(v, title);
     struct video_groups groups = {.v = v,
                                   .entries = core_get_data_pinned(handle),
                                   .all = !television};
     groups.first = (int *)(groups.entries + count);
+    groups.seasons = groups.first + count + 1;
     for (int i = 0; i < count; i++)
     {
         struct video_group_entry *entry = &groups.entries[i];
@@ -681,8 +837,17 @@ static int show_groups(struct videos *v, char *title, bool television)
     qsort(groups.entries, count, sizeof(*groups.entries), compare_group);
     int ngroups = 0;
     for (int i = 0; i < count; i++)
-        if (i == 0 || strcasecmp(groups.entries[i-1].name, groups.entries[i].name))
-            groups.first[ngroups++] = i;
+    {
+        const struct video_group_entry *e = &groups.entries[i];
+        bool show = i == 0 || strcasecmp(e[-1].name, e->name);
+        if (show)
+        {
+            groups.first[ngroups] = i;
+            groups.seasons[ngroups++] = 0;
+        }
+        if (show || e[-1].season != e->season)
+            groups.seasons[ngroups - 1]++;
+    }
     groups.first[ngroups] = count;
 
     struct simplelist_info info;
@@ -711,15 +876,20 @@ static int show_groups(struct videos *v, char *title, bool television)
         int group = info.selection - groups.all;
         int first = group < 0 ? 0 : groups.first[group];
         int end = group < 0 ? count : groups.first[group + 1];
-        v->row_count = 0;
-        for (int i = first; i < end; i++)
-            v->rows[v->row_count++] = groups.entries[i].track;
         char name[96];
         snprintf(name, sizeof(name), "%s",
                  group_title(info.selection, &groups, NULL, 0));
-        v->episodes = television;
-        rc = show_tracks(v, name);
-        v->episodes = false;
+        if (television && groups.seasons[group] > 1)
+            rc = show_seasons(v, &groups, first, end, name);
+        else if (television)
+            rc = show_episodes(v, &groups, first, end, name);
+        else
+        {
+            v->row_count = 0;
+            for (int i = first; i < end; i++)
+                v->rows[v->row_count++] = groups.entries[i].track;
+            rc = show_tracks(v, name);
+        }
     }
     core_unpin(handle);
     core_free(handle);
@@ -765,7 +935,8 @@ static bool add_loose(const struct video_entry *e, void *data)
     *t = (struct video_track){
         .id = UINT32_MAX - v->count, .media = e->kind,
         .season = e->season, .episode = e->episode,
-        .duration_ms = e->duration_ms, .art_key = e->art_key, .loose = true,
+        .duration_ms = e->duration_ms, .released = e->released,
+        .art_key = e->art_key, .loose = true,
     };
     t->path = keep_text(v, e->path);
     t->title = keep_text(v, e->title);
@@ -842,6 +1013,86 @@ static off_t index_size(void)
     return size;
 }
 
+/* Library videos with artwork, for the menu pane: a sample of at most
+ * PANE_ART of them, taken when the census counts. The pane's thread reads
+ * it, so `pane_art_count` is cleared while it is rewritten. */
+#define PANE_ART 128
+/* Set in a pane cover's number for one of the library's */
+#define PANE_LIBRARY (1 << 24)
+static struct {
+    uint32_t media;
+    off_t image;
+} pane_art[PANE_ART];
+static volatile int pane_art_count;
+
+static void sample_pane_art(struct videos *v)
+{
+    int count = 0, seen = 0;
+    pane_art_count = 0;
+    if (!stock_artwork_open(&v->art))
+        return;
+    read_artwork(v);
+    for (int i = 0; i < v->count; i++)
+    {
+        if (!v->tracks[i].artwork)
+            continue;
+        int slot = seen < PANE_ART ? seen : rand() % (seen + 1);
+        seen++;
+        if (slot >= PANE_ART)
+            continue;
+        pane_art[slot].media = v->tracks[i].media;
+        pane_art[slot].image = v->tracks[i].artwork;
+        count = MIN(seen, PANE_ART);
+    }
+    stock_db_close(&v->art);
+    pane_art_count = count;
+}
+
+/* One of the library's covers of `kinds` other than `previous`, chosen at
+ * random, or -1 */
+static int library_pane_cover(unsigned kinds, int previous, fb_data *pixels)
+{
+    int count = pane_art_count, chosen = -1, eligible = 0;
+    for (int i = 0; i < count; i++)
+    {
+        if (!(category_of(pane_art[i].media) & kinds))
+            continue;
+        if (i == previous && eligible)
+            continue;
+        if (i == previous || rand() % ++eligible == 0)
+            chosen = i;
+    }
+    if (chosen < 0)
+        return -1;
+    struct stock_db art;
+    bool ok = stock_artwork_open(&art) &&
+              stock_artwork_large(&art, pane_art[chosen].image, pixels,
+                                  VIDEO_ART_PANE);
+    stock_db_close(&art);
+    return ok ? chosen : -1;
+}
+
+int stock_videos_pane_cover(unsigned kinds, int previous, fb_data *pixels)
+{
+    bool was_library = previous >= 0 && (previous & PANE_LIBRARY);
+    bool library_first = rand() & 1;
+    for (int pass = 0; pass < 2; pass++)
+    {
+        int cover;
+        if (library_first == !pass)
+        {
+            cover = library_pane_cover(kinds, was_library ?
+                                       previous & ~PANE_LIBRARY : -1, pixels);
+            if (cover >= 0)
+                return cover | PANE_LIBRARY;
+        }
+        else if ((cover = video_art_pane_load(kinds, was_library ? -1 :
+                                              previous, pixels)) >= 0)
+            return cover;
+    }
+    return -1;
+}
+
 /* Counted again only when the iTunes library or the video index has been
  * written since */
 void stock_videos_census(struct stock_video_census *census)
@@ -855,6 +1106,7 @@ void stock_videos_census(struct stock_video_census *census)
         return;
     }
     counted = (struct stock_video_census){0};
+    pane_art_count = 0;
     struct videos v = {.art.fd = -1, .db.fd = -1};
     struct stock_record list;
     if (db_size && stock_db_open(&v.db, false) &&
@@ -867,13 +1119,13 @@ void stock_videos_census(struct stock_video_census *census)
         {
             v.tracks = core_get_data_pinned(handle);
             v.playlists = (off_t *)(v.tracks + count);
-            v.row_capacity = count;     /* a playlist's first video only */
             read_tracks(&v, &list, count);
             qsort(v.tracks, v.count, sizeof(*v.tracks), compare_id);
             for (int i = 0; i < v.count; i++)
                 census_add(&counted, v.tracks[i].media);
-            read_playlists(&v);
+            read_playlists(&v, false);
             counted.playlists = v.playlist_count;
+            sample_pane_art(&v);
             core_unpin(handle);
             core_free(handle);
         }
@@ -903,7 +1155,9 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
     if (!count)
         goto leave;
     handle = core_alloc(count * (sizeof(*v.tracks) + sizeof(*v.rows)) +
-                        MAX_PLAYLISTS * sizeof(*v.playlists) + loose.bytes);
+                        MAX_PLAYLISTS * (sizeof(*v.playlists) +
+                                         sizeof(*v.playlist_sizes)) +
+                        loose.bytes);
     v.cover_handle = core_alloc((COVER_SOURCE * COVER_SOURCE +
                                  COVER_SLOTS * COVER_SIZE * COVER_SIZE) *
                                 sizeof(fb_data));
@@ -916,7 +1170,8 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
     v.art_generation = video_art_generation();
     v.tracks = core_get_data_pinned(handle);
     v.playlists = (off_t *)(v.tracks + count);
-    v.rows = (int *)(v.playlists + MAX_PLAYLISTS);
+    v.playlist_sizes = (int *)(v.playlists + MAX_PLAYLISTS);
+    v.rows = v.playlist_sizes + MAX_PLAYLISTS;
     v.loose_text = (char *)(v.rows + count);
     v.loose_size = loose.bytes;
     v.row_capacity = v.capacity = count;
@@ -930,7 +1185,7 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
     qsort(v.tracks, v.count, sizeof(*v.tracks), compare_id);
     if (kind == STOCK_VIDEO_PLAYLISTS)
     {
-        read_playlists(&v);
+        read_playlists(&v, true);
         if (v.playlist_count)
         {
             ui_scene_open_page(&scene, "videos-push");

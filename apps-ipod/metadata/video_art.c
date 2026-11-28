@@ -4,8 +4,9 @@
  * Cover thumbnails for the video files of the video index, so the Videos
  * lists draw a cover from a small file instead of decoding a JPEG per row.
  *
- * Each video with a 'covr' image gets one thumbnail, fitted inside
- * VIDEO_ART_DIM square at its own shape, in the art cache's file format
+ * Each video with a 'covr' image gets two thumbnails, fitted inside a
+ * VIDEO_ART_DIM square for its row and a VIDEO_ART_PANE square for the
+ * menu pane's slideshow, at its own shape, in the art cache's file format
  * under library/cache/art/video/, named by the index's key for it. A video
  * with no cover has none, and its rows show the stock placeholder: a frame
  * of the film would need the H.264 decoder, which only the video player
@@ -43,8 +44,15 @@
 /* Videos whose thumbnails a pass keeps. Past it, the sweep is skipped. */
 #define VIDEO_ART_MAX 1024
 
-#define WORK_BYTES (BM_SCALED_SIZE(VIDEO_ART_DIM, VIDEO_ART_DIM, \
+#define WORK_BYTES (BM_SCALED_SIZE(VIDEO_ART_PANE, VIDEO_ART_PANE, \
                                    FORMAT_NATIVE, 0) + IMAGE_DECODE_OVERHEAD)
+
+/* A thumbnail's file name ends in its size's extension, or while it is
+ * being written in its partial one */
+static const char *const extensions[2][2] = {
+    { "aat", "new" },       /* a row's */
+    { "aap", "pnw" },       /* the pane's */
+};
 
 static volatile bool wants_pass;
 static volatile unsigned generation;
@@ -54,29 +62,30 @@ unsigned video_art_generation(void)
     return generation;
 }
 
-static void thumb_path(uint64_t key, char *out, size_t size, bool partial)
+static void thumb_path(uint64_t key, bool pane, char *out, size_t size,
+                       bool partial)
 {
     snprintf(out, size, LIB_VIDEO_ART_DIR "/%08lx%08lx.%s",
              (unsigned long)(uint32_t)(key >> 32), (unsigned long)(uint32_t)key,
-             partial ? "new" : "aat");
+             extensions[pane][partial]);
 }
 
-bool video_art_load(uint64_t art_key, int dim, fb_data *pixels,
-                    fb_data background)
+static bool load(uint64_t art_key, bool pane, int dim, fb_data *pixels,
+                 fb_data background)
 {
     char path[MAX_PATH];
     struct art_cache_header h;
-    fb_data row[VIDEO_ART_DIM];
+    fb_data row[VIDEO_ART_PANE];
+    int edge = pane ? VIDEO_ART_PANE : VIDEO_ART_DIM;
     if (!art_key)
         return false;
-    thumb_path(art_key, path, sizeof(path), false);
+    thumb_path(art_key, pane, path, sizeof(path), false);
     int fd = open(path, O_RDONLY);
     if (fd < 0)
         return false;
     bool ok = read(fd, &h, sizeof(h)) == (ssize_t)sizeof(h) &&
               h.magic == ART_CACHE_MAGIC && h.version == VIDEO_ART_VERSION &&
-              h.width && h.height && h.width <= VIDEO_ART_DIM &&
-              h.height <= VIDEO_ART_DIM;
+              h.width && h.height && h.width <= edge && h.height <= edge;
     if (ok)
     {
         for (int i = 0; i < dim * dim; i++)
@@ -97,6 +106,49 @@ bool video_art_load(uint64_t art_key, int dim, fb_data *pixels,
     return ok;
 }
 
+bool video_art_load(uint64_t art_key, int dim, fb_data *pixels,
+                    fb_data background)
+{
+    return load(art_key, false, dim, pixels, background);
+}
+
+struct pick
+{
+    unsigned kinds;
+    int previous;
+    int seen, eligible, chosen;
+    uint64_t key;
+};
+
+/* Reservoir sampling: each eligible video is kept with an equal chance.
+ * The last cover shown is eligible only when no other is. */
+static bool pick_one(const struct video_entry *e, void *data)
+{
+    struct pick *p = data;
+    if (!e->art_key || !(e->kind & p->kinds))
+        return true;
+    int n = p->seen++;
+    if (n == p->previous && p->eligible)
+        return true;
+    if (n == p->previous || rand() % ++p->eligible == 0)
+    {
+        p->chosen = n;
+        p->key = e->art_key;
+    }
+    return true;
+}
+
+int video_art_pane_load(unsigned kinds, int previous, fb_data *pixels)
+{
+    static struct video_index_text text;
+    struct pick p = { .kinds = kinds, .previous = previous, .chosen = -1 };
+    video_index_each(pick_one, &p, &text);
+    if (p.chosen < 0 ||
+        !load(p.key, true, VIDEO_ART_PANE, pixels, LCD_BLACK))
+        return -1;
+    return p.chosen;
+}
+
 /* ---- the pass ---------------------------------------------------------- */
 
 struct pass
@@ -107,16 +159,17 @@ struct pass
     bool stopped;
 };
 
-static bool render(const struct video_entry *e, const char *out,
+static bool render(const struct video_entry *e, bool pane, const char *out,
                    struct pass *p)
 {
+    int edge = pane ? VIDEO_ART_PANE : VIDEO_ART_DIM;
     struct image_src src = {
         .fd = open(e->path, O_RDONLY), .pos = e->cover_at,
         .len = e->cover_size,
     };
     struct bitmap bm = {
-        .width = VIDEO_ART_DIM, .height = VIDEO_ART_DIM,
-        .format = FORMAT_NATIVE, .data = p->work,
+        .width = edge, .height = edge, .format = FORMAT_NATIVE,
+        .data = p->work,
     };
     if (src.fd < 0)
         return false;
@@ -125,7 +178,7 @@ static bool render(const struct video_entry *e, const char *out,
                         FORMAT_DITHER, NULL);
     close(src.fd);
     if (rc <= 0 || bm.width <= 0 || bm.height <= 0 ||
-        bm.width > VIDEO_ART_DIM || bm.height > VIDEO_ART_DIM)
+        bm.width > edge || bm.height > edge)
         return false;
 
     char partial[MAX_PATH];
@@ -134,7 +187,7 @@ static bool render(const struct video_entry *e, const char *out,
         .width = bm.width, .height = bm.height, .layout = AA_ROWS,
     };
     size_t bytes = (size_t)bm.width * bm.height * sizeof(fb_data);
-    thumb_path(e->art_key, partial, sizeof(partial), true);
+    thumb_path(e->art_key, pane, partial, sizeof(partial), true);
     int fd = open(partial, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd < 0)
         return false;
@@ -162,18 +215,25 @@ static bool visit(const struct video_entry *e, void *data)
     if (p->count < VIDEO_ART_MAX)
         p->keys[p->count] = e->art_key;
     p->count++;
-    thumb_path(e->art_key, out, sizeof(out), false);
-    if (!file_exists(out) && !render(e, out, p))
-        debug_log(DEBUG_LOG_TASKS, "%s: no cover from %s",
-                  video_art_task.name, e->path);
-    yield();
+    for (int pane = 0; pane < 2; pane++)
+    {
+        thumb_path(e->art_key, pane, out, sizeof(out), false);
+        if (!file_exists(out) && !render(e, pane, out, p))
+        {
+            debug_log(DEBUG_LOG_TASKS, "%s: no cover from %s",
+                      video_art_task.name, e->path);
+            break;
+        }
+        yield();
+    }
     return true;
 }
 
 static bool named(const struct pass *p, const char *name)
 {
     char *end;
-    if (strlen(name) != 20 || strcasecmp(name + 16, ".aat"))
+    if (strlen(name) != 20 || (strcasecmp(name + 16, ".aat") &&
+                               strcasecmp(name + 16, ".aap")))
         return true;            /* not a thumbnail: left alone */
     char high[9];
     strlcpy(high, name, sizeof(high));

@@ -14,6 +14,13 @@
 #define VIDEO_INDEX_TITLE 128
 #define VIDEO_INDEX_NAME  96
 
+/* A release date packed in a word, month and day 0 where unknown */
+#define VIDEO_DATE(year, month, day) \
+    ((uint32_t)(year) << 9 | (uint32_t)(month) << 5 | (uint32_t)(day))
+#define VIDEO_DATE_YEAR(d)  ((d) >> 9)
+#define VIDEO_DATE_MONTH(d) (((d) >> 5) & 15)
+#define VIDEO_DATE_DAY(d)   ((d) & 31)
+
 /* One video. kind is a Videos category, enum stock_video_kind's
  * STOCK_MOVIE, STOCK_MUSIC_VIDEO or STOCK_TV_SHOW. artist and show are
  * empty where the file names none, and title the file's name without its
@@ -28,6 +35,7 @@ struct video_entry
     unsigned kind;
     uint32_t duration_ms;
     uint32_t season, episode;
+    uint32_t released;          /* VIDEO_DATE(), 0 for none */
     long cover_at;              /* the 'covr' image's offset, or -1 */
     uint32_t cover_size;
 };

@@ -1,15 +1,18 @@
 /***************************************************************************
  * GNU General Public License (version 2+)
  *
- * The video index: the Videos category, title, artist, show, episode,
- * length and cover location of every video file copied to the player
- * outside the iTunes library, for the Videos lists and their artwork.
+ * The video index: the Videos category, title, artist, show, season,
+ * episode, release date, length and cover location of every video file
+ * copied to the player outside the iTunes library, for the Videos lists
+ * and their artwork.
  *
  * The documents walk (file_index.c) hands each video here, and its MP4 tags
  * are read once per walk: a video's metadata sits at the end of its 'moov'
  * and is reached by seeking past the sample tables, a handful of small
  * reads. The category is the 'stik' media kind iTunes writes: 6 is a music
- * video, 10 a TV show, and anything else, or none, a movie. One entry per
+ * video, 10 a TV show, and anything else, or none, a movie. A TV show's
+ * name is its 'tvsh', else its album ('\251alb'); its season and episode
+ * are 'tvsn' and 'tves'. The release date is '\251day'. One entry per
  * video in a libfile of entries that each say their length.
  *
  * Parts, in order:
@@ -45,6 +48,7 @@ struct video_rec
     uint32_t duration_ms;
     int32_t  cover_at;
     uint32_t cover_size;
+    uint32_t released;          /* VIDEO_DATE() packed, 0 for none */
     uint16_t season, episode;
     uint8_t  kind;
     uint8_t  pad;
@@ -90,6 +94,7 @@ void video_index_each(video_index_fn fn, void *data,
         e.duration_ms = r.duration_ms;
         e.season = r.season;
         e.episode = r.episode;
+        e.released = r.released;
         e.cover_at = r.cover_at;
         e.cover_size = r.cover_size;
         if (!fn(&e, data))
@@ -109,6 +114,7 @@ struct video_tags
     char title[VIDEO_INDEX_TITLE];
     char artist[VIDEO_INDEX_NAME];
     char show[VIDEO_INDEX_NAME];
+    char album[VIDEO_INDEX_NAME];
 };
 
 static bool read_u32(int fd, uint32_t *v)
@@ -209,6 +215,36 @@ static uint32_t item_number(int fd, off_t at, uint32_t len)
     return v;
 }
 
+/* `n` digits of `text` from `at` as a number, or -1 */
+static int digits(const char *text, int at, int n)
+{
+    int value = 0;
+    for (int i = at; i < at + n; i++)
+    {
+        if (text[i] < '0' || text[i] > '9')
+            return -1;
+        value = value * 10 + text[i] - '0';
+    }
+    return value;
+}
+
+/* '\251day' as iTunes writes it, "2026-03-08T08:00:00Z", or a part of it
+ * from the start: "2026" or "2026-03" */
+static uint32_t parse_day(const char *day)
+{
+    int year = digits(day, 0, 4), month = 0, date = 0;
+    if (year < 1)
+        return 0;
+    if (day[4] == '-' && (month = digits(day, 5, 2)) >= 1 && month <= 12 &&
+        day[7] == '-')
+        date = MAX(digits(day, 8, 2), 0);
+    if (month < 1 || month > 12)
+        month = date = 0;
+    if (date > 31)
+        date = 0;
+    return VIDEO_DATE(year, month, date);
+}
+
 static void read_items(int fd, off_t at, off_t end, struct video_tags *t)
 {
     uint32_t item;
@@ -231,6 +267,16 @@ static void read_items(int fd, off_t at, off_t end, struct video_tags *t)
             case FOURCC('t', 'v', 's', 'h'):
                 item_text(fd, data, len, t->show, sizeof(t->show));
                 break;
+            case FOURCC(0xa9, 'a', 'l', 'b'):
+                item_text(fd, data, len, t->album, sizeof(t->album));
+                break;
+            case FOURCC(0xa9, 'd', 'a', 'y'):
+            {
+                char day[16];
+                item_text(fd, data, len, day, sizeof(day));
+                t->r.released = parse_day(day);
+                break;
+            }
             case FOURCC('t', 'v', 's', 'n'):
                 t->r.season = MIN(item_number(fd, data, len), UINT16_MAX);
                 break;
@@ -313,6 +359,8 @@ void video_index_found(const char *path, unsigned long size,
     read_tags(path, &t);
     t.r.kind = t.stik == 6 ? STOCK_MUSIC_VIDEO :
                t.stik == 10 ? STOCK_TV_SHOW : STOCK_MOVIE;
+    if (t.r.kind == STOCK_TV_SHOW && !t.show[0])
+        strlcpy(t.show, t.album, sizeof(t.show));
     if (!t.title[0])
     {
         const char *leaf = strrchr(path, '/');

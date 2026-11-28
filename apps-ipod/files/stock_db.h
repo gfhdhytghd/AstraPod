@@ -54,4 +54,9 @@ bool stock_video_path(char *colon_path);
 bool stock_photo_pixels(const struct stock_db *db, off_t at, unsigned width,
                         unsigned height, void *pixels);
 int stock_artwork_pixels(const struct stock_db *db, off_t at, void *pixels);
+/* Image `at`'s largest thumbnail as an `edge`-pixel square in `pixels`:
+ * the middle of the 320-pixel one, or the 128-pixel one widened. False
+ * when it has neither. */
+bool stock_artwork_large(const struct stock_db *db, off_t at, void *pixels,
+                         int edge);
 #endif

@@ -185,8 +185,11 @@
   tags; a file with none is a movie. The separate list of loose video
   files is gone. A film with an embedded cover shows it once the player
   has made a thumbnail in the background; until then, and for films with
-  no cover, the row shows the original iPod's picture. In the Videos
-  lists, Play/Pause plays the selected video, and Previous and Next do
-  nothing. In the video player, the Picture page is the original iPod's
-  Shuffle-style selector: turn the wheel a sixth of a turn to move
-  between Fit, Fill and Stretch.
+  no cover, the row shows the original iPod's picture. A TV show with
+  more than one season opens a list of its seasons, and an episode shows
+  its release date where the file or iTunes gives one. Beside the Videos
+  rows, the right half shows a slideshow of the covers of that category's
+  videos. In the Videos lists, Play/Pause plays the selected video, and
+  Previous and Next do nothing. In the video player, the Picture page is
+  the original iPod's Shuffle-style selector: turn the wheel a sixth of a
+  turn to move between Fit, Fill and Stretch.

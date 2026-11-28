@@ -12,8 +12,10 @@
 #include "lcd.h"                        /* fb_data */
 #include "system/bg_task.h"
 
-/* The edge of the square a thumbnail is fitted inside */
+/* The edge of the square a row's thumbnail is fitted inside */
 #define VIDEO_ART_DIM 55
+/* And the menu pane's, as large as its slideshow pans over */
+#define VIDEO_ART_PANE 272
 
 /* Register the task. Call once at startup, before bg_task_start(). */
 void video_art_init(void);
@@ -27,6 +29,12 @@ unsigned video_art_generation(void);
  * been made, or when the cover could not be read. */
 bool video_art_load(uint64_t art_key, int dim, fb_data *pixels,
                     fb_data background);
+
+/* A pane thumbnail of a video of `kinds` (enum stock_video_kind bits),
+ * chosen at random, into `pixels`, VIDEO_ART_PANE square, centred on black.
+ * Returns which video it is, to pass as `previous` for a different one next
+ * time, or -1 when no such video has a thumbnail. */
+int video_art_pane_load(unsigned kinds, int previous, fb_data *pixels);
 
 /* The pass: a walk that changed the video index sends it an update, and
  * it makes whichever thumbnails are missing and removes the ones no video

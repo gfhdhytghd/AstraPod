@@ -72,15 +72,64 @@ def loose_media(disk):
     tagged(disk / "Movies/covered.mp4", poster, title="Covered Film",
            media_type=9)
     tagged(disk / "TV/episode.mp4", poster, title="Pilot", media_type=10,
-           show="My Show", season_number=2, episode_sort=3)
+           show="My Show", season_number=2, episode_sort=3, date="2026-03-08")
+    # No show name: the album names it, and it makes My Show's second season
+    tagged(disk / "TV/earlier.mp4", title="Before", media_type=10,
+           album="My Show", season_number=1, episode_sort=1)
     tagged(disk / "Clips/band.mp4", title="Band Song", media_type=6,
            artist="Some Band")
     poster.unlink()
 
 
-def itunes_db(disk, films):
-    """An iTunesDB of 'films', (title, media kind, length in ms) each, all
-    playing a copy of Movies/clip.m4v"""
+def rgb565(image, edge):
+    data = image.convert("RGB").resize((edge, edge)).tobytes()
+    return b"".join(struct.pack("<H", (r >> 3) << 11 | (g >> 2) << 5 | b >> 3)
+                    for r, g, b in zip(data[0::3], data[1::3], data[2::3]))
+
+
+def artwork_db(disk, covers):
+    """An ArtworkDB and its .ithmb files: for each (dbid, colour) of
+    'covers', a 320-pixel and a 56-pixel square of the colour"""
+    def record(kind, header, body, fields):
+        data = bytearray(header)
+        struct.pack_into("<4sII", data, 0, kind, header, header + len(body))
+        for offset, value in fields.items():
+            struct.pack_into("<I", data, offset, value)
+        return data + body
+
+    folder = disk / "iPod_Control/Artwork"
+    folder.mkdir(parents=True)
+    files = {1060: bytearray(), 1061: bytearray()}
+    images = b""
+    for number, (dbid, colour) in enumerate(covers, 1):
+        thumbs = b""
+        for form, edge in ((1060, 320), (1061, 56)):
+            offset = len(files[form])
+            files[form] += rgb565(Image.new("RGB", (edge, edge), colour), edge)
+            name = f":F{form}_1.ithmb".encode("utf-16le")
+            location = record(b"mhod", 24, struct.pack("<IBBH", len(name), 2,
+                                                       0, 0) + b"\0" * 4 +
+                              name, {12: 3})
+            thumbs += record(b"mhod", 24,
+                             record(b"mhni", 76, location,
+                                    {12: 1, 16: form, 20: offset,
+                                     24: edge * edge * 2}), {12: 2})
+        image = record(b"mhii", 152, thumbs, {12: 2, 16: 100 + number})
+        struct.pack_into("<Q", image, 20, dbid)
+        images += image
+    listing = bytearray(92)
+    struct.pack_into("<4sII", listing, 0, b"mhli", 92, len(covers))
+    section = record(b"mhsd", 96, bytes(listing) + images, {12: 1})
+    (folder / "ArtworkDB").write_bytes(record(b"mhfd", 132, section, {}))
+    for form, data in files.items():
+        (folder / f"F{form}_1.ithmb").write_bytes(data)
+
+
+def itunes_db(disk, films, playlists=()):
+    """An iTunesDB of 'films', each (title, media kind, length in ms) and
+    optionally a dict of artist, show, season, episode and a cover's
+    colour, all playing a copy of Movies/clip.m4v; and of 'playlists', each
+    (name, [titles])"""
     def record(kind, header, body, fields):
         data = bytearray(header)
         struct.pack_into("<4sII", data, 0, kind, header, header + len(body))
@@ -94,20 +143,47 @@ def itunes_db(disk, films):
                       struct.pack("<IIII", 1, len(encoded), 0, 0) + encoded,
                       {12: kind})
 
+    def listing(kind, items, count):
+        data = bytearray(12)
+        struct.pack_into("<4sII", data, 0, kind, 12, count)
+        return bytes(data) + items
+
+    def playlist(name, ids, hidden):
+        items = b"".join(record(b"mhip", 76, b"", {24: i}) for i in ids)
+        return record(b"mhyp", 48, text(1, name) + items,
+                      {12: 1, 16: len(ids), 20: hidden})
+
     control = disk / "iPod_Control"
     (control / "Music/F00").mkdir(parents=True)
-    tracks = b""
-    for number, (title, kind, length) in enumerate(films, 1):
+    tracks, ids, covers = b"", {}, []
+    for number, (title, kind, length, *more) in enumerate(films, 1):
+        extra = more[0] if more else {}
         name = f"TEST{number}.m4v"
+        ids.setdefault(title, number)
         shutil.copyfile(disk / "Movies/clip.m4v", control / "Music/F00" / name)
-        tracks += record(b"mhit", 212, text(1, title) +
-                         text(2, f":iPod_Control:Music:F00:{name}"),
-                         {16: number, 40: length, 208: kind})
-    tracks = record(b"mhlt", 12, tracks, {8: len(films)})
-    section = record(b"mhsd", 16, tracks, {12: 1})
+        body = text(1, title) + text(2, f":iPod_Control:Music:F00:{name}")
+        if "artist" in extra:
+            body += text(4, extra["artist"])
+        if "show" in extra:
+            body += text(19, extra["show"])
+        tracks += record(b"mhit", 220, body,
+                         {16: number, 40: length, 112: 0x1000 + number,
+                          208: kind, 212: extra.get("season", 0),
+                          216: extra.get("episode", 0)})
+        if "cover" in extra:
+            covers.append((0x1000 + number, extra["cover"]))
+    sections = record(b"mhsd", 16, listing(b"mhlt", tracks, len(films)),
+                      {12: 1})
+    lists = playlist("Library", range(1, len(films) + 1), 1) + b"".join(
+        playlist(name, [ids[t] for t in titles], 0)
+        for name, titles in playlists)
+    sections += record(b"mhsd", 16,
+                       listing(b"mhlp", lists, 1 + len(playlists)), {12: 2})
     database = control / "iTunes/iTunesDB"
     database.parent.mkdir()
-    database.write_bytes(record(b"mhbd", 12, section, {}))
+    database.write_bytes(record(b"mhbd", 12, sections, {}))
+    if covers:
+        artwork_db(disk, covers)
 
 
 def indexed_movie(disk):
@@ -242,15 +318,35 @@ class Sim:
 STOCK_FILMS = [("Test Pattern", 2, 3725000), ("Test Pattern", 2, 95000),
                ("Test Pattern", 2, 12000)]
 
+# The library of the stock firmware's richer captures, two films with
+# artwork
+RICH_FILMS = [
+    ("Alpha Movie", 2, 5520000, {"cover": (200, 40, 40)}),
+    ("Beta Movie Without Artwork", 2, 32000),
+    ("Delta Tall Poster", 2, 7380000),
+    ("Gamma Movie Watched", 2, 5400000, {"cover": (40, 160, 50)}),
+    ("Pilot", 64, 1500000, {"show": "Show One", "season": 1, "episode": 1}),
+    ("Second Episode", 64, 1500000,
+     {"show": "Show One", "season": 1, "episode": 2}),
+    ("Season Two Opener", 64, 1500000,
+     {"show": "Show One", "season": 2, "episode": 1}),
+    ("Only Episode", 64, 1500000,
+     {"show": "Show Two", "season": 1, "episode": 1}),
+    ("Video One", 32, 215000, {"artist": "Band A"}),
+    ("Video Two", 32, 200000, {"artist": "Band A"}),
+    ("Clip", 32, 180000, {"artist": "Band B"}),
+]
+RICH_PLAYLISTS = [("Road Trip", ["Alpha Movie", "Video One", "Pilot"])]
+
 
 @contextmanager
-def session(build, case, theme="scrim", library=None):
+def session(build, case, theme="scrim", library=None, playlists=()):
     disk = case / "disk"
     disk.mkdir(parents=True)
     player(build, disk, theme)
     media(disk)
     if library:
-        itunes_db(disk, library)
+        itunes_db(disk, library, playlists)
         shutil.rmtree(disk / "Movies")
     elif theme != "scrim":
         indexed_movie(disk)
@@ -304,6 +400,24 @@ def line_text(case, png, box, label):
         stderr=subprocess.DEVNULL, text=True).lower().strip()
 
 
+def first_row(sim, png, art, label):
+    """The first row's title and second line, read on their own: white on
+    the selection bar reads poorly as part of the screen. 'art' for a
+    55-pixel row beside a cover, else a 44-pixel one."""
+    x, top = (60, 22) if art else (3, 20)
+    if art:
+        top += 2
+    return (line_text(sim.case, png, (x, top, 296, top + 25), label + "-1"),
+            line_text(sim.case, png, (x, top + 23, 296, top + 43),
+                      label + "-2"))
+
+
+def expect_first(sim, png, art, title, value):
+    got = first_row(sim, png, art, png[:-4])
+    assert got == (title, value), f"{png}: wanted {(title, value)}, " \
+        f"read {got}"
+
+
 def video_settings(sim):
     sim.go("select", "settings", ["tv signal", "tv screen", "picture scaling",
                                  "alternate audio", "captions", "subtitles"])
@@ -337,6 +451,75 @@ def stock_states(build, case, theme, states):
         keep(sim, states, "settings")
 
 
+def rich_states(build, case, theme, states):
+    """The seasons, episodes and playlists stock was captured on, from
+    stock's richer library"""
+    with session(build, case, theme, RICH_FILMS, RICH_PLAYLISTS) as sim:
+        if theme == "classic":
+            sim.text("home", ["videos", "files"])
+        else:
+            sim.text("home", ["music", "videos", "photos"])
+            sim.tap("down")
+        sim.go("select", "rich-videos-menu", ["movies", "rentals"])
+        pane_shows_cover(sim, "rich-pane-movies",
+                         [(200, 40, 40), (40, 160, 50)])
+        keep(sim, states, "vm-movies")
+        sim.move("down", 2)
+        keep(sim, states, "vm-tvshows")
+        sim.move("down", 2)
+        keep(sim, states, "vm-playlists")
+        sim.move("up", 2)
+        sim.step("select", "tvshows", ["show two", "1 episode"])
+        expect_first(sim, "tvshows.png", True, "show one", "2 seasons")
+        keep(sim, states, "tvshows")
+        sim.step("select", "seasons", ["show one", "season 2", "1 episode"],
+                 ["show two"])
+        expect_first(sim, "seasons.png", False, "season 1", "2 episodes")
+        keep(sim, states, "tv-show-one-seasons")
+        sim.step("select", "season-1", ["second episode",
+                                       "unknown release date"])
+        expect_first(sim, "season-1.png", False, "pilot",
+                     "unknown release date")
+        keep(sim, states, "tv-season1-episodes")
+        sim.step("menu", "seasons-back", ["season 2"], ["second episode"])
+        sim.step("menu", "tvshows-back", ["show two"], ["season 2"])
+        sim.move("down")
+        sim.step("select", "show-two", ["show two"], ["season"])
+        expect_first(sim, "show-two.png", False, "only episode",
+                     "unknown release date")
+        keep(sim, states, "tv-show-two-episodes")
+        sim.step("menu", "tvshows-again", ["tv shows"])
+        sim.step("menu", "rich-videos-back", ["music videos",
+                                             "video playlists"])
+        sim.move("down", 2)
+        sim.step("select", "video-playlists", ["video playlists"],
+                 ["rentals"])
+        expect_first(sim, "video-playlists.png", False, "road trip",
+                     "3 videos")
+        keep(sim, states, "video-playlists")
+        sim.step("select", "road-trip", ["video one", "band a", "show one"])
+        expect_first(sim, "road-trip.png", False, "alpha movie", "1:32:00")
+        keep(sim, states, "playlist-road-trip")
+
+
+def pane_shows_cover(sim, label, colours=()):
+    """The Movies row's pane leaves the film picture and its count for a
+    slideshow of the films' covers, given 'colours' one of those. A cover
+    waits for the disk walk, and a load it interrupts is retried later."""
+    deadline = time.monotonic() + 20
+    while True:
+        time.sleep(2)
+        pane = sim.image().crop((186, 20, 320, 240))
+        middle = pane.getpixel((67, 110))
+        words = sim.read(pane)
+        shown = "videos" not in words and (not colours or any(
+            max(abs(a - b) for a, b in zip(middle, c)) < 12 for c in colours))
+        if shown or time.monotonic() > deadline:
+            break
+    pane.save(sim.case / f"{label}.png")
+    assert shown, f"{label}: no cover, {words!r} {middle}"
+
+
 def stock_navigation(sim, theme, states=None):
     if theme == "classic":
         sim.text("home", ["videos", "files"])
@@ -357,10 +540,18 @@ def stock_navigation(sim, theme, states=None):
     sim.text("movies-back", ["covered film", "film"], ["ipod video"])
     sim.step("menu", "videos-back", ["music videos", "video playlists"],
              ["indexed film"])
+    pane_shows_cover(sim, "pane-movies")
+    keep(sim, states, "pane-movies")
     sim.move("down", 2)
     sim.step("select", "tv-shows", ["tv shows"], ["rentals", "pilot"])
-    sim.step("select", "tv-episodes", ["pilot"])
-    sim.step("menu", "tv-back", ["tv shows"], ["rentals", "pilot"])
+    expect_first(sim, "tv-shows.png", True, "my show", "2 seasons")
+    sim.step("select", "tv-seasons", ["my show", "season 2"], ["pilot"])
+    expect_first(sim, "tv-seasons.png", False, "season 1", "1 episode")
+    sim.move("down")
+    sim.step("select", "tv-episodes", ["season 2"], ["season 1"])
+    expect_first(sim, "tv-episodes.png", False, "pilot", "march 8, 2026")
+    sim.step("menu", "tv-seasons-back", ["season 2"], ["pilot"])
+    sim.step("menu", "tv-back", ["tv shows"], ["rentals", "season 2"])
     sim.step("menu", "tv-shows-back", ["music videos", "video playlists"],
              ["pilot"])
     sim.move("down")
@@ -421,6 +612,7 @@ def main():
               flush=True)
         if states:
             stock_states(args.build, case / "stock", theme, states)
+            rich_states(args.build, case / "rich", theme, states)
             print(f"PASS {theme} stock states in {states}", flush=True)
 
 

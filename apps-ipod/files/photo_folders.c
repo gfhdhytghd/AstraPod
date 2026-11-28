@@ -1,8 +1,8 @@
 /***************************************************************************
  * GNU General Public License (version 2+)
  *
- * The pictures copied to the player as files, found by walking the disk when
- * Photos opens, for the Photos screens to show beside a Photo Database's.
+ * The pictures copied to the player as files, found by walking the disk while
+ * Photos is open, for the Photos screens to show beside a Photo Database's.
  *
  * Every folder that directly holds a picture is an album named after it; two
  * albums of the same name are shown as "Parent/Name". The walk leaves out
@@ -28,7 +28,6 @@
 #include <string.h>
 #include "config.h"
 #include "system.h"
-#include "kernel.h"
 #include "dir.h"
 #include "file.h"
 #include "fs_attr.h"
@@ -44,7 +43,7 @@ struct walk {
     int folder_count;
     size_t names_used, names_size;
     struct photo_file *top;     /* file i is top[-1 - i] */
-    int capacity;               /* files that fit beside the names */
+    bool (*checkpoint)(void);
     bool skip_full;
 };
 
@@ -87,9 +86,9 @@ static bool skipped_folder(const struct walk *w, int depth, const char *name)
 static uint32_t keep_name(struct walk *w, const char *name)
 {
     size_t len = strlen(name) + 1;
-    size_t room = w->names_size - w->names_used;
     size_t files = (size_t)(w->pf->file_count + 1) * sizeof(struct photo_file);
-    if (len + files > room)
+    if (ALIGN_UP(w->names_used + len, sizeof(uint32_t)) + files >
+        w->names_size)
         return UINT32_MAX;
     uint32_t at = w->names_used;
     memcpy(w->pf->names + at, name, len);
@@ -98,7 +97,7 @@ static uint32_t keep_name(struct walk *w, const char *name)
 }
 
 /* This folder's own pictures, kept as an album unless it holds a song */
-static void read_pictures(struct walk *w, bool *subfolders)
+static bool read_pictures(struct walk *w, bool *subfolders)
 {
     struct photo_folders *pf = w->pf;
     int first = pf->file_count;
@@ -106,13 +105,17 @@ static void read_pictures(struct walk *w, bool *subfolders)
     bool audio = false;
     DIR *dir = opendir(walk_path);
     if (!dir)
-        return;
+        return true;
     struct dirent *entry;
     while ((entry = readdir(dir)))
     {
         struct dirinfo info = dir_get_info(dir, entry);
         const char *name = (const char *)entry->d_name;
-        yield();
+        if (!w->checkpoint())
+        {
+            closedir(dir);
+            return false;
+        }
         if (skipped_entry(name, &info))
             continue;
         if (info.attribute & ATTR_DIRECTORY)
@@ -120,7 +123,7 @@ static void read_pictures(struct walk *w, bool *subfolders)
             *subfolders = true;
             continue;
         }
-        if ((filetype_get_attr(name) & FILE_ATTR_MASK) == FILE_ATTR_AUDIO)
+        if (!audio && filetype_get_attr(name) == FILE_ATTR_AUDIO)
             audio = true;
         if (audio || !is_picture(name))
             continue;
@@ -141,56 +144,67 @@ static void read_pictures(struct walk *w, bool *subfolders)
 
     bool root = !strcmp(walk_path, "/");
     if (pf->file_count == first)
-        return;
+        return true;
     if (audio || (!root && w->folder_count >= PHOTO_FOLDER_LIMIT))
     {
         pf->file_count = first;
         w->names_used = names_mark;
-        return;
+        return true;
     }
     if (root)
-        return;
+        return true;
     uint32_t path = keep_name(w, walk_path);
     if (path == UINT32_MAX)
     {
         pf->file_count = first;
         w->names_used = names_mark;
-        return;
+        return true;
     }
     struct photo_folder *folder = &pf->folders[w->folder_count++];
     folder->path = path;
     folder->label = path + (strrchr(walk_path, '/') + 1 - walk_path);
     folder->first = first;
     folder->count = pf->file_count - first;
+    return true;
 }
 
-static void walk(struct walk *w, int depth)
+static bool walk(struct walk *w, int depth)
 {
     bool subfolders = false;
-    read_pictures(w, &subfolders);
+    if (!read_pictures(w, &subfolders))
+        return false;
     if (!subfolders || depth >= WALK_MAX_DEPTH)
-        return;
+        return true;
 
     size_t len = strlen(walk_path);
     DIR *dir = opendir(walk_path);
     if (!dir)
-        return;
+        return true;
     struct dirent *entry;
     while ((entry = readdir(dir)))
     {
         struct dirinfo info = dir_get_info(dir, entry);
         const char *name = (const char *)entry->d_name;
-        yield();
+        if (!w->checkpoint())
+        {
+            closedir(dir);
+            return false;
+        }
         if (!(info.attribute & ATTR_DIRECTORY) || skipped_entry(name, &info) ||
             skipped_folder(w, depth, name) ||
             len + 1 + strlen(name) >= sizeof(walk_path))
             continue;
         strcpy(walk_path + len, len > 1 ? "/" : "");
         strcat(walk_path, name);
-        walk(w, depth + 1);
+        if (!walk(w, depth + 1))
+        {
+            closedir(dir);
+            return false;
+        }
         walk_path[len] = '\0';
     }
     closedir(dir);
+    return true;
 }
 
 /* qsort() has no context argument */
@@ -240,7 +254,8 @@ static void tell_apart(struct photo_folders *pf)
 }
 
 size_t photo_folders_scan(struct photo_folders *pf, void *buf, size_t size,
-                          bool skip_full_resolution)
+                          bool skip_full_resolution,
+                          bool (*checkpoint)(void))
 {
     size_t table = PHOTO_FOLDER_LIMIT * sizeof(struct photo_folder);
     memset(pf, 0, sizeof(*pf));
@@ -248,16 +263,17 @@ size_t photo_folders_scan(struct photo_folders *pf, void *buf, size_t size,
         return 0;
     struct walk w = {
         .pf = pf,
-        .names_size = size - table,
         .top = (struct photo_file *)ALIGN_DOWN((uintptr_t)buf + size,
                                               sizeof(uint32_t)),
+        .checkpoint = checkpoint,
         .skip_full = skip_full_resolution,
     };
     w.names_size = (char *)w.top - ((char *)buf + table);
     pf->folders = buf;
     pf->names = (char *)buf + table;
     strcpy(walk_path, "/");
-    walk(&w, 0);
+    if (!walk(&w, 0))
+        return 0;
     pf->album_count = w.folder_count;
 
     /* The records turned into walk order, then moved down to the names */

@@ -122,6 +122,7 @@ struct albums {
     fb_data *pane;              /* the menu pane's photo */
     fb_data *menu;              /* the menu as the grid opened over it */
     bool menu_split;
+    bool loaded;                 /* the interface can read the catalogue */
     int pane_set;               /* the set a loose pane photo is wanted for */
     int pane_file;              /* that photo, or -1 */
     int pane_last;              /* the photo shown last */
@@ -176,6 +177,8 @@ static void read_albums(struct albums *a, const struct stock_record *list)
             r.body - p < 32)
             break;
         a->album[a->album_count++] = p;
+        if (!photo_thumbs_checkpoint())
+            return;
     }
 }
 
@@ -191,7 +194,8 @@ static void read_photos(struct albums *a, const struct stock_record *list,
             r.body - p < 20 || !stock_db_u32(&a->db, p + 16, &id))
             break;
         a->photos[a->photo_count++] = (struct photo){id, p};
-        yield();
+        if (!photo_thumbs_checkpoint())
+            return;
     }
     qsort(a->photos, a->photo_count, sizeof(*a->photos), compare_photo);
 }
@@ -202,7 +206,7 @@ static const char *album_name(int row, void *data, char *buf, size_t size)
     if (row == 1)
         return str(LANG_SETTINGS);
     if (row == 0)
-        return str(LANG_FRUIT_ALL_PHOTOS);
+        return str(a->loaded ? LANG_FRUIT_ALL_PHOTOS : LANG_SCANNING_DISK);
     row--;
     if (row > db_rows(a))
         return photo_folders_label(&a->loose, row - db_rows(a) - 1);
@@ -1221,16 +1225,17 @@ static void paint_no_photos(struct stock_canvas *band)
 static enum list_pane_kind photos_pane(int row, void *data, int *art)
 {
     const struct albums *a = data;
-    if (a->indexed || a->loose.file_count)
+    if (a->loaded && (a->indexed || a->loose.file_count))
     {
         *art = row > 1 ? row : 0;
         return LIST_PANE_PHOTO;
     }
     struct menu_pane_content c = {
         .kind = LIST_PANE_PICTURE, .art = -1, .baseline = 179,
-        .paint = paint_no_photos,
+        .paint = a->loaded ? paint_no_photos : NULL,
     };
-    strlcpy(c.title, str(LANG_FRUIT_NO_PHOTOS), sizeof(c.title));
+    if (a->loaded)
+        strlcpy(c.title, str(LANG_FRUIT_NO_PHOTOS), sizeof(c.title));
     menu_pane_set_picture(&c);
     return LIST_PANE_PICTURE;
 }
@@ -1244,6 +1249,8 @@ static struct albums *pane_albums;
 static bool pane_next(int set)
 {
     struct albums *a = pane_albums;
+    if (!a->loaded)
+        return false;
     if (a->pane_file >= 0 && a->pane_set == set)
     {
         enum photo_thumb_state state =
@@ -1278,8 +1285,27 @@ static bool pane_next(int set)
 
 static int photos_list_action(int action, struct gui_synclist *lists)
 {
+    struct albums *a = lists->data;
     if (action == ACTION_REDRAW)
         gui_synclist_set_pane_callback(lists, photos_pane);
+    if (!a->loaded && photo_thumbs_ready())
+    {
+        a->loaded = true;
+        if (action == ACTION_NONE)
+            action = ACTION_REDRAW;
+    }
+    if (a->loaded)
+    {
+        int count = 2 + db_rows(a) + a->loose.album_count;
+        if (count != gui_synclist_get_nb_items(lists))
+        {
+            gui_synclist_set_nb_items(lists, count);
+            if (action == ACTION_NONE)
+                action = ACTION_REDRAW;
+        }
+    }
+    else if (action == ACTION_STD_OK && gui_synclist_get_sel_pos(lists) == 0)
+        return ACTION_NONE;
     return stock_media_list_action(action, lists);
 }
 
@@ -1293,24 +1319,46 @@ static unsigned char *read_database(struct albums *a, unsigned char *p,
         !stock_db_list(&a->db, 2, "mhla", &albums))
         return p;
     unsigned count = MIN(images.count, PHOTO_LIMIT);
-    p = (unsigned char *)ALIGN_UP((uintptr_t)p, 8);
+    unsigned char *aligned = (unsigned char *)ALIGN_UP((uintptr_t)p, 8);
     size_t need = count * (sizeof(*a->photos) + sizeof(*a->slides)) +
                   ALBUM_LIMIT * sizeof(*a->album);
-    if ((size_t)(end - p) < need)
+    if (aligned > end || (size_t)(end - aligned) < need)
         return p;
-    a->photos = (struct photo *)p;
+    a->photos = (struct photo *)aligned;
     a->album = (off_t *)(a->photos + count);
     a->slides = a->album + ALBUM_LIMIT;
     a->slide_capacity = count;
     read_photos(a, &images, count);
-    read_albums(a, &albums);
+    if (photo_thumbs_checkpoint())
+        read_albums(a, &albums);
     a->indexed = a->album_count && a->photo_count;
     return (unsigned char *)(a->slides + count);
 }
 
+struct photo_catalogue {
+    struct albums *albums;
+    unsigned char *start, *end;
+};
+
+static bool load_catalogue(void *data)
+{
+    const struct photo_catalogue *catalogue = data;
+    struct albums *a = catalogue->albums;
+    unsigned char *p = read_database(a, catalogue->start, catalogue->end);
+    if (!photo_thumbs_checkpoint())
+        return false;
+    size_t left = catalogue->end - p;
+    size_t order = left / 6 + a->photo_count * sizeof(int) + 16;
+    if (left > order)
+        p += photo_folders_scan(&a->loose, p, left - order, a->indexed,
+                                photo_thumbs_checkpoint);
+    a->order = (int *)ALIGN_UP((uintptr_t)p, sizeof(int));
+    return photo_thumbs_checkpoint();
+}
+
 int stock_photos_screen(void)
 {
-    struct albums a = {0};
+    struct albums a = {.db.fd = -1};
     int rc = 0;
     size_t size;
     unsigned char *arena = app_try_claim_buffer(&size, ARENA_OWNER);
@@ -1327,13 +1375,16 @@ int stock_photos_screen(void)
     a.menu = a.pane + PHOTO_PIXELS;
     a.pane_file = a.pane_last = -1;
     unsigned char *thumbs = (unsigned char *)(a.menu + PHOTO_PIXELS);
-    unsigned char *p = read_database(&a, thumbs + photo_thumbs_bytes(), end);
-    size_t left = end - p;
-    size_t order = left / 6 + a.photo_count * sizeof(int) + 16;
-    if (left > order)
-        p += photo_folders_scan(&a.loose, p, left - order, a.indexed);
-    a.order = (int *)ALIGN_UP((uintptr_t)p, sizeof(int));
-    photo_thumbs_open(&a.loose, thumbs, photo_thumbs_bytes());
+    size_t thumb_bytes = photo_thumbs_bytes();
+    if (thumbs > end || (size_t)(end - thumbs) < thumb_bytes)
+    {
+        app_release_buffer(ARENA_OWNER);
+        action_set_menu_back(menu_back);
+        return 0;
+    }
+    struct photo_catalogue catalogue = {
+        &a, (unsigned char *)ALIGN_UP((uintptr_t)thumbs + thumb_bytes, 8), end
+    };
     struct menu_pane_photos pane = { a.pane, pane_next };
     pane_albums = &a;
     menu_pane_set_photos(&pane);
@@ -1341,13 +1392,18 @@ int stock_photos_screen(void)
     struct ui_scene scene = {0};
     ui_scene_open_page(&scene, "photos-push");
     struct simplelist_info info;
-    simplelist_info_init(&info, str(LANG_FRUIT_PHOTOS),
-                         2 + db_rows(&a) + a.loose.album_count, &a);
+    simplelist_info_init(&info, str(LANG_FRUIT_PHOTOS), 2, &a);
+    if (!photo_thumbs_open(&a.loose, thumbs, thumb_bytes, load_catalogue,
+                           &catalogue))
+        a.loaded = true;
     info.get_name = album_name;
     info.action_callback = photos_list_action;
+    info.timeout = HZ / 10;
     info.page_with_left_right = true;
     while (true)
     {
+        if (a.loaded)
+            info.count = 2 + db_rows(&a) + a.loose.album_count;
         if (simplelist_show_list(&info))
         {
             rc = MENU_ATTACHED_USB;
@@ -1370,9 +1426,9 @@ int stock_photos_screen(void)
         if (rc)
             break;
     }
-    ui_scene_close_modal(&scene, !rc, "photos-pop");
     menu_pane_set_photos(NULL);
     photo_thumbs_close();
+    ui_scene_close_modal(&scene, !rc, "photos-pop");
     stock_db_close(&a.db);
     app_release_buffer(ARENA_OWNER);
     action_set_menu_back(menu_back);

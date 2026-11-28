@@ -23,9 +23,13 @@ enum photo_thumb_state {
 /* The memory photo_thumbs_open() wants */
 size_t photo_thumbs_bytes(void);
 
-/* Reads the cache's index for pf's files and starts making what is missing.
- * pf and buf must last until photo_thumbs_close(). */
-bool photo_thumbs_open(struct photo_folders *pf, void *buf, size_t size);
+/* Loads the catalogue and cache index, then makes missing thumbnails.
+ * The worker calls load(data) to fill pf. All storage must last until close. */
+bool photo_thumbs_open(struct photo_folders *pf, void *buf, size_t size,
+                       bool (*load)(void *), void *data);
+bool photo_thumbs_ready(void);
+/* From load(): yield and stop if Photos is closing or USB needs the disk. */
+bool photo_thumbs_checkpoint(void);
 void photo_thumbs_close(void);
 
 /* The files of the album on screen, [lo, hi), and those of them in view,

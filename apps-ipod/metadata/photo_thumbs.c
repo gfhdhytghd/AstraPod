@@ -140,10 +140,14 @@ static struct {
     volatile bool screen_ok;
     volatile unsigned generation;
 
-    /* The worker's own */
+    /* Worker startup and lifetime */
     unsigned thread;
     struct event_queue queue;
     bool running, stopped;
+    volatile bool ready, closing;
+    bool (*load)(void *);
+    void *load_data;
+    size_t cache_scratch;
     unsigned seen_focus;
     int forward, backward, sweep;
     enum job job;
@@ -266,6 +270,8 @@ static bool open_cache(void *temp, size_t temp_size)
 
     for (int i = 0; i < pt.pf->file_count; i++)
     {
+        if ((i & 63) == 0 && !photo_thumbs_checkpoint())
+            return false;
         struct photo_file *f = &pt.pf->files[i];
         uint32_t hash, check;
         if (!photo_folders_path(pt.pf, i, pt.path, sizeof(pt.path)))
@@ -278,8 +284,6 @@ static bool open_cache(void *temp, size_t temp_size)
         f->thumb = r->slot < 0 ? THUMB_FAILED : r->slot;
         f->thumb_w = r->w;
         f->thumb_h = r->h;
-        if ((i & 63) == 0)
-            yield();
     }
     lseek(pt.idx_fd, 0, SEEK_END);
     return true;
@@ -369,8 +373,7 @@ static bool decode_progress(int done, int rows)
 {
     (void)done;
     (void)rows;
-    yield();
-    if (!queue_empty(&pt.queue))
+    if (!photo_thumbs_checkpoint())
         pt.aborted = true;
     else if (pt.job == JOB_SCREEN)
         pt.aborted = pt.want_screen != pt.job_file;
@@ -504,7 +507,7 @@ static int next_thumb(void)
 
 static enum job next_job(int *file)
 {
-    if (pt.stopped)
+    if (!pt.ready || pt.stopped || pt.closing)
         return JOB_NONE;
     if (pt.want_screen >= 0 && pt.want_screen != pt.screen_file)
     {
@@ -529,6 +532,17 @@ static void close_files(void)
 static void worker(void)
 {
     struct queue_event ev;
+    if (pt.load(pt.load_data) && photo_thumbs_checkpoint())
+    {
+        /* The index borrows the space that will hold the thumbnails. */
+        if (pt.pf->file_count)
+            open_cache(pt.ram_pixels, pt.cache_scratch);
+        if (photo_thumbs_checkpoint())
+        {
+            membarrier();
+            pt.ready = true;
+        }
+    }
     for (;;)
     {
         int file;
@@ -582,15 +596,18 @@ size_t photo_thumbs_bytes(void)
            SCREEN_PIXELS * sizeof(fb_data) + STACK_BYTES + 64;
 }
 
-bool photo_thumbs_open(struct photo_folders *pf, void *buf, size_t size)
+bool photo_thumbs_open(struct photo_folders *pf, void *buf, size_t size,
+                       bool (*load)(void *), void *data)
 {
     memset(&pt, 0, sizeof(pt));
     pt.pf = pf;
+    pt.load = load;
+    pt.load_data = data;
     pt.dat_fd = pt.idx_fd = -1;
     pt.want_screen = pt.screen_file = -1;
     for (int i = 0; i < RAM_SLOTS; i++)
         pt.ram[i].file = -1;
-    if (size < photo_thumbs_bytes() || !pf->file_count)
+    if (size < photo_thumbs_bytes())
         return false;
     unsigned char *p = (unsigned char *)ALIGN_UP((uintptr_t)buf, 8);
     pt.stack = (long *)p;
@@ -604,9 +621,8 @@ bool photo_thumbs_open(struct photo_folders *pf, void *buf, size_t size)
     pt.work = p;
     mutex_init(&pt.lock);
 
-    /* the index is read into the memory the thumbnails will take */
-    open_cache(pt.ram_pixels, (unsigned char *)buf + size -
-                              (unsigned char *)pt.ram_pixels);
+    pt.cache_scratch = (unsigned char *)buf + size -
+                       (unsigned char *)pt.ram_pixels;
 
     queue_init(&pt.queue, true);
     pt.thread = create_thread(worker, pt.stack, STACK_BYTES, 0, "photo thumbs"
@@ -614,17 +630,30 @@ bool photo_thumbs_open(struct photo_folders *pf, void *buf, size_t size)
     if (!pt.thread)
     {
         queue_delete(&pt.queue);
-        close_files();
         return false;
     }
     pt.running = true;
     return true;
 }
 
+bool photo_thumbs_ready(void)
+{
+    bool ready = pt.ready;
+    membarrier();
+    return ready;
+}
+
+bool photo_thumbs_checkpoint(void)
+{
+    yield();
+    return !pt.closing && queue_empty(&pt.queue);
+}
+
 void photo_thumbs_close(void)
 {
     if (pt.running)
     {
+        pt.closing = true;
         queue_post(&pt.queue, EV_EXIT, 0);
         thread_wait(pt.thread);
         queue_delete(&pt.queue);

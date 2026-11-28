@@ -44,10 +44,12 @@ struct photo_folders {
 };
 
 /* Walks the disk into buf and returns the bytes kept from its start.
+ * Returns zero if checkpoint() cancels the walk or buf is too small.
  * skip_full_resolution leaves out the folder iTunes copies a Photo
  * Database's originals to. */
 size_t photo_folders_scan(struct photo_folders *pf, void *buf, size_t size,
-                          bool skip_full_resolution);
+                          bool skip_full_resolution,
+                          bool (*checkpoint)(void));
 
 /* A file's whole path, false when it does not fit */
 bool photo_folders_path(const struct photo_folders *pf, int file, char *buf,

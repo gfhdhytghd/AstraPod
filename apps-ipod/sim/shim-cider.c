@@ -25,6 +25,7 @@
 #include "screens/covers/panel_perf.h"
 #include "system/hash.h"
 #include "system/bg_task.h"
+#include "string-extra.h"
 
 #define TRACKS 40
 #define ART_ALBUMS 160

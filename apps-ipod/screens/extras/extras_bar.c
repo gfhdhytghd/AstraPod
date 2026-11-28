@@ -160,6 +160,14 @@ void extras_bar_put_ex(struct stock_canvas *canvas, const char *title,
     if (canvas->y >= EXTRAS_BAR_HEIGHT || !stock_art_ready())
         return;
     put_background(canvas);
+    extras_bar_put_marks(canvas, title, show_battery, show_play);
+}
+
+void extras_bar_put_marks(struct stock_canvas *canvas, const char *title,
+                          bool show_battery, bool show_play)
+{
+    if (canvas->y >= EXTRAS_BAR_HEIGHT || !stock_art_ready())
+        return;
     put_hold(canvas);
     if (title_font < 0)
         title_font = font_load_ex(TITLE_FONT, 0,

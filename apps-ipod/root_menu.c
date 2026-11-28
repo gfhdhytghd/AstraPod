@@ -78,6 +78,7 @@
 #include "games/quiz/quiz.h"
 #include "screens/browse/featured_artists.h"
 #include "screens/browse/browser_flat.h"
+#include "screens/browse/stock_media.h"
 #include "speech/language.h"
 #include "files/filetypes.h"
 #include "viewers/text_viewer/text_viewer.h"
@@ -1084,6 +1085,11 @@ static int documents_scrn(void* param)
 static int images_scrn(void* param)
 {
     (void)param;
+    if (ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC)
+    {
+        int result = stock_photos_screen();
+        return result == 0 ? GO_TO_PREVIOUS : result;
+    }
     return browser_flat(FLAT_IMAGES);
 }
 

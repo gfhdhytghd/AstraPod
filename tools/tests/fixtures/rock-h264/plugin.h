@@ -9,6 +9,13 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
+#define __PCTOOL__
+#define __CONFIG_H__
+#define INIT_ATTR
+#include "button.h"
+#undef INIT_ATTR
+#undef __CONFIG_H__
+#undef __PCTOOL__
 #include "hw_h264.h"
 #include "plugins/rock_h264_audio.h"
 

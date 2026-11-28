@@ -150,6 +150,30 @@ elif src.name == "video_playback.c":
     }""")
     replace("int action = rb->get_action(CONTEXT_WPS, TIMEOUT_NOBLOCK);",
             "int action = rb->get_action(CONTEXT_VIDEO_PLAYBACK, TIMEOUT_NOBLOCK);")
+    # Inline remote codes bypass the action keymap. Keep their volume keys
+    # independent of the wheel, which also scrubs and changes picture scaling.
+    replace("    case ACTION_WPS_VOLUP:\n", """\
+    case BUTTON_MULTIMEDIA_VOLUME_UP:
+    case BUTTON_MULTIMEDIA_VOLUME_UP | BUTTON_REPEAT:
+    case BUTTON_MULTIMEDIA_VOLUME_DOWN:
+    case BUTTON_MULTIMEDIA_VOLUME_DOWN | BUTTON_REPEAT:
+        rb->adjust_volume((action & ~BUTTON_REPEAT) ==
+                          BUTTON_MULTIMEDIA_VOLUME_UP ? 1 : -1);
+        video_osd_show(osd, VIDEO_OVERLAY_VOLUME);
+        *redraw = true;
+        break;
+    case ACTION_WPS_VOLUP:
+""")
+    replace("    case ACTION_WPS_SKIPPREV:\n    case ACTION_WPS_SKIPNEXT:",
+            """    case BUTTON_MULTIMEDIA_PREV:
+    case ACTION_WPS_SKIPPREV:
+    case BUTTON_MULTIMEDIA_NEXT:
+    case ACTION_WPS_SKIPNEXT:""")
+    replace("        bool forward = action == ACTION_WPS_SKIPNEXT;",
+            """        bool forward = action == ACTION_WPS_SKIPNEXT ||
+                       action == BUTTON_MULTIMEDIA_NEXT;""")
+    replace("    case ACTION_WPS_PLAY:", """    case BUTTON_MULTIMEDIA_PLAYPAUSE:
+    case ACTION_WPS_PLAY:""")
 
     for line in (
         "    rb->pcmbuf_fade(false, true);", "    rb->pcmbuf_fade(false, false);",

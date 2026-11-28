@@ -1107,6 +1107,10 @@ static bool photo_grid(const struct albums *a, const char *title)
     lcd_set_viewport(NULL);
     bool usb = false;
     grid_entry(a, title);
+    int select_buttons = BUTTON_SELECT;
+#ifdef BUTTON_RC_SELECT
+    select_buttons |= BUTTON_RC_SELECT;
+#endif
     for (;;)
     {
         bool back = false;
@@ -1144,8 +1148,7 @@ static bool photo_grid(const struct albums *a, const char *title)
             sel = MAX(0, sel - 1);
         else if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
             sel = MIN(total - 1, sel + 1);
-        else if (action == ACTION_STD_OK &&
-                 (button & (BUTTON_SELECT | BUTTON_RC_SELECT)))
+        else if (action == ACTION_STD_OK && (button & select_buttons))
         {
             enum photo_view_result result = photo_view(a, &sel);
             usb = result == PHOTO_VIEW_USB;
@@ -1428,7 +1431,7 @@ static bool browse_photo_files(struct photo_catalogue *catalogue)
         dir.ready = !open_photo_worker(catalogue, load_loose);
         struct simplelist_info info;
         char *name = strrchr(path, '/') + 1;
-        char *title = *name ? name : str(LANG_FRUIT_BROWSE_PHOTOS);
+        char *title = *name ? name : (char *)str(LANG_FRUIT_BROWSE_PHOTOS);
         simplelist_info_init(&info, title, 1, &dir);
         info.get_name = directory_name;
         info.action_callback = directory_action;

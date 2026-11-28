@@ -13,7 +13,9 @@
  *
  * The Picture page is stock's Now Playing Shuffle selector with Fit, Fill
  * and Stretch for Off, Songs and Albums: the same well, highlight, labels,
- * slides and steps of the wheel.
+ * slides and steps of the wheel. It differs in one thing: Shuffle applies
+ * its value when the page closes, and a step here applies at once, so the
+ * movie previews each mode.
  *
  * Parts: composing the layer (over, put, tile, text), the pages, the slides,
  * and presenting a frame.

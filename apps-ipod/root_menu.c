@@ -2017,8 +2017,8 @@ enum list_pane_kind root_menu_item_pane(const struct menu_item_ex *item,
             *art = STOCK_ART_NO_CONTENT_PHOTO_PREVIEW;
             break;
         case GO_TO_VIDEOS:
-            *art = STOCK_ART_NO_CONTENT_MOVIES_PREVIEW;
-            break;
+            fruit_videos_pane(str(LANG_VIDEOS));
+            return LIST_PANE_PICTURE;
         case GO_TO_CALENDARS:
         {
             struct menu_pane_content pane;

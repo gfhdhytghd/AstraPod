@@ -76,6 +76,7 @@ metadata/tag_trim.c
 metadata/albumart.c
 metadata/itunes_art.c
 metadata/art_cache.c
+metadata/video_art.c
 metadata/art_name.c
 #endif
 metadata/photo_thumbs.c
@@ -285,6 +286,7 @@ files/file_index.c
 files/stock_db.c
 files/photo_folders.c
 files/book_index.c
+files/video_index.c
 files/zip_member.c
 files/filetypes.c
 files/path_list.c

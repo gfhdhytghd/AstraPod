@@ -24,6 +24,9 @@ struct menu_pane_content {
     int x, y, baseline;
     /* LIST_PANE_PICTURE: drawn over the backdrop before the art, or NULL. */
     void (*paint)(struct stock_canvas *band);
+    /* LIST_PANE_ART: 0 for a slideshow of the library's album covers, else
+     * of the covers of the videos of these enum stock_video_kind bits. */
+    unsigned videos;
     int stamp;                  /* a new value repaints the pane */
 };
 
@@ -38,7 +41,9 @@ void menu_pane_select(const struct menu_pane_content *content,
                       unsigned identity);
 /* What a LIST_PANE_PICTURE row shows: `art` at (x, y), then `title` and
  * `caption` centred in the title font. A list's pane callback sets it for
- * the row it is asked about before returning LIST_PANE_PICTURE. */
+ * the row it is asked about before returning LIST_PANE_PICTURE. Content of
+ * kind LIST_PANE_ART instead makes the row a slideshow of its `videos`,
+ * showing `art` and `title` as a category pane does while it has none. */
 void menu_pane_set_picture(const struct menu_pane_content *content);
 /* What a LIST_PANE_PHOTO row shows: a screen-size photo behind the pane at
  * 1:1, its window panning from one side to the other, then the next photo.

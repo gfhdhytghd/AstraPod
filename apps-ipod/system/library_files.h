@@ -65,6 +65,8 @@
 #define LIB_IMAGES_FILE     LIB_CACHE_DIR "/images.dat"
 #define LIB_VIDEOS_FILE     LIB_CACHE_DIR "/videos.dat"
 #define LIB_BOOK_INDEX_FILE LIB_CACHE_DIR "/books.dat"
+#define LIB_VIDEO_INDEX_FILE LIB_CACHE_DIR "/video_index.dat"
+#define LIB_VIDEO_ART_DIR   LIB_ART_DIR "/video"
 #define LIB_SPIKE_RUN_FILE  LIB_CACHE_DIR "/spike_run.dat"
 #define LIB_UNREADABLE_FILE LIB_CACHE_DIR "/unreadable.dat"
 #define LIB_UNREADABLE_LIST LIB_CACHE_DIR "/unreadable.txt"
@@ -117,6 +119,8 @@
 #define LIB_PATHS_VERSION   1
 #define LIB_UNREADABLE_MAGIC 0x44524e55u    /* "UNRD" */
 #define LIB_UNREADABLE_VERSION 1
+#define LIB_VIDEO_INDEX_MAGIC 0x58444956u   /* "VIDX" */
+#define LIB_VIDEO_INDEX_VERSION 2
 
 /* One line in logs/upgrade.log, for a carry-over made outside the steps */
 void library_files_log(const char *fmt, ...);

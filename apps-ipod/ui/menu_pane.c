@@ -3,9 +3,10 @@
  *
  * The right half of a menu under style.menu_pane=split, as the stock iPod
  * Classic draws it, from its own bitmaps: a slideshow of the library's
- * covers, a list's photos, or on the blue-grey backdrop the playing track,
- * the player's free space, or the selected row's name, picture and value.
- * The rows cast a shadow on its first columns.
+ * album covers or of one kind of video's covers, a list's photos, or on the
+ * blue-grey backdrop the playing track, the player's free space, or the
+ * selected row's name, picture and value. The rows cast a shadow on its
+ * first columns.
  *
  * Parts: the page on screen and its depth; the fonts; the slideshow, whose
  * covers the background thread reads into one buffer; the photos, which the
@@ -35,6 +36,8 @@
 #include "draw/viewport.h"
 #include "metadata/album_palette.h"
 #include "metadata/art_cache.h"
+#include "metadata/video_art.h"
+#include "screens/browse/stock_media.h"
 #include "system/bg_task.h"
 #include "string-extra.h"
 #include "animation.h"
@@ -49,7 +52,7 @@
 /* PreviewArea_Shadow_Image's width. */
 #define SHADOW_W 26
 /* A cover is read 272 pixels square, so the pane has room to pan over it. */
-#define SHOW_EDGE 272
+#define SHOW_EDGE VIDEO_ART_PANE
 #define SHOW_BYTES (SHOW_EDGE * SHOW_EDGE * sizeof(fb_data))
 #define SHOW_EVENT 0x1185
 #define SHOW_TRIES 8
@@ -103,6 +106,8 @@ static struct {
     volatile int state;
     volatile bool release;
     int album;              /* the cover in the buffer, or -1 */
+    unsigned source;        /* the content's `videos` it was chosen from */
+    volatile unsigned wanted;   /* the source of the cover asked for */
     uint32_t started;       /* when the current cover began its pan */
     uint32_t fade_started;
     int fade_level;         /* how much of the cover the pane shows, of 32 */
@@ -290,7 +295,11 @@ static void show_work(const struct queue_event *ev)
     }
     show.state = SHOW_LOADING;
     probe.work++;
-    int count = tagcache_album_count();
+    unsigned source = show.wanted;
+    if (source != show.source)
+        show.album = -1;
+    show.source = source;
+    int count = source ? 1 : tagcache_album_count();
     bool loaded = false;
     fb_data *pixels = core_get_data_pinned(show.handle);
     for (int i = 0; i < SHOW_TRIES && count > 0 && !show.release; i++)
@@ -300,6 +309,16 @@ static void show_work(const struct queue_event *ev)
         if (bg_task_should_stop(&show_task))
         {
             probe.yielded++;
+            break;
+        }
+        if (source)
+        {
+            int video = stock_videos_pane_cover(source, show.album, pixels);
+            if (video >= 0)
+            {
+                show.album = video;
+                loaded = true;
+            }
             break;
         }
         int album = rand() % count;
@@ -341,8 +360,26 @@ static void show_request(void)
         }
         show.album = -1;
     }
+    show.wanted = shown.videos;
     show.state = SHOW_REQUESTED;
     bg_task_post(&show_task, SHOW_EVENT);
+}
+
+/* Whether the buffer holds, or will, a cover from another source than the
+ * slideshow on screen, and none is loading */
+static bool show_stale(void)
+{
+    return show.wanted != shown.videos && show.state != SHOW_REQUESTED &&
+           show.state != SHOW_LOADING;
+}
+
+/* Ask for a cover when the pane shows a slideshow whose source the buffer
+ * neither holds nor is loading. */
+static void show_want(void)
+{
+    if (shown.kind == LIST_PANE_ART &&
+        (show.state == SHOW_EMPTY || show_stale()))
+        show_request();
 }
 
 /* Whether the buffer holds a picture to draw. While the next cover loads
@@ -350,6 +387,9 @@ static void show_request(void)
  * screen. */
 static bool show_drawable(void)
 {
+    /* A cover leaving to the right is the one that was on screen. */
+    if (slide_dir <= 0 && show.source != shown.videos)
+        return false;
     return show.state == SHOW_READY || show.state == SHOW_FRESH ||
            ((show.state == SHOW_REQUESTED || show.state == SHOW_LOADING ||
              show.state == SHOW_NONE) && show.album >= 0);
@@ -709,8 +749,10 @@ static void compose_still(struct stock_canvas *band,
         case LIST_PANE_PICTURE:
             if (c->paint)
                 c->paint(band);
-            if (c->art >= 0)
+            if (c->art >= 0 && stock_art[c->art].colors)
                 stock_art_put(band, c->art, c->x, c->y);
+            else if (c->art >= 0)
+                stock_art_mask(band, c->art, c->x, c->y, WHITE);
             break;
         default:
             if (c->art >= 0)
@@ -841,7 +883,7 @@ static void paint_content(struct ui_rect clip, uint32_t now)
         return;
     }
     bool art = slide_dir || shown.kind == LIST_PANE_ART;
-    if (art && show.state == SHOW_FRESH)
+    if (art && show.state == SHOW_FRESH && show_drawable())
         show_begin(now);
     if (!art || !show_drawable())
     {
@@ -886,7 +928,8 @@ static bool same_content(const struct menu_pane_content *a,
     return a->kind == b->kind && a->art == b->art &&
            !strcmp(a->title, b->title) && !strcmp(a->caption, b->caption) &&
            a->x == b->x && a->y == b->y && a->baseline == b->baseline &&
-           a->paint == b->paint && a->stamp == b->stamp;
+           a->paint == b->paint && a->stamp == b->stamp &&
+           a->videos == b->videos;
 }
 
 void menu_pane_select(const struct menu_pane_content *content,
@@ -916,14 +959,14 @@ void menu_pane_select(const struct menu_pane_content *content,
             pending_at = USEC_TIMER;
         }
     }
-    if (shown.kind == LIST_PANE_ART && show.state == SHOW_EMPTY)
-        show_request();
+    show_want();
 }
 
 void menu_pane_set_picture(const struct menu_pane_content *content)
 {
     picture = *content;
-    picture.kind = LIST_PANE_PICTURE;
+    if (picture.kind != LIST_PANE_ART)
+        picture.kind = LIST_PANE_PICTURE;
 }
 
 /* ---- motion ---- */
@@ -931,6 +974,12 @@ void menu_pane_set_picture(const struct menu_pane_content *content)
 static void cover_step(uint32_t now, struct ui_rect *damage)
 {
     struct ui_rect pane = menu_pane_rect();
+    /* A load for a source the pane has left is followed by its own. */
+    if (show_stale())
+    {
+        show_request();
+        return;
+    }
     /* Retry an interrupted or unsuccessful load a cover's life later. */
     if (show.state == SHOW_NONE && now - show.none_at >= SHOW_LIFE_US)
     {
@@ -1043,11 +1092,11 @@ struct ui_rect menu_pane_step(void)
         if (from_art != to_art)
             show.keep_pixels = false;
         has_pending = false;
-        if (to_art && show.state == SHOW_EMPTY)
-            show_request();
+        show_want();
         /* A cover leaves to the right, or arrives from there. */
         if (from_art != to_art && show.state == SHOW_READY &&
-            shown.kind != LIST_PANE_PHOTO && under.kind != LIST_PANE_PHOTO)
+            shown.kind != LIST_PANE_PHOTO && under.kind != LIST_PANE_PHOTO &&
+            (from_art || show.source == shown.videos))
         {
             slide_dir = from_art ? 1 : -1;
             slide_started = now;
@@ -1134,6 +1183,8 @@ int menu_pane_deadline(void)
             wait = 0;
         else if (show.fading)
             wait = MIN(wait, frame);
+        else if (show_stale())
+            wait = 0;
         else if (show.state == SHOW_NONE)
         {
             uint32_t age = now - show.none_at;

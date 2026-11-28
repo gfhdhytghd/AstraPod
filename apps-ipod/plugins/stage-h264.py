@@ -484,7 +484,8 @@ int video_h264_play(const char *filepath,""")
             "    VIDEO_OVERLAY_VOLUME,\n    VIDEO_OVERLAY_PICTURE,\n"
             "    VIDEO_OVERLAY_BRIGHTNESS,")
     replace("    enum video_overlay mode;",
-            "    enum video_overlay mode;\n    int picture_mode;")
+            "    enum video_overlay mode;\n    int picture_mode;\n"
+            "    int picture_pull;")
     replace("    bool stock = osd->options != NULL;",
             "    bool stock = osd->options != NULL;\n"
             "    bool stock_osd = stock && osd->options->stock_osd;")
@@ -535,7 +536,10 @@ static enum video_input_action video_input(bool *paused, long *start_tick,""")
             """        *redraw = true;
         if (osd->mode == VIDEO_OVERLAY_PICTURE)
         {
-            osd->picture_mode = osd->options->picture_mode(direction);
+            if (stock_osd)
+                video_stock_picture_wheel(osd, direction);
+            else
+                osd->picture_mode = osd->options->picture_mode(direction);
             video_osd_show(osd, VIDEO_OVERLAY_PICTURE);
         }
         else if (osd->mode == VIDEO_OVERLAY_BRIGHTNESS)

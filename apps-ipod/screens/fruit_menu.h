@@ -26,6 +26,9 @@ bool fruit_menu_is_stock(const struct menu_item_ex *menu);
 enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
                                          const struct menu_item_ex *item,
                                          int *art);
+/* Set the pane of a row titled `title` that leads to every video: a
+ * slideshow of their covers. Return LIST_PANE_PICTURE after it. */
+void fruit_videos_pane(const char *title);
 /* For a Settings row stock changes in place: the row's kind and the value
  * it shows, and, on Select, stepping it to its next value. False for any
  * other row. */

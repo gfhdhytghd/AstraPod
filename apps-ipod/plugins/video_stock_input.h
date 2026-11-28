@@ -9,6 +9,30 @@
 /* A band was sliding at the last present: present again while paused. */
 static bool video_stock_moving;
 
+/* Wheel events, a sixth of a turn, that step the picture mode, as a step of
+ * stock's Shuffle selector */
+#define VIDEO_STOCK_PICTURE_STEP 4
+
+/* Turning leans the highlight towards the next mode, and a sixth of a turn
+ * moves to it; at either end the wheel does nothing. */
+static void video_stock_picture_wheel(struct video_osd *osd, int direction)
+{
+    int next = osd->picture_mode + direction;
+    if (next < 0 || next >= VIDEO_PICTURE_COUNT)
+    {
+        osd->picture_pull = 0;
+        return;
+    }
+    if (osd->picture_pull * direction < 0)
+        osd->picture_pull = 0;
+    osd->picture_pull += direction;
+    if (osd->picture_pull * direction >= VIDEO_STOCK_PICTURE_STEP)
+    {
+        osd->picture_mode = osd->options->picture_mode(direction);
+        osd->picture_pull = 0;
+    }
+}
+
 /* SELECT steps Progress, Scrub, Brightness and Picture, then hides. SELECT
  * after a scrub commits it and hides, and SELECT from Volume hides. */
 static enum video_input_action video_stock_select(struct video_osd *osd)
@@ -29,6 +53,7 @@ static enum video_input_action video_stock_select(struct video_osd *osd)
     case VIDEO_OVERLAY_BRIGHTNESS:
         if (osd->options->picture_mode)
             mode = VIDEO_OVERLAY_PICTURE;
+        osd->picture_pull = 0;
         break;
     default:
         break;
@@ -53,7 +78,8 @@ static void video_stock_present(unsigned char *const planes[3], bool paused,
     };
     struct video_stock_state state = {
         .title = osd->title,
-        .picture = video_picture_label(osd),
+        .picture = osd->picture_mode,
+        .picture_pull = osd->picture_pull,
         .position_ms = osd->pending_seek ? osd->seek_ms : position_ms,
         .duration_ms = duration_ms,
         .mode = modes[osd->mode],

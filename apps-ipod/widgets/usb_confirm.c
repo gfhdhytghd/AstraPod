@@ -12,13 +12,9 @@
 #include "system/shutdown.h"
 #include "screens/playback/wps.h"
 #include "screens/playback/handoff.h"
-#include "screens/playback/cider.h"
-#include "lang.h"
 #include "audio.h"
 #include "backlight.h"
 #include "font.h"
-#include "ui/native_theme_runtime.h"
-#include <string.h>
 #ifdef HAVE_USB_PODLINK
 #include "screens/playback/handoff_sheet.h"
 #endif
@@ -28,18 +24,6 @@ static const char *const lines[] = {
     "SELECT  Connect",
     "MENU    Charge only",
 };
-
-static bool remote_choice(void)
-{
-    return handoff_capable() && !cider_active() &&
-           (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE)) == AUDIO_STATUS_PLAY;
-}
-
-static const char *remote_hint(void)
-{
-    return ui_wheel_navigation() ? "Hold SELECT   Remote control" :
-                                   (const char *)str(LANG_HANDOFF_USB);
-}
 
 static void confirm_measure(struct dialog *d, struct screen *s,
                             struct viewport *box, void *data)
@@ -54,15 +38,8 @@ static void confirm_measure(struct dialog *d, struct screen *s,
         s->getstringsize(lines[i], &w, NULL);
         width = MAX(width, w);
     }
-    bool remote = remote_choice();
-    if (remote)
-    {
-        int w;
-        s->getstringsize(remote_hint(), &w, NULL);
-        width = MAX(width, w);
-    }
     box->width = MIN(width + in.left + in.right, s->lcdwidth - 2 * d->style.edge_margin);
-    box->height = (ARRAYLEN(lines) + remote) * s->getcharheight() + in.top + in.bottom;
+    box->height = ARRAYLEN(lines) * s->getcharheight() + in.top + in.bottom;
     box->x = (s->lcdwidth - box->width) / 2;
     box->y = (s->lcdheight - box->height) / 2;
 }
@@ -77,8 +54,6 @@ static void confirm_draw(struct dialog *d, struct screen *s,
     s->set_drawmode(DRMODE_FG);
     for (unsigned i = 0; i < ARRAYLEN(lines); ++i)
         s->putsxy(0, i * s->getcharheight(), lines[i]);
-    if (remote_choice())
-        s->putsxy(0, ARRAYLEN(lines) * s->getcharheight(), remote_hint());
 }
 
 
@@ -87,7 +62,7 @@ static int confirm_action(struct dialog *d, int action, void *data)
     uint32_t epoch = *(uint32_t *)data;
     if (!usb_confirm_pending(epoch))
         return DIALOG_ABORT;
-    if (remote_choice() && handoff_prompt_wps(epoch))
+    if (handoff_prompt_wps(epoch))
         return DIALOG_ACCEPT;
     switch (action)
     {
@@ -97,11 +72,6 @@ static int confirm_action(struct dialog *d, int action, void *data)
                 break;
             handoff_usb_dismissed();
             usb_confirm_reply(epoch, action == ACTION_STD_OK);
-            return DIALOG_ACCEPT;
-        case ACTION_STD_NEXT:
-            if (!d->backlight_on || !remote_choice()) break;
-            usb_confirm_reply(epoch, false);
-            handoff_begin();
             return DIALOG_ACCEPT;
         case ACTION_WPS_PLAY:
         case BUTTON_MULTIMEDIA_PLAYPAUSE:
@@ -127,7 +97,6 @@ static const struct button_mapping *confirm_keymap(int context)
     static const struct button_mapping keys[] = {
         { ACTION_STD_OK, BUTTON_SELECT, BUTTON_NONE },
         { ACTION_STD_CANCEL, BUTTON_MENU, BUTTON_NONE },
-        { ACTION_STD_NEXT, BUTTON_RIGHT, BUTTON_NONE },
         { ACTION_WPS_PLAY, BUTTON_PLAY | BUTTON_REL, BUTTON_PLAY },
 #ifdef IPOD_ACCESSORY_PROTOCOL
         { ACTION_STD_CANCEL, BUTTON_RC_MENU, BUTTON_NONE },
@@ -167,8 +136,7 @@ static void confirm_classic_measure(struct dialog *d, struct screen *s,
     int hfont = c->head_font >= 0 ? c->head_font : box->font;
     int hch = font_get(hfont)->height;
     int bch = font_get(box->font)->height;
-    int count = remote_choice() ? 3 : 2;
-    int rows_h = count * DIALOG_POPUP_BUTTON_H + (count - 1) * USB_POPUP_ROW_GAP;
+    int rows_h = 2 * DIALOG_POPUP_BUTTON_H + USB_POPUP_ROW_GAP;
     int box_w = MIN(s->lcdwidth - 40, 272);
     int box_h = 14 + hch + 6 + 2 * bch + 2 + 12 + rows_h + 12;
     if (box_h > s->lcdheight - 20)
@@ -186,15 +154,13 @@ static void confirm_classic_draw(struct dialog *d, struct screen *s,
 {
     (void)d;
     struct usb_classic_ctx *c = data;
-    bool remote = remote_choice();
-    int count = remote ? 3 : 2;
     int hfont = c->head_font >= 0 ? c->head_font : content->font;
     int lfont = c->label_font >= 0 ? c->label_font : content->font;
     int kfont = content->font;
     int hch = font_get(hfont)->height;
     int bch = font_get(content->font)->height;
     int old_font = content->font;
-    int rows_h = count * DIALOG_POPUP_BUTTON_H + (count - 1) * USB_POPUP_ROW_GAP;
+    int rows_h = 2 * DIALOG_POPUP_BUTTON_H + USB_POPUP_ROW_GAP;
     int ry = content->height - 12 - rows_h;
     unsigned shadow = LCD_RGBPACK(4, 10, 24);
     unsigned body_fg = LCD_RGBPACK(234, 240, 250);
@@ -225,13 +191,6 @@ static void confirm_classic_draw(struct dialog *d, struct screen *s,
     dialog_draw_popup_action_row(s, 12, ry, row_w, DIALOG_POPUP_BUTTON_H,
                                  "SELECT", false, "Connect",
                                  kfont, lfont);
-    if (remote)
-    {
-        ry += DIALOG_POPUP_BUTTON_H + USB_POPUP_ROW_GAP;
-        dialog_draw_popup_action_row(s, 12, ry, row_w, DIALOG_POPUP_BUTTON_H,
-                                     "RIGHT", true, "Remote Control",
-                                     kfont, lfont);
-    }
     s->set_drawmode(DRMODE_SOLID);
 }
 

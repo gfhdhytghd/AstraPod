@@ -4,7 +4,7 @@
 Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [--themes THEME,THEME,...]
 
 For each theme, opens and screenshots:
-  - USB Disk Mode consent (one-press MENU = Charge Only, SELECT = Connect; PLAY stays open)
+  - USB Disk Mode consent (one-press MENU = Charge Only, SELECT = Connect; RIGHT stays open)
   - Yes/No confirmation (pop-up under Classic/Fruit; one-press LEFT/MENU = No,
     RIGHT/SELECT = Yes; PLAY stays open; wheel does not shift selection)
   - Transient dark-glass splash notice (captured while visible, restores cleanly)
@@ -321,11 +321,11 @@ def run_theme(binary, simdisk, env, out, theme):
             res["usb_opened"] = differ(home, usb)
             if classic:
                 res["usb_is_popup"] = is_dimmed_popup(home, usb)
-                # PLAY stays playback, wheel & LEFT do not dismiss or shift
-                for k in ("space", "Down", "Left"):
-                    s.tap(k)
-                    time.sleep(0.15)
-                res["usb_play_wheel_left_inert"] = not differ(usb, settle(s))
+            # Transport and wheel input keep the two-choice prompt open.
+            for k in ("space", "Down", "Left", "Right"):
+                s.tap(k)
+                time.sleep(0.15)
+            res["usb_transport_and_wheel_keep_prompt"] = not differ(usb, settle(s))
             # One press of MENU -> Charge Only -> restores home cleanly
             s.tap("Escape")
             after_usb_menu = settle(s)

@@ -202,7 +202,7 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 
 Classic sets the second keyword of every style except `list_scroll` and
 `menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`, and Fruit
-Company Ultra is Fruit Company with `style.motion=ultra`.  In a stock menu
+Company Ultra is Fruit Company with `style.motion=ultra`. In a stock menu
 tree, Previous, Next and Play/Pause control playback. Use the wheel to
 move, Select to act, and Menu to go back. Games and plugins own their
 controls. To

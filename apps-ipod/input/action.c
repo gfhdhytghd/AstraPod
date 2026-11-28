@@ -1475,6 +1475,18 @@ static int get_rock_action(int context, int timeout,
 }
 #endif
 
+static int get_action_measured(action_cur_t *current)
+{
+    if (!ui_perf_enabled())
+        return get_action_worker(&action_last, current);
+
+    uint32_t start = USEC_TIMER;
+    int timeout = current->timeout;
+    int action = get_action_worker(&action_last, current);
+    ui_perf_note_action_wait((uint32_t)USEC_TIMER - start, timeout);
+    return action;
+}
+
 int get_action(int context, int timeout)
 {
     wheel_set_detent_mode(false);
@@ -1494,12 +1506,7 @@ int get_action(int context, int timeout)
     action_cur_t current;
     init_act_cur(&current, context, ui_scene_poll(timeout), NULL);
 
-    bool measure = ui_perf_enabled();
-    uint32_t start = measure ? USEC_TIMER : 0;
-    int requested_timeout = current.timeout;
-    int action = get_action_worker(&action_last, &current);
-    if (measure)
-        ui_perf_note_action_wait((uint32_t)USEC_TIMER - start, requested_timeout);
+    int action = get_action_measured(&current);
 
     action = do_backlight(&action_last, &current, action);
     scene_takeover(action);
@@ -1579,7 +1586,7 @@ int get_custom_action(int context,int timeout,
     action_cur_t current;
     init_act_cur(&current, context, ui_scene_poll(timeout), get_context_map);
 
-    int action = get_action_worker(&action_last, &current);
+    int action = get_action_measured(&current);
 
     action = do_backlight(&action_last, &current, action);
     scene_takeover(action);

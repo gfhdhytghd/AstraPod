@@ -8993,7 +8993,9 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
             {
                 transfers = (struct ui_perf_transfers){0};
                 deferred_rows = 0;
-                *trace = ui_motion_begin(model->motion_trace ?: "cover-flow");
+                const char *route = leaving ? "cover-flow-exit" :
+                                    model->motion_trace ?: "cover-flow";
+                *trace = ui_motion_begin(route);
                 trace_attempted = true;
             }
             bool motion_begins = motion && !flow_moving;
@@ -9314,6 +9316,14 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
             }
             if (pf_scene.capturing)
                 ui_scene_start(&pf_scene);
+            /* Land the scroll on its last submitted frame. The next input
+             * can be a new scroll or a page exit after an idle wait. */
+            if (trace_attempted && pf_state == pf_idle && !fade)
+            {
+                ui_motion_end(trace);
+                trace_attempted = false;
+                flow_moving = false;
+            }
             first_frame = false;
             dirty_top = LCD_HEIGHT;
             dirty_end = 0;
@@ -9438,6 +9448,10 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
 #endif
             if (flat_view() || !pf_motion_scale || dark || leaving)
                 return leave_result;
+            ui_motion_end(trace);
+            trace_attempted = false;
+            flow_moving = false;
+            flow_due = USEC_TIMER;
             if (pf_scene.backdrop_handle > 0 && pf_scene_stale())
             {
                 /* Join before the theme changes, as for the modal screens. */

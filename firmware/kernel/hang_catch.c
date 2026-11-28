@@ -225,10 +225,11 @@ static void NORETURN_ATTR hang_show(void)
     unsigned int y = 1;
 #ifdef HAVE_HANG_CATCH_FIQ
     panic_screen_enter();
-#endif
+#else
     int n = t && hang_sp >= (uint32_t)t->stack
           ? stack_scan(hang_sp, (uint32_t)t->stack + t->stack_size,
                        calls, STACK_CALLS) : 0;
+#endif
 
     crumb(CR_HANG, hang_stuck ? 0 : hang_pc);
 #ifndef HAVE_HANG_CATCH_FIQ
@@ -249,7 +250,6 @@ static void NORETURN_ATTR hang_show(void)
     struct crumb_crash_context context = {
         .kind = CRUMB_CRASH_HANG, .pc = hang_pc, .sp = hang_sp, .lr = hang_lr,
         .status = get_processor_mode(),
-        .calls = { calls[0], calls[1], calls[2], calls[3] },
     };
     strlcpy(context.thread, t && t->name ? t->name : "?", sizeof context.thread);
     if (hang_stuck && ui_thread)
@@ -260,6 +260,15 @@ static void NORETURN_ATTR hang_show(void)
         context.ui_caller = (uintptr_t)ui_thread->blk_ra;
 #endif
     }
+    crumbs_crash_save(message, &context);
+#endif
+#ifdef HAVE_HANG_CATCH_FIQ
+    int n = t && hang_sp >= (uint32_t)t->stack
+          ? stack_scan(hang_sp, (uint32_t)t->stack + t->stack_size,
+                       calls, STACK_CALLS) : 0;
+#endif
+#ifdef HAVE_CRUMBS
+    memcpy(context.calls, calls, sizeof context.calls);
     crumbs_crash_record(message, &context);
 #endif
     lcd_set_viewport(NULL);
@@ -468,16 +477,13 @@ void hang_catch_fiq_show(void)
         .lr = freeze.lr, .status = freeze.cpsr,
     };
     strlcpy(context.thread, t && t->name ? t->name : "?", sizeof context.thread);
-    crumbs_crash_record(message, &context);
+    crumbs_crash_save(message, &context);
 #endif
     /* The durable record precedes any reads from the interrupted stack. */
     int n = freeze.sp >= base ? stack_scan(freeze.sp, top, calls, 8) : 0;
 #ifdef HAVE_CRUMBS
-    if (n > 0)
-    {
-        memcpy(context.calls, calls, sizeof context.calls);
-        crumbs_crash_record(message, &context);
-    }
+    memcpy(context.calls, calls, sizeof context.calls);
+    crumbs_crash_record(message, &context);
 #endif
     lcd_set_viewport(NULL);
 #if LCD_DEPTH > 1

@@ -122,6 +122,8 @@ int main(void)
         .kind = CRUMB_CRASH_EXCEPTION, .exception = 2, .pc = 0x08101010,
         .sp = 0x08400000, .lr = 0x08003456, .status = 0x6000001f,
         .fault_status = 5, .fault_address = 0x10,
+        .thread = "mikey", .ui_lr = 0x08100004, .ui_wait = 0x08101000,
+        .ui_caller = 0x08102004, .calls = { 0x08103004 },
     };
     crumb_crash_store(CRASH_A, 12, "firmware-2", "Data abort", &abort);
     crash_report();
@@ -129,6 +131,9 @@ int main(void)
     assert(strstr(disk, "ARM exception: Data abort"));
     assert(strstr(disk, "lr: 08003456  status: 6000001f"));
     assert(strstr(disk, "exception: 2  fsr: 00000005  far: 00000010"));
+    assert(strstr(disk, "thread: mikey"));
+    assert(strstr(disk, "ui lr: 08100004  wait: 08101000  caller: 08102004"));
+    assert(strstr(disk, "stack candidates: 08103004 00000000"));
 
     char long_text[500];
     memset(long_text, 'a', sizeof(long_text) - 1);

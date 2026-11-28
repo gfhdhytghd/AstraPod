@@ -150,13 +150,25 @@ void crumb(enum crumb_id id, uint32_t value)
 
 extern const char *thread_current_name(void);
 
-void crumbs_crash_record(const char *message, const struct crumb_crash_context *context)
+static uint32_t crash_save(const char *message,
+                           const struct crumb_crash_context *context)
 {
     uint32_t boot = crumb_ring_head_ok(RING_A) ? RING_A->boot : 0;
     struct crumb_crash_context saved = *context;
     if (!saved.thread[0])
         strlcpy(saved.thread, thread_current_name(), sizeof saved.thread);
     crumb_crash_store(CRASH_A, boot, RBVERSION, message, &saved);
+    return boot;
+}
+
+void crumbs_crash_save(const char *message, const struct crumb_crash_context *context)
+{
+    crash_save(message, context);
+}
+
+void crumbs_crash_record(const char *message, const struct crumb_crash_context *context)
+{
+    uint32_t boot = crash_save(message, context);
 #ifdef HAVE_IPOD_CRASH_RECOVERY
     /* No disk, scheduler, I2C or LCD from a fatal context. A recovery
      * fault drops through to the original diagnostic screen and halt. */
@@ -165,6 +177,8 @@ void crumbs_crash_record(const char *message, const struct crumb_crash_context *
         asm volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(zero) : "memory");
         system_reboot();
     }
+#else
+    (void)boot;
 #endif
 }
 

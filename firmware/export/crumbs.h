@@ -154,6 +154,8 @@ struct crumb_crash_context
     uint32_t calls[4];
     char thread[16];
 };
+/* Commit registers before inspecting memory that may be damaged. */
+void crumbs_crash_save(const char *message, const struct crumb_crash_context *context);
 void crumbs_crash_record(const char *message, const struct crumb_crash_context *context);
 
 /* Very first thing at boot: takes the previous boot's ring, starts this one */

@@ -3662,6 +3662,18 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
     return delay;
 }
 
+bool list_render_complete(const struct gui_synclist *list)
+{
+    if (renderer_handle <= 0)
+        return true;
+
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    bool complete = motion_owner(render, list) && render->shown.valid &&
+                    render->shown.complete && !rows_waiting(&render->shown);
+    core_put_data_pinned(render);
+    return complete;
+}
+
 bool list_render_motion_due(const struct gui_synclist *list)
 {
     return motion_deadline(list, false) == 0;

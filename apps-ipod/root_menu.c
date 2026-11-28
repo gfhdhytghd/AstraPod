@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "string-extra.h"
 #include "config.h"
+#include "usb.h"
 #include "plugins/rock_compat.h"
 #include "button_chord.h"
 #include "input/agents_shortcut.h"
@@ -23,6 +24,7 @@
 #include "widgets/menu.h"
 #include "ui/scene.h"
 #include "ui/statusbar.h"
+#include "widgets/usb_confirm.h"
 #include "ui/stock_art_ids.h"
 #include "root_menu.h"
 #ifdef SIMULATOR
@@ -3027,6 +3029,10 @@ void root_menu(void)
         } /* switch() */
         continue;
 load_next_screen: /* load_screen is inlined */
+#ifdef HAVE_USB_CONFIRM
+        /* A configured start screen other than Home has its own input loop. */
+        gui_usb_confirm_boot_ready();
+#endif
         if (global_settings.animations && next_screen == GO_TO_MAINMENU &&
             presented == GO_TO_ROOT && !ui_scene_automatic())
             menu_link_scene(&menu_scene, &main_menu_, &root_menu_);

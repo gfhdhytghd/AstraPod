@@ -388,8 +388,8 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
 #endif
 #ifdef HAVE_USB_CONFIRM
         case SYS_USB_CONFIRM:
-            gui_usb_confirm_run(button_get_data());
-            button_queue_post(BUTTON_REDRAW, 0);
+            if (gui_usb_confirm_run(button_get_data()))
+                button_queue_post(BUTTON_REDRAW, 0);
             break;
 #endif
 #if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)

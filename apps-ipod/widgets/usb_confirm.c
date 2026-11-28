@@ -7,6 +7,7 @@
 #include "widgets/usb_confirm.h"
 #include "plugins/rock_pitch.h"
 #include "widgets/dialog.h"
+#include "ui/scene.h"
 #include "input/action.h"
 #include "settings/settings.h"
 #include "system/shutdown.h"
@@ -200,7 +201,37 @@ static int confirm_classic_action(struct dialog *d, int action, void *data)
     return confirm_action(d, action, &c->epoch);
 }
 
-void gui_usb_confirm_run(uint32_t epoch)
+/* The UI thread retains the request while boot notices or the first Home
+ * paint own the screen. The USB thread still owns the cable epoch and reply. */
+static bool boot_ready;
+static uint32_t deferred_epoch;
+
+bool gui_usb_confirm_boot_waiting(void)
+{
+    return !boot_ready;
+}
+
+bool gui_usb_confirm_boot_pending(void)
+{
+    return deferred_epoch && usb_confirm_pending(deferred_epoch);
+}
+
+void gui_usb_confirm_boot_ready(void)
+{
+    boot_ready = true;
+}
+
+bool gui_usb_confirm_run_deferred(void)
+{
+    if (!boot_ready || !deferred_epoch)
+        return false;
+
+    uint32_t epoch = deferred_epoch;
+    deferred_epoch = 0;
+    return gui_usb_confirm_run(epoch);
+}
+
+bool gui_usb_confirm_run(uint32_t epoch)
 {
     static const struct dialog_callbacks cb = {
         .measure = confirm_measure,
@@ -213,9 +244,18 @@ void gui_usb_confirm_run(uint32_t epoch)
         .on_action = confirm_classic_action,
     };
     if (!usb_confirm_pending(epoch))
-        return;
+        return false;
+    if (!boot_ready)
+    {
+        deferred_epoch = epoch;
+        return false;
+    }
+
+    ui_scene_interrupt();
+    dialog_interrupt_transition();
     rock_pitch_revoke();
-    if (handoff_prompt_wps(epoch)) return;
+    if (handoff_prompt_wps(epoch))
+        return true;
 #ifdef HAVE_USB_PODLINK
     handoff_sheet_interrupt();
 #endif
@@ -248,5 +288,6 @@ void gui_usb_confirm_run(uint32_t epoch)
     else
 #endif
         action_wait_for_release();
+    return true;
 }
 #endif

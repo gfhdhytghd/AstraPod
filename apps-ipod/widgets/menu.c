@@ -78,9 +78,8 @@
 
 /* gui api */
 #include "list.h"
-#ifdef SIMULATOR
 #include "list_render.h"
-#endif
+#include "widgets/usb_confirm.h"
 #include "row_glyphs.h"
 #include "ui/scene.h"
 #include "ui/stock_art_ids.h"
@@ -1160,8 +1159,32 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
     ui_scene_start(scene);
     gui_synclist_speak_item(&lists);
 
+#ifdef HAVE_USB_CONFIRM
+    bool wait_for_home = gui_usb_confirm_boot_waiting() &&
+                         (start_menu == &root_menu_ || start_menu == fruit_menu_root());
+#endif
     while (!done)
     {
+#ifdef HAVE_USB_CONFIRM
+        if (wait_for_home)
+        {
+            bool ready = list_render_complete(&lists);
+            if (!ready && gui_usb_confirm_boot_pending())
+            {
+                /* A popup retains this frame, including the split pane. Read
+                 * any visible glyph misses now, as for a scene snapshot. */
+                lists.require_row_glyphs = true;
+                gui_synclist_draw_settled(&lists);
+                lists.require_row_glyphs = false;
+                ready = true;
+            }
+            if (ready)
+            {
+                gui_usb_confirm_boot_ready();
+                wait_for_home = false;
+            }
+        }
+#endif
         keyclick_set_callback(gui_synclist_keyclick_callback, &lists);
 
         if (UNLIKELY(start_action != ACTION_ENTER_MENUITEM))

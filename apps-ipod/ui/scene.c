@@ -76,17 +76,17 @@ static fb_data *surface(fb_data *data, bool front)
     return data + (front ? PAGE_PIXELS : 0);
 }
 
-static bool mixed_slide(const struct ui_scene *scene)
+static bool split_slide(const struct ui_scene *scene)
 {
     return scene->slide && !scene->full_screen &&
-           scene->back_split != scene->front_split;
+           (scene->back_split || scene->front_split);
 }
 
 static int position(const struct ui_scene *scene, unsigned frame)
 {
     const struct ui_tween *tween = &scene->tween;
     int offset;
-    if (scene->slide && ui_theme_ultra())
+    if (scene->slide && !split_slide(scene) && ui_theme_ultra())
         return ultra_scene_sample(tween, frame) & ~1;
     if (scene->pan_top && !scene->slide && frame < tween->frames)
     {
@@ -366,7 +366,7 @@ static void compose_pages(const struct ui_scene *scene, fb_data *out,
                           const fb_data *back, const fb_data *front, int offset,
                           const fb_data *still)
 {
-    if (mixed_slide(scene) && !ui_theme_ultra())
+    if (split_slide(scene))
     {
         compose_split(scene, out, back, front, offset);
         return;
@@ -959,7 +959,7 @@ static bool capture_panel(struct ui_scene *scene, bool vertical,
     /* A panel page may hide the status bar. Keep it in the snapshot. */
     scene->pan_top = 0;
     scene->slide = slide;
-    scene->back_split = slide && menu_pane_take_screen();
+    scene->back_split = slide && ui_wheel_navigation() && menu_pane_take_screen();
     scene->front_split = false;
     scene->still_backdrop = false;
     scene->staggered = !vertical && !slide;
@@ -1308,7 +1308,7 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     if (!scene->vertical)
         scene->still_backdrop = pages_on_backdrop(backdrop, front);
     memcpy(lcd_framebuffer_default.fb_ptr, backdrop, FRAMEBUFFER_SIZE);
-    if (scene->slide)
+    if (scene->slide && ui_wheel_navigation())
     {
         scene->front_split = menu_pane_take_screen();
         menu_pane_restore_screen(scene->back_split);
@@ -1440,7 +1440,8 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
     }
 
     bool panel = scene->backdrop_handle > 0;
-    if (target_changed && scene->slide && (!panel || scene->target_front))
+    if (target_changed && scene->slide &&
+        (!panel || (scene->target_front && ui_wheel_navigation())))
     {
         bool split = menu_pane_split() != 0;
         if (scene->target_front)
@@ -1448,7 +1449,8 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         else
             scene->back_split = split;
         /* The full page crosses a split menu at constant speed. */
-        scene->tween.easing = panel || scene->full_screen || mixed_slide(scene)
+        bool mixed = scene->back_split != scene->front_split;
+        scene->tween.easing = panel || scene->full_screen || mixed
                             ? UI_EASE_LINEAR : ui_theme_easing();
     }
 

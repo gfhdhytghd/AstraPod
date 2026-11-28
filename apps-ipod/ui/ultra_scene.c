@@ -4,10 +4,9 @@
  * Fruit Company slides pages side by side. Under Ultra they stack: the
  * page on the right, always the deeper one, lies over the page on the left,
  * which moves a third as fast, darkens as it is covered and takes a soft
- * shadow from the upper page's edge. Between two split menus the rows and
- * the pane each stack the same way inside their own column, at half the
- * pace, and a status bar that stays in place hands its title over with a
- * short slide. At shutdown the screen shrinks a little as it fades.
+ * shadow from the upper page's edge. A status bar that stays in place hands
+ * its title over with a short slide. At shutdown the screen shrinks a little
+ * as it fades.
  *
  * Parts: the stacked pages; the title; the slide's timing; the shutdown
  * fade.
@@ -16,7 +15,6 @@
 #include <string.h>
 #include "config.h"
 #include "system.h"
-#include "menu_pane.h"
 #include "retained.h"
 #include "ultra.h"
 #include "ultra_scene.h"
@@ -221,41 +219,20 @@ void ultra_scene_compose(const struct ui_scene *scene, fb_data *out,
                          const fb_data *back, const fb_data *front,
                          const fb_data *chrome, int offset)
 {
-    const int half = MENU_PANE_X;
     bool front_right = offset >= 0;
     const fb_data *l = front_right ? back : front;
     const fb_data *r = front_right ? front : back;
     /* The upper page's left edge. */
     int p = front_right ? offset : LCD_WIDTH + offset;
-    /* A panel's split flags are those of the last page slide. */
-    bool panel = scene->backdrop_handle > 0;
-    bool l_split = !panel &&
-        (front_right ? scene->back_split : scene->front_split);
-    bool r_split = !panel &&
-        (front_right ? scene->front_split : scene->back_split);
     bool target_right = front_right == scene->target_front;
     /* How far the slide has gone towards its destination, in 256ths. */
     int f = (target_right ? LCD_WIDTH - p : p) * UI_FULL_OPACITY / LCD_WIDTH;
     const fb_data *from = target_right ? l : r;
 
-    if (scene->full_screen || l_split != r_split)
-    {
-        stack_rows(out, l, r, LCD_WIDTH, p, 0, LCD_HEIGHT);
-        return;
-    }
-    int top = scene->pan_top;
-    int width = l_split ? half : LCD_WIDTH;
-    if (l_split)
-    {
-        int q = (p / 2) & ~1;
-        stack_rows(out, l, r, half, q, top, LCD_HEIGHT);
-        /* The pane runs up beside the bar. */
-        stack_rows(out + half, l + half, r + half, half, q, 0, LCD_HEIGHT);
-    }
-    else
-        stack_rows(out, l, r, LCD_WIDTH, p, top, LCD_HEIGHT);
+    int top = scene->full_screen ? 0 : scene->pan_top;
+    stack_rows(out, l, r, LCD_WIDTH, p, top, LCD_HEIGHT);
     if (top)
-        retitle(out, from, chrome, width, top, f, target_right ? -1 : 1);
+        retitle(out, from, chrome, LCD_WIDTH, top, f, target_right ? -1 : 1);
 }
 
 /* ---- the slide's timing ---- */

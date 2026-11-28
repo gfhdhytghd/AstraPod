@@ -776,11 +776,12 @@ int extras_stopwatch(void)
     struct ui_scene entry = {0}, route = {0};
     sw_logs_load();
     bool timer_first = sw_running() || (!current && !log_count);
+    bool whole_page = !ui_wheel_navigation();
     ui_scene_open_page(&entry, "stopwatch-push");
     enum sw_next next = timer_first ? sw_timer() : SW_MENU;
 
     if (timer_first && next == SW_MENU)
-        ui_scene_enter(&route, &timer_page, &menu_page, false, false);
+        ui_scene_enter(&route, &timer_page, &menu_page, false, whole_page);
     while (next == SW_MENU)
     {
         next = sw_menu();
@@ -790,20 +791,22 @@ int extras_stopwatch(void)
         {
             case ROW_RESUME:
                 sw_run(&logs[0]);
-                ui_scene_enter(&route, &menu_page, &timer_page, true, false);
+                ui_scene_enter(&route, &menu_page, &timer_page, true, whole_page);
                 next = sw_timer();
                 if (next == SW_MENU)
-                    ui_scene_enter(&route, &timer_page, &menu_page, false, false);
+                    ui_scene_enter(&route, &timer_page, &menu_page, false,
+                                   whole_page);
                 break;
             case ROW_NEW:
                 if (current)
                     sw_stop(&logs[0]);
                 current = false;
                 sw_logs_save();
-                ui_scene_enter(&route, &menu_page, &timer_page, true, false);
+                ui_scene_enter(&route, &menu_page, &timer_page, true, whole_page);
                 next = sw_timer();
                 if (next == SW_MENU)
-                    ui_scene_enter(&route, &timer_page, &menu_page, false, false);
+                    ui_scene_enter(&route, &timer_page, &menu_page, false,
+                                   whole_page);
                 break;
             case ROW_CLEAR:
                 log_count = 0;

@@ -12,10 +12,11 @@
  * those rows with the rest of the movie in a single timed transfer.
  *
  * The Picture page is stock's Now Playing Shuffle selector with Fit, Fill
- * and Stretch for Off, Songs and Albums: the same well, highlight, labels,
- * slides and steps of the wheel. It differs in one thing: Shuffle applies
- * its value when the page closes, and a step here applies at once, so the
- * movie previews each mode.
+ * and Stretch for Off, Songs and Albums: the same segments, slides and steps
+ * of the wheel, drawn in the dark well, blue highlight and white labels of
+ * stock's black option bar, centred in the band. It differs in one thing:
+ * Shuffle applies its value when the page closes, and a step here applies at
+ * once, so the movie previews each mode.
  *
  * Parts: composing the layer (over, put, tile, text), the pages, the slides,
  * and presenting a frame.
@@ -66,11 +67,10 @@
 
 /* The Picture page, as stock's Shuffle selector */
 #define WELL_X       69
+#define WELL_Y       209  /* the 26-row well centred in the band */
 #define WELL_W       202
-#define LABEL_BASE   221
+#define LABEL_BASE   (WELL_Y + 17)
 #define LABEL_PAD    30   /* a segment's columns beyond its label */
-#define LABEL_BLUE   0x0071c6u
-#define LABEL_DARK   0x212421u
 #define PULL_PX      2    /* the highlight's lean for each wheel event */
 #define THUMB_TICKS  (HZ / 10)
 
@@ -380,17 +380,18 @@ static void put_page(const struct page *p, int dx)
         int x[VIDEO_PICTURE_COUNT], w[VIDEO_PICTURE_COUNT];
         int width = segments(x, w);
         /* Stock's screen mark where Shuffle has its arrows, at x 30-54 */
-        put(STOCK_ART_MEDIA_VIDEOSTATUSICON_WHITE, 26 + dx, 202, ICON);
-        strip(STOCK_ART_OPTIONBAR_NOWPLAYING_WELL_CENTER, WELL_X + dx,
-              BOTTOM_Y, width);
-        strip(STOCK_ART_OPTIONBAR_NOWPLAYING_THUMB_CENTER, p->thumb_x + dx,
-              BOTTOM_Y, p->thumb_w);
+        put(STOCK_ART_MEDIA_VIDEOSTATUSICON_WHITE, 26 + dx, WELL_Y - 2,
+            ICON);
+        strip(STOCK_ART_OPTIONBAR_BLACK_WELL_CENTER, WELL_X + dx, WELL_Y,
+              width);
+        strip(STOCK_ART_OPTIONBAR_BLACK_THUMB_CENTER, p->thumb_x + dx,
+              WELL_Y, p->thumb_w);
         for (int i = 0; i < VIDEO_PICTURE_COUNT; i++)
         {
             const char *label = str(picture_names[i]);
             text(title_font, label,
                  x[i] + (w[i] - text_width(title_font, label)) / 2 + dx,
-                 LABEL_BASE, i == p->picture ? LABEL_BLUE : LABEL_DARK);
+                 LABEL_BASE, WHITE);
         }
         break;
     }

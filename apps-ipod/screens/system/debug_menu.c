@@ -1637,7 +1637,7 @@ static bool video_probe_walk(char *path, unsigned depth)
             const char *ext = strrchr(entry->d_name, '.');
             if (ext && (!strcasecmp(ext, ".mp4") || !strcasecmp(ext, ".m4v")))
             {
-                int result = rock_probe_video(path);
+                int result = rock_probe_video(path, NULL);
                 usb = usb_exclusive_storage();
                 if (!usb)
                     video_probe_note(path, "module-return", result);

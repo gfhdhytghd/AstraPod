@@ -37,6 +37,7 @@ static char path[MAX_PATH];
 static unsigned result_sequence;
 static unsigned result_operation;
 static int result_error;
+static int result_video_decode;
 
 struct shell_playback_status {
     uint32_t version, sequence, operation;
@@ -67,6 +68,9 @@ static void write_playback_status(uint8_t *buffer)
     reply.sequence = result_sequence;
     reply.operation = result_operation;
     reply.command_error = result_error;
+    /* Op 6 reports the completed video frame count or decoder error. */
+    if (result_operation == SHELL_PROBE_VIDEO)
+        reply.playback_error = result_video_decode;
     restore_irq(oldlevel);
     const char *name = get_codec_string(snapshot.codec);
     if (name && snapshot.path[0])
@@ -138,13 +142,14 @@ void shell_playback_request(const struct usb_ctrlrequest *req,
     usb_core_control_response(USB_CONTROL_STALL, NULL, 0);
 }
 
-static int playback_dispatch(unsigned op)
+static int playback_dispatch(unsigned op, int *video_decode)
 {
     if (op == SHELL_PROBE_VIDEO)
     {
 #ifdef HAVE_HW_H264
-        return rock_probe_video(path) == 0 ? 0 : EIO;
+        return rock_probe_video(path, video_decode) == 0 ? 0 : EIO;
 #else
+        (void)video_decode;
         return ENOSYS;
 #endif
     }
@@ -186,10 +191,12 @@ static int playback_dispatch(unsigned op)
 long shell_playback_dispatch(void)
 {
     unsigned op = operation;
-    int error = playback_dispatch(op);
+    int video_decode = 0;
+    int error = playback_dispatch(op, &video_decode);
 
     int oldlevel = disable_irq_save();
     result_error = error;
+    result_video_decode = video_decode;
     result_operation = op;
     result_sequence = ++sm1_test_completed;
     restore_irq(oldlevel);

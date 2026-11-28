@@ -70,8 +70,10 @@ enum plugin_status plugin_start""")
     replace('    result = video_h264_play(path, buffer, buffer_size);',
             '''#ifdef HAVE_HW_H264
     if (request->probe)
-        return video_h264_probe(path, buffer, buffer_size) < 0 ?
-            PLUGIN_ERROR : PLUGIN_OK;
+    {
+        request->result = video_h264_probe(path, buffer, buffer_size);
+        return request->result < 0 ? PLUGIN_ERROR : PLUGIN_OK;
+    }
     const struct video_play_options options = {
         .title = request->title,
         .battery_level = request->battery_level,
@@ -441,7 +443,7 @@ size_t video_h264_scratch_size(const char *path)""")
                      (unsigned long)((b << 16) | a));
         rb->close(log);
         if (!failure && frames)
-            result = VIDEO_FINISHED;
+            result = frames;
         goto cleanup;
     }
 
@@ -482,6 +484,8 @@ size_t video_h264_scratch_size(const char *path)""")
     replace("cleanup:\n", r"""cleanup:
     if (failure)
     {
+        if (probe && code < 0)
+            result = code;
         int log = video_log_open(filepath, failure, code);
         if (log >= 0)
         {

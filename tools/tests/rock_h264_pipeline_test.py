@@ -198,6 +198,7 @@ binary = out / "pipeline"
 sp.run(["cc", "-std=gnu11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
         "-fsanitize=undefined", "-DHAVE_HW_H264", "-I", headers, "-I", fixture,
         "-I", source, "-I", root / "apps-ipod", "-I", root / "firmware/export",
+        "-I", root / "firmware/target/arm/s5l8702/ipod6g",
         probe, staged, source / "mp4_demux.c", root / "apps-ipod/plugins/rock_h264.c",
         "-o", binary], check=True)
 

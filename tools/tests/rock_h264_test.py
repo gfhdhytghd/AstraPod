@@ -44,6 +44,7 @@ subprocess.run([
     "-fsanitize=address,undefined", "-DHAVE_HW_H264",
     "-I", stubs, "-I", fixture, "-I", source,
     "-I", root / "apps-ipod", "-I", root / "firmware/export",
+        "-I", root / "firmware/target/arm/s5l8702/ipod6g",
     fixture / "probe.c", staged, source / "mp4_demux.c",
     root / "apps-ipod/plugins/rock_h264.c", "-o", binary,
 ], check=True)

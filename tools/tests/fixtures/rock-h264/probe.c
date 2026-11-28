@@ -439,6 +439,8 @@ static const struct plugin_api api = {
     .adjust_volume = adjust_volume,
     .lcd_blit_yuv = draw,
     .font_get = font,
+    .strcmp = strcmp,
+    .strncmp = strncmp,
     .snprintf = snprintf,
     .sound_min = minimum,
     .sound_max = maximum,
@@ -568,8 +570,8 @@ int main(int argc, char **argv)
 {
     assert(argc == 4);
     reset(FINISH);
-    assert(video_h264_probe(argv[3], scratch, sizeof(scratch)) == 0);
-    assert(opens == 1 && configured == 1 && closes == 1 && decoded == 8);
+    assert(video_h264_probe(argv[3], scratch, sizeof(scratch)) == 336);
+    assert(opens == 1 && configured == 1 && closes == 1 && decoded == 336);
     assert(!drawn && !audio_opens && access("resume", F_OK) < 0);
     FILE *log = fopen("video-probe.log", "r");
     char report[4096];
@@ -578,7 +580,7 @@ int main(int argc, char **argv)
     report[bytes] = '\0';
     fclose(log);
     assert(strstr(report, "stage=decoder-configure code=0"));
-    assert(strstr(report, "sample=7") && strstr(report, "decode=1"));
+    assert(strstr(report, "samples=336 frames=336 decode=1 adler32="));
 
     reset(FINISH);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 0);

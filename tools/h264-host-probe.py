@@ -122,7 +122,8 @@ def probe(path, runner, samples):
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height,extradata" +
         (":packet=pos,size" if samples else ""),
-        "-show_data", *(["-show_packets"] if samples else []), "-of", "json", path]))
+        "-show_data", *(["-show_packets"] if samples else
+                        ["-read_intervals", "0%+#1"]), "-of", "json", path]))
     stream = info["streams"][0]
     avcc = bytes.fromhex("".join(
         line.split(":", 1)[1].split("  ", 1)[0].strip()

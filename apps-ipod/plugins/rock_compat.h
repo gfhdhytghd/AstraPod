@@ -44,7 +44,7 @@ struct rock_video_request {
     const struct video_stock_osd *stock_osd; /* NULL draws the plugin's own */
 };
 #ifdef HAVE_HW_H264
-int rock_probe_video(const char *path);
+int rock_probe_video(const char *path, int *decode_result);
 #endif
 int rock_open_video(const char *path, const char *title, bool has_previous);
 int rock_run_from_shell(const char *path);

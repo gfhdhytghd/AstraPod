@@ -52,10 +52,11 @@ FT_USE_MODULE(ft_smooth_renderer_class)
 # ascent, CJK strike). Each size is the one whose glyphs match the stock
 # screens pixel for pixel: list rows 16.265625 px, Now Playing title
 # 16.984375 px, the side pane's title 17.40625 px, Now Playing's times
-# 13.796875 px, the calendar's 14.25 px, the Alarms time panel's
-# 21.9375 px, the Stopwatch's 17.96875, 21.25 and 22.875 px, Screen Lock's
-# digits 29.4375 px and the 13.125 px small text. The 13 px faces keep the
-# firmware's own 11/4 line; the larger faces fit the Classic layout's cells.
+# 13.796875 px, the calendar's 14.25 px, a setting row's value 14.46875 px,
+# the Alarms time panel's 21.9375 px, the Stopwatch's 17.96875, 21.25 and
+# 22.875 px, Screen Lock's digits 29.4375 px and the 13.125 px small text.
+# The 13 px faces keep the firmware's own 11/4 line; the larger faces fit the
+# Classic layout's cells.
 # The list's letter overlay is QuickScroll_Font, size 202, and holds only
 # the letters it shows.
 STOCK = {
@@ -63,6 +64,7 @@ STOCK = {
     "13-helvetica-bold": ("HelveticaBold.ttf", 840, 700, 15, 11, 11),
     "14-helvetica-bold": ("HelveticaBold.ttf", 883, 700, 16, 12, 11),
     "14-helvetica-bold-calendar": ("HelveticaBold.ttf", 912, 700, 16, 12, 0),
+    "14-helvetica-bold-value": ("HelveticaBold.ttf", 926, 700, 16, 12, 11),
     "16-helvetica-bold": ("HelveticaBold.ttf", 1041, 700, 20, 16, 16),
     "17-helvetica-bold": ("HelveticaBold.ttf", 1087, 700, 18, 14, 16),
     "17-helvetica-bold-pane": ("HelveticaBold.ttf", 1114, 700, 19, 14, 16),

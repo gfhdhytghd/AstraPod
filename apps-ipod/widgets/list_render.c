@@ -1593,7 +1593,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     }
     if (value_text)
     {
-        int inset = m[UI_METRIC_LIST_TEXT_PADDING];
+        /* A stock value, like the chevron, keeps 6 columns clear. */
+        int inset = chevron_selected ? 6 - render->row_inset
+                                     : m[UI_METRIC_LIST_TEXT_PADDING];
         int value_width = MIN(font_getstringsize((const unsigned char *)value,
                                                  NULL, NULL, value_font),
                               (right - text_x) / 2);

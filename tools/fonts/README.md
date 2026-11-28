@@ -51,6 +51,7 @@ record size), then the PBF1 bitmap records in the same order.
 | `13-helvetica-bold` | Helvetica Bold | 13.125 px |
 | `14-helvetica-bold` | Helvetica Bold | 13.796875 px |
 | `14-helvetica-bold-calendar` | Helvetica Bold | 14.25 px |
+| `14-helvetica-bold-value` | Helvetica Bold | 14.46875 px |
 | `16-helvetica-bold` | Helvetica Bold | 16.265625 px |
 | `17-helvetica-bold` | Helvetica Bold | 16.984375 px |
 | `17-helvetica-bold-pane` | Helvetica Bold | 17.40625 px |

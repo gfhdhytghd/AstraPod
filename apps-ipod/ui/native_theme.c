@@ -281,7 +281,7 @@ static void classic(struct ui_theme *theme)
     strcpy(theme->font[UI_FONT_WPS_META], "13-helvetica-bold");
     strcpy(theme->font[UI_FONT_PANE_TITLE], "17-helvetica-bold-pane");
     strcpy(theme->font[UI_FONT_PANE_TEXT], "13-helvetica-bold");
-    strcpy(theme->font[UI_FONT_LIST_VALUE], "13-helvetica-bold");
+    strcpy(theme->font[UI_FONT_LIST_VALUE], "14-helvetica-bold-value");
     strcpy(theme->font[UI_FONT_WPS_TIME], "14-helvetica-bold");
     theme->gradient[UI_GRADIENT_PROGRESS] = (struct ui_theme_gradient){
         .color = { 0x6483f0, 0x6789f2, 0x56aeff, 0x4e8fce }, .stops = 4 };

@@ -303,8 +303,9 @@ def down(n):
 
 def row(label, kind="page", inner=(), back="menu", pre=None):
     """A menu row: kind "menu" has `inner` as its rows, "page" runs the
-    steps `inner` on the page it opens, "any" opens and leaves without a
-    check, "none" is a row Select does nothing on. `pre` reaches the row in
+    steps `inner` on the page it opens, "cut" is a page stock cuts to and
+    slides back from, "any" opens and leaves without a check, "none" is a
+    row Select does nothing on. `pre` reaches the row in
     place of the wheel turns its position needs."""
     return (label, kind, list(inner), back, pre)
 
@@ -323,8 +324,9 @@ def segments(rows, path="", reach=()):
                         inner))
             continue
         check = "any" if kind == "any" else "slide"
+        enter = "any" if kind == "cut" else check
         body = [] if kind == "menu" else inner
-        out.append((name, nav + [(check, "select", name + " >")] + body +
+        out.append((name, nav + [(enter, "select", name + " >")] + body +
                     [(check, back, name + " <")]))
         if kind == "menu":
             out += segments(inner, name, nav + [("nav", "select", "")])
@@ -413,9 +415,10 @@ FRUIT_TREE = [
         row("Video Playlists", "none", pre=down(4)),
         row("Settings", "any", pre=down(5))]),
     row("Photos", "menu", [
-        # The Images list opens on its first picture; Menu leaves the viewer
-        row("All Photos", inner=levels("Photos/All Photos", ["photo"],
-                                       leave="menu")),
+        # All Photos opens the thumbnail grid, Select its first photo and
+        # Menu leaves the photo
+        row("All Photos", "cut", levels("Photos/All Photos", ["photo"],
+                                        leave="menu")),
         row("Settings", "any", pre=down(1))]),
     row("Podcasts", inner=levels("Podcasts", ["show"]), pre=down(3)),
     row("Podcasts, play", "raw", play_from("Podcasts", ["show"]),

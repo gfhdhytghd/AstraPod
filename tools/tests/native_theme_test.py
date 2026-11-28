@@ -298,7 +298,7 @@ static void check_list_rows(void)
     assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_PITCH);
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);
     assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_FILL);
-    assert(!strcmp(theme.font[UI_FONT_LIST_VALUE], "13-helvetica-bold"));
+    assert(!strcmp(theme.font[UI_FONT_LIST_VALUE], "14-helvetica-bold-value"));
 
     static const char file[] = VERSION "style.list_rows=fill\n"
         "font.list_value=Local_12\n";

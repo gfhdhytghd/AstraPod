@@ -18,7 +18,8 @@ enum video_stock_mode {
 /* What the overlay shows for one frame. */
 struct video_stock_state {
     const char *title;
-    const char *picture;    /* PICTURE: the scaling mode's name */
+    int picture;            /* PICTURE: enum video_picture_mode */
+    int picture_pull;       /* PICTURE: wheel events towards the next */
     uint32_t position_ms;   /* SCRUB: where the marker stands */
     uint32_t duration_ms;
     int level, level_max;   /* VOLUME and BRIGHTNESS */

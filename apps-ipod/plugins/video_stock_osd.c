@@ -11,6 +11,12 @@
  * the layer over them as the controller does. The iPod LCD driver combines
  * those rows with the rest of the movie in a single timed transfer.
  *
+ * The Picture page is stock's Now Playing Shuffle selector with Fit, Fill
+ * and Stretch for Off, Songs and Albums: the same well, highlight, labels,
+ * slides and steps of the wheel. It differs in one thing: Shuffle applies
+ * its value when the page closes, and a step here applies at once, so the
+ * movie previews each mode.
+ *
  * Parts: composing the layer (over, put, tile, text), the pages, the slides,
  * and presenting a frame.
  ****************************************************************************/
@@ -24,11 +30,13 @@
 #include "core_alloc.h"
 #include "font.h"
 #include "kernel.h"
+#include "lang.h"
 #include "lcd.h"
 #include "power.h"
 #include "powermgmt.h"
 #include "rbpaths.h"
 #include "settings/settings.h"
+#include "settings/video_picture.h"
 #include "ui/stock_art.h"
 #include "ui/theme_art.h"
 #include "video_stock_osd.h"
@@ -41,7 +49,7 @@
 #define BAND_Y       202  /* the bottom band from an even row: YUV pairs */
 #define SLIDE_ROWS   37   /* how far both bands slide to show or hide */
 #define SLIDE_TICKS  (HZ / 10)
-#define PAGE_TICKS   (HZ / 4)
+#define PAGE_TICKS   (27 * HZ / 100)  /* 8 frames of stock's 34 ms */
 
 #define TITLE_FONT   FONT_DIR "/13-helvetica-bold.pbf"
 #define TIME_FONT    FONT_DIR "/14-helvetica-bold.pbf"
@@ -51,12 +59,20 @@
 
 /* Bars: the progress bar and the level bars of Volume and Brightness. */
 #define BAR_Y        212
-#define PROGRESS_X   54
-#define PROGRESS_W   212
+#define PROGRESS_X   54   /* the bar's inset either side, under 10 minutes */
 #define LEVEL_W      208
-#define TIME_RIGHT   44   /* elapsed time ends here */
-#define TIME_LEFT    276  /* remaining time starts here */
+#define TIME_GAP     10   /* between the bar and each time */
 #define TIME_BASE    223
+
+/* The Picture page, as stock's Shuffle selector */
+#define WELL_X       69
+#define WELL_W       202
+#define LABEL_BASE   221
+#define LABEL_PAD    30   /* a segment's columns beyond its label */
+#define LABEL_BLUE   0x0071c6u
+#define LABEL_DARK   0x212421u
+#define PULL_PX      2    /* the highlight's lean for each wheel event */
+#define THUMB_TICKS  (HZ / 10)
 
 static int layer_handle;
 static uint32_t *layer;
@@ -144,6 +160,20 @@ static void put(enum stock_art_id id, int x, int y, enum rule rule)
     put_part(id, 0, stock_art[id].width, x, y, 0, LCD_WIDTH, rule);
 }
 
+/* A strip `width` columns wide from x: `left`, then `centre` repeated, then
+ * `right`, the order of their ids. */
+static void strip(enum stock_art_id centre, int x, int y, int width)
+{
+    enum stock_art_id left = centre + 1, right = centre + 2;
+    int lw = stock_art[left].width, rw = stock_art[right].width;
+    int cw = stock_art[centre].width;
+    put(left, x, y, ICON);
+    for (int i = x + lw; i < x + width - rw; i += cw)
+        put_part(centre, 0, MIN(cw, x + width - rw - i), i, y, 0, LCD_WIDTH,
+                 ICON);
+    put(right, x + width - rw, y, ICON);
+}
+
 /* Repeat `id` across `width` columns from x. A last part tile shows the
  * image's right-hand columns, so the bar always ends on its end cap. */
 static void tile(enum stock_art_id id, int x, int y, int width)
@@ -203,31 +233,12 @@ static void text(int font, const char *text, int x, int baseline,
 struct page {
     unsigned char mode;
     int elapsed, remaining;  /* seconds */
+    int inset;               /* the progress bar's, either side */
     int marker;              /* scrub marker's centre on the bar, or -1 */
     int fill;                /* level bar's blue columns */
-    const char *label;
+    int picture;             /* enum video_picture_mode */
+    int thumb_x, thumb_w;    /* the highlight, as it stands this frame */
 };
-
-static struct page page_of(const struct video_stock_state *s)
-{
-    struct page p;
-    memset(&p, 0, sizeof(p));  /* compared with memcmp(), padding too */
-    p.mode = s->mode;
-    p.marker = -1;
-    p.label = s->picture;
-    uint32_t duration = s->duration_ms;
-    uint32_t position = MIN(s->position_ms, duration);
-    if (s->mode == VIDEO_STOCK_PROGRESS || s->mode == VIDEO_STOCK_SCRUB)
-    {
-        p.elapsed = position / 1000;
-        p.remaining = (duration - position) / 1000;
-        if (s->mode == VIDEO_STOCK_SCRUB && duration)
-            p.marker = (int)((uint64_t)position * PROGRESS_W / duration);
-    }
-    else if (s->level_max > 0)
-        p.fill = MIN(MAX(s->level, 0), s->level_max) * LEVEL_W / s->level_max;
-    return p;
-}
 
 static void time_text(char *buffer, size_t size, const char *sign, int s)
 {
@@ -236,6 +247,67 @@ static void time_text(char *buffer, size_t size, const char *sign, int s)
                  s % 60);
     else
         snprintf(buffer, size, "%s%d:%02d", sign, s / 60, s % 60);
+}
+
+/* Stock sizes the progress bar to the video, as long as it plays: the
+ * remaining time at the start stands at the right margin, and the bar ends
+ * TIME_GAP before it, with the same inset on the left. */
+static int progress_inset(int length)
+{
+    char buffer[16];
+    if (time_font < 0)
+        return PROGRESS_X;
+    time_text(buffer, sizeof(buffer), "-", length);
+    int wider = text_width(time_font, buffer) - text_width(time_font, "-0:00");
+    return PROGRESS_X + MAX(wider, 0);
+}
+
+static struct page page_of(const struct video_stock_state *s)
+{
+    struct page p;
+    memset(&p, 0, sizeof(p));  /* compared with memcmp(), padding too */
+    p.mode = s->mode;
+    p.marker = -1;
+    p.picture = s->mode == VIDEO_STOCK_PICTURE ? s->picture : 0;
+    uint32_t duration = s->duration_ms;
+    uint32_t position = MIN(s->position_ms, duration);
+    if (s->mode == VIDEO_STOCK_PROGRESS || s->mode == VIDEO_STOCK_SCRUB)
+    {
+        p.elapsed = position / 1000;
+        p.remaining = (duration - position) / 1000;
+        p.inset = progress_inset(duration / 1000);
+        if (s->mode == VIDEO_STOCK_SCRUB && duration)
+            p.marker = (int)((uint64_t)position *
+                             (LCD_WIDTH - 2 * p.inset) / duration);
+    }
+    else if (s->level_max > 0)
+        p.fill = MIN(MAX(s->level, 0), s->level_max) * LEVEL_W / s->level_max;
+    return p;
+}
+
+static const int picture_names[VIDEO_PICTURE_COUNT] = {
+    LANG_VIDEO_PICTURE_FIT, LANG_VIDEO_PICTURE_FILL,
+    LANG_VIDEO_PICTURE_STRETCH,
+};
+
+/* Each mode's segment of the well: its label and LABEL_PAD more columns,
+ * the well's spare columns shared out. Returns the well's width. */
+static int segments(int x[VIDEO_PICTURE_COUNT], int w[VIDEO_PICTURE_COUNT])
+{
+    int total = 0;
+    for (int i = 0; i < VIDEO_PICTURE_COUNT; i++)
+    {
+        w[i] = text_width(title_font, str(picture_names[i])) + LABEL_PAD;
+        total += w[i];
+    }
+    int spare = MAX(WELL_W - total, 0), at = WELL_X;
+    for (int i = 0; i < VIDEO_PICTURE_COUNT; i++)
+    {
+        w[i] += spare / VIDEO_PICTURE_COUNT + (i < spare % VIDEO_PICTURE_COUNT);
+        x[i] = at;
+        at += w[i];
+    }
+    return at - WELL_X;
 }
 
 static void level_bar(int x, int fill)
@@ -252,21 +324,24 @@ static void put_page(const struct page *p, int dx)
     {
     case VIDEO_STOCK_PROGRESS:
     case VIDEO_STOCK_SCRUB:
-        tile(STOCK_ART_VIDEO_PROGRESSBAR, PROGRESS_X + dx, BAR_Y, PROGRESS_W);
+    {
+        int left = p->inset + dx, right = LCD_WIDTH - p->inset + dx;
+        tile(STOCK_ART_VIDEO_PROGRESSBAR, left, BAR_Y, right - left);
         if (p->marker >= 0)
         {
             /* The diamond is cut to the bar: a triangle at either end. */
             enum stock_art_id id = STOCK_ART_NOWPLAYING_PROGRESSBAR_SCRUB;
             int w = stock_art[id].width;
-            put_part(id, 0, w, PROGRESS_X + dx + p->marker - w / 2, BAR_Y,
-                     PROGRESS_X + dx, PROGRESS_X + dx + PROGRESS_W, BAR);
+            put_part(id, 0, w, left + p->marker - w / 2, BAR_Y, left, right,
+                     BAR);
         }
         time_text(buffer, sizeof(buffer), "", p->elapsed);
-        text(time_font, buffer, TIME_RIGHT + dx - text_width(time_font, buffer),
-             TIME_BASE, WHITE);
+        text(time_font, buffer,
+             left - TIME_GAP - text_width(time_font, buffer), TIME_BASE, WHITE);
         time_text(buffer, sizeof(buffer), "-", p->remaining);
-        text(time_font, buffer, TIME_LEFT + dx, TIME_BASE, WHITE);
+        text(time_font, buffer, right + TIME_GAP, TIME_BASE, WHITE);
         break;
+    }
     case VIDEO_STOCK_VOLUME:
         put(STOCK_ART_VIDEO_VOLUME_LOW, 31 + dx, 212, TEXT);
         put(STOCK_ART_VIDEO_VOLUME_HIGH, 274 + dx, 210, TEXT);
@@ -278,11 +353,24 @@ static void put_page(const struct page *p, int dx)
         level_bar(58 + dx, p->fill);
         break;
     case VIDEO_STOCK_PICTURE:
-        if (p->label)
-            text(time_font, p->label,
-                 (LCD_WIDTH - text_width(time_font, p->label) + 1) / 2 + dx,
-                 TIME_BASE, WHITE);
+    {
+        int x[VIDEO_PICTURE_COUNT], w[VIDEO_PICTURE_COUNT];
+        int width = segments(x, w);
+        /* Stock's screen mark where Shuffle has its arrows, at x 30-54 */
+        put(STOCK_ART_MEDIA_VIDEOSTATUSICON_WHITE, 26 + dx, 202, ICON);
+        strip(STOCK_ART_OPTIONBAR_NOWPLAYING_WELL_CENTER, WELL_X + dx,
+              BOTTOM_Y, width);
+        strip(STOCK_ART_OPTIONBAR_NOWPLAYING_THUMB_CENTER, p->thumb_x + dx,
+              BOTTOM_Y, p->thumb_w);
+        for (int i = 0; i < VIDEO_PICTURE_COUNT; i++)
+        {
+            const char *label = str(picture_names[i]);
+            text(title_font, label,
+                 x[i] + (w[i] - text_width(title_font, label)) / 2 + dx,
+                 LABEL_BASE, i == p->picture ? LABEL_BLUE : LABEL_DARK);
+        }
         break;
+    }
     }
 }
 
@@ -423,6 +511,34 @@ static void band_set(struct band *b, bool shown, long now)
         b->start--;
 }
 
+/* The Picture highlight: at its mode's segment, leaning `pull` wheel events
+ * towards the next, after sliding there from where it stood in THUMB_TICKS
+ * by an ease-out. True while it slides. */
+static int thumb_picture = -1, thumb_x, thumb_w, thumb_from_x, thumb_from_w;
+static long thumb_start;
+
+static bool place_thumb(struct page *p, int pull, long now)
+{
+    int x[VIDEO_PICTURE_COUNT], w[VIDEO_PICTURE_COUNT];
+    segments(x, w);
+    if (p->picture != thumb_picture)
+    {
+        thumb_from_x = thumb_x;
+        thumb_from_w = thumb_w;
+        thumb_start = thumb_picture < 0 ? now - THUMB_TICKS : now;
+        thumb_picture = p->picture;
+    }
+    int t = MIN(now - thumb_start, THUMB_TICKS), rest = THUMB_TICKS - t;
+    int to_x = x[p->picture] + pull * PULL_PX, to_w = w[p->picture];
+    thumb_x = to_x + (thumb_from_x - to_x) * rest * rest /
+                     (THUMB_TICKS * THUMB_TICKS);
+    thumb_w = to_w + (thumb_from_w - to_w) * rest * rest /
+                     (THUMB_TICKS * THUMB_TICKS);
+    p->thumb_x = thumb_x;
+    p->thumb_w = thumb_w;
+    return t < THUMB_TICKS;
+}
+
 static int page_dx(long now)
 {
     int t = MIN(now - page_start, PAGE_TICKS), rest = PAGE_TICKS - t;
@@ -517,6 +633,7 @@ static bool present(unsigned char *const planes[3],
 
     if (bottom)
     {
+        prepare();              /* the time font sizes the progress bar */
         struct page p = page_of(s);
         if (bands[1].shown && p.mode != page_new.mode)
         {
@@ -537,6 +654,11 @@ static bool present(unsigned char *const planes[3],
     bool moving = (top_off && bands[0].shown) || (bottom_off && bands[1].shown)
                   || (top_on && !bands[0].shown)
                   || (bottom_on && !bands[1].shown) || paging;
+
+    if (bottom && page_new.mode == VIDEO_STOCK_PICTURE && prepare())
+        moving |= place_thumb(&page_new, s->picture_pull, now);
+    else if (bottom)
+        thumb_picture = -1;
 
     if ((!top_on && !bottom_on) || !prepare())
     {
@@ -633,6 +755,7 @@ void video_stock_osd_release(void)
     memset(bands, 0, sizeof(bands));
     memset(&page_new, 0, sizeof(page_new));
     paging = top_ready = bottom_ready = false;
+    thumb_picture = -1;
     if (brightness_changed)
         settings_save();
     brightness_changed = false;

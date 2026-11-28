@@ -281,7 +281,7 @@ static void classic(struct ui_theme *theme)
     strcpy(theme->font[UI_FONT_WPS_META], "13-helvetica-bold");
     strcpy(theme->font[UI_FONT_PANE_TITLE], "17-helvetica-bold-pane");
     strcpy(theme->font[UI_FONT_PANE_TEXT], "13-helvetica-bold");
-    strcpy(theme->font[UI_FONT_LIST_VALUE], "13-helvetica-bold");
+    strcpy(theme->font[UI_FONT_LIST_VALUE], "14-helvetica-bold-value");
     strcpy(theme->font[UI_FONT_WPS_TIME], "14-helvetica-bold");
     theme->gradient[UI_GRADIENT_PROGRESS] = (struct ui_theme_gradient){
         .color = { 0x6483f0, 0x6789f2, 0x56aeff, 0x4e8fce }, .stops = 4 };
@@ -399,7 +399,24 @@ uint32_t ui_theme_gradient_at(const struct ui_theme_gradient *gradient,
             return gradient->rows[last];
         if (height == 3 || last < 3)
             return gradient->rows[y < last ? y : last];
-        return gradient->rows[1 + (y - 1) * (last - 2) / (height - 3)];
+        /* A bar no taller than the table keeps both ends of its inner rows;
+         * a taller one samples each row's centre and blends, as stock
+         * stretches its bar */
+        if (height <= gradient->nrows)
+            return gradient->rows[1 + (y - 1) * (last - 2) / (height - 3)];
+        int inner = last - 1;
+        int pos = (2 * (y - 1) + 1) * inner * 256 / (2 * (height - 2)) - 128;
+        if (pos < 0)
+            pos = 0;
+        int i = pos >> 8;
+        if (i >= inner - 1)
+            return gradient->rows[last - 1];
+        uint32_t a = gradient->rows[1 + i], b = gradient->rows[2 + i], out = 0;
+        unsigned f = pos & 255;
+        for (int shift = 0; shift <= 16; shift += 8)
+            out |= ((((a >> shift) & 255) * (256 - f) +
+                     ((b >> shift) & 255) * f) >> 8) << shift;
+        return out;
     }
     int first = 0, last = height - 1;
     if (gradient->stops == 4 && height >= 3)

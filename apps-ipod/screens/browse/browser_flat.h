@@ -11,7 +11,6 @@
 /* Every document, image or video on the player, by 'kind', in one flat list.
  * Owns the screen until the user leaves. Returns a GO_TO_* code. */
 int browser_flat(enum flat_kind kind);
-int browser_flat_loose_videos(void);
 
 /* global_settings.sort_documents and sort_images */
 enum flat_sort {

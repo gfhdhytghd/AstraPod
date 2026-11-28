@@ -139,6 +139,7 @@ enum list_row_kind
     LIST_ROW_OPTION,            /* one of a setting's values, in its picker */
     LIST_ROW_CUSTOM,            /* a view from tagnavi_custom.config */
     LIST_ROW_CUSTOM_MENU,       /* opens a menu from tagnavi_custom.config */
+    LIST_ROW_VIDEO,             /* a video that plays */
 };
 typedef enum list_row_kind list_get_kind(int selected_item, void * data);
 /* Range callback: where a number setting's value sits in its
@@ -164,6 +165,7 @@ enum list_pane_kind
     LIST_PANE_DEVICE,           /* the player's name and free space */
     LIST_PANE_SHUFFLE,          /* the player's name and song count */
     LIST_PANE_PICTURE,          /* what menu_pane_set_picture() last gave */
+    LIST_PANE_PHOTO,            /* photos from menu_pane_set_photos() */
 };
 typedef enum list_pane_kind list_get_pane(int selected_item, void * data,
                                           int *art);
@@ -242,6 +244,7 @@ struct gui_synclist
      * per-item callback -- every row is this height. */
     int line_height_override;
     bool value_below;                  /* two-line row with a subtitle */
+    bool video_rows;                   /* value_below, as stock's Videos */
     list_get_name *callback_get_item_name;
     list_speak_item *callback_speak_item;
     list_draw_item *callback_draw_item;
@@ -442,6 +445,7 @@ struct simplelist_info {
     list_get_name *get_subtitle; /* a second line below the row label */
     list_get_range *get_range; /* can be NULL; a setting row's percentage */
     list_get_albumart *get_albumart; /* can be NULL for no art */
+    bool video_rows;   /* the value is a second line, as stock's Videos */
     int row_height; /* 0 uses the theme */
     struct list_selection_color *selection_color;
     void *callback_data; /* data for callbacks */

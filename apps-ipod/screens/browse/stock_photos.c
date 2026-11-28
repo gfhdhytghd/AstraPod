@@ -1,8 +1,18 @@
 /***************************************************************************
  * GNU General Public License (version 2+)
  *
- * Browse Classic photo albums and display their indexed LCD thumbnails.
- * Loose pictures keep the existing image viewer.
+ * Photos: the albums of iTunes' Photo Database and of the folders pictures
+ * were copied to (files/photo_folders.c), their thumbnail grid, a photo full
+ * screen and the slideshow.
+ *
+ * A Photo Database's thumbnails and screen pictures are read from its .ithmb
+ * files as they are drawn. A loose picture's come from photo_thumbs.c, which
+ * makes them in the background: a cell waits for its thumbnail as a
+ * placeholder, and a photo full screen waits for its decode as its
+ * thumbnail enlarged.
+ *
+ * Everything here lives in the scratch buffer (system/app_buffer.h) for as
+ * long as Photos is open, so opening it never shrinks the audio buffer.
  ****************************************************************************/
 #include <fcntl.h>
 #include <stdio.h>
@@ -29,26 +39,33 @@
 #include "rbpaths.h"
 #include "root_menu.h"
 #include "screens/extras/extras_bar.h"
-#include "screens/playback/wps.h"
 #include "string-extra.h"
 #include "system/activity.h"
 #include "system/volume.h"
 #include "settings/settings.h"
 #include "system.h"
 #include "ui/menu_pane.h"
+#include "ui/native_theme_runtime.h"
 #include "ui/scene.h"
 #include "ui/stock_art.h"
 #include "widgets/list.h"
 #include "widgets/menu.h"
 #include "widgets/option_select.h"
 #include "widgets/splash.h"
-#include "browser_flat.h"
+#include "system/app_buffer.h"
+#include "files/photo_folders.h"
+#include "metadata/photo_thumbs.h"
 #include "stock_media.h"
 
 #define PHOTO_LIMIT 32768
 #define ALBUM_LIMIT 2048
-#define THUMB_EDGE 64
+#define THUMB_EDGE PHOTO_THUMB_EDGE
 #define PHOTO_PIXELS (LCD_WIDTH * LCD_HEIGHT)
+#define ARENA_OWNER "photos"
+/* How long a loose picture's decode is waited for before its thumbnail is
+ * shown enlarged in its place */
+#define SCREEN_WAIT (HZ / 5)
+#define SLIDE_WAIT HZ
 
 /* Stock's thumbnail grid: five 62 x 63 cells a row on 64 x 65 pitches below
  * a 46-row header, three rows on screen. A 64 x 64 thumbnail sits in its cell
@@ -64,6 +81,9 @@
 #define GRID_GREY LCD_RGBPACK(32, 32, 32)
 #define FRAME_OUTER LCD_RGBPACK(248, 192, 24)
 #define FRAME_INNER LCD_RGBPACK(208, 160, 32)
+#define TITLE_ROWS 24
+#define LOADING_FILL LCD_RGBPACK(40, 44, 40)
+#define LOADING_EDGE LCD_RGBPACK(64, 68, 64)
 #define SUBTITLE_FONT FONT_DIR "/13-helvetica-bold.pbf"
 #define SUBTITLE_GREY 0x939393
 #define SUBTITLE_BASELINE 38
@@ -82,6 +102,8 @@ struct photo {
     off_t at;
 };
 
+/* The open album's photos are its Photo Database photos, slides[], then its
+ * loose pictures, files loose_first onwards. */
 struct albums {
     struct stock_db db;
     bool indexed;
@@ -92,7 +114,34 @@ struct albums {
     off_t *slides;
     int slide_count;
     int slide_capacity;
+    struct photo_folders loose;
+    int loose_first;
+    int loose_count;
+    fb_data *view;              /* three screens */
+    int *order;                 /* a slideshow's, room for every photo */
+    fb_data *pane;              /* the menu pane's photo */
+    fb_data *menu;              /* the menu as the grid opened over it */
+    bool menu_split;
+    int pane_set;               /* the set a loose pane photo is wanted for */
+    int pane_file;              /* that photo, or -1 */
+    int pane_last;              /* the photo shown last */
 };
+
+static int photo_total(const struct albums *a)
+{
+    return a->slide_count + a->loose_count;
+}
+
+/* The loose picture behind a photo of the open album, or -1 */
+static int slide_file(const struct albums *a, int sel)
+{
+    return sel < a->slide_count ? -1 : a->loose_first + sel - a->slide_count;
+}
+
+static int db_rows(const struct albums *a)
+{
+    return a->indexed ? a->album_count - 1 : 0;
+}
 
 static int compare_photo(const void *left, const void *right)
 {
@@ -152,10 +201,11 @@ static const char *album_name(int row, void *data, char *buf, size_t size)
     struct albums *a = data;
     if (row == 1)
         return str(LANG_SETTINGS);
-    if (!a->indexed)
+    if (row == 0)
         return str(LANG_FRUIT_ALL_PHOTOS);
-    if (row > 1)
-        row--;
+    row--;
+    if (row > db_rows(a))
+        return photo_folders_label(&a->loose, row - db_rows(a) - 1);
     struct stock_record album, name;
     uint32_t flags;
     off_t at = a->album[row];
@@ -170,7 +220,7 @@ static const char *album_name(int row, void *data, char *buf, size_t size)
     return str(LANG_FRUIT_PHOTOS);
 }
 
-static void read_album(struct albums *a, int row)
+static void read_db_album(struct albums *a, int row)
 {
     struct stock_record album, r;
     uint32_t metadata, count, flags;
@@ -209,16 +259,45 @@ static void read_album(struct albums *a, int row)
     }
 }
 
+/* The photos of the menu's row: All Photos, a Photo Database album or a
+ * folder */
+static void read_album(struct albums *a, int row)
+{
+    a->slide_count = 0;
+    a->loose_first = a->loose_count = 0;
+    if (row == 0)
+    {
+        if (a->indexed)
+            read_db_album(a, 0);
+        a->loose_count = a->loose.file_count;
+    }
+    else if (row - 1 <= db_rows(a))
+        read_db_album(a, row - 1);
+    else
+    {
+        const struct photo_folder *f =
+            &a->loose.folders[row - db_rows(a) - 2];
+        a->loose_first = f->first;
+        a->loose_count = f->count;
+    }
+}
+
 static int subtitle_font = -1;
 
 /* The date a photo was taken, as "November 27, 2026", or "" if unknown. */
 static void photo_date(const struct albums *a, int sel, char *buf, size_t size)
 {
     uint32_t mac;
+    time_t when;
+    int file = slide_file(a, sel);
     *buf = '\0';
-    if (!stock_db_u32(&a->db, a->slides[sel] + 40, &mac) || mac < MAC_EPOCH)
+    if (file >= 0)
+        when = a->loose.files[file].mtime;
+    else if (!stock_db_u32(&a->db, a->slides[sel] + 40, &mac) ||
+             mac < MAC_EPOCH)
         return;
-    time_t when = mac - MAC_EPOCH;
+    else
+        when = mac - MAC_EPOCH;
     struct tm tm;
     gmtime_r(&when, &tm);
     snprintf(buf, size, "%s %d, %d", str(LANG_EXTRAS_CALENDARS_JANUARY + tm.tm_mon),
@@ -228,7 +307,7 @@ static void photo_date(const struct albums *a, int sel, char *buf, size_t size)
 /* The black title bar, then the album's photo count and the selected
  * photo's date on the grey band below it. */
 static void draw_grid_header(const struct albums *a, const char *title,
-                             int sel)
+                             int sel, bool battery)
 {
     enum { ROWS = 4 };
     uint32_t pixels[LCD_WIDTH * ROWS];
@@ -237,9 +316,9 @@ static void draw_grid_header(const struct albums *a, const char *title,
     if (subtitle_font < 0)
         subtitle_font = font_load_ex(SUBTITLE_FONT, 0,
                                      global_settings.glyphs_to_cache);
-    snprintf(count, sizeof(count), a->slide_count == 1 ?
+    snprintf(count, sizeof(count), photo_total(a) == 1 ?
              str(LANG_FRUIT_ONE_PHOTO) : str(LANG_FRUIT_PHOTO_COUNT),
-             a->slide_count);
+             photo_total(a));
     photo_date(a, sel, date, sizeof(date));
     int top = 0;
     if (subtitle_font >= 0)
@@ -256,7 +335,7 @@ static void draw_grid_header(const struct albums *a, const char *title,
         for (int i = 0; i < LCD_WIDTH * band.height; i++)
             pixels[i] = 0x202020;
         stock_art_put(&band, STOCK_ART_PHOTOS_HEADER, 0, 0);
-        extras_bar_put_marks(&band, title, true, playing);
+        extras_bar_put_marks(&band, title, battery, playing);
         if (subtitle_font >= 0)
         {
             stock_canvas_text(&band, subtitle_font, count, SUBTITLE_LEFT, top,
@@ -280,33 +359,91 @@ static void draw_frame(int x, int y)
     lcd_drawrect(x + 2, y + 2, CELL_W - 4, CELL_H - 4);
 }
 
+/* A cell whose thumbnail is still being made shows stock's loading cell; one
+ * that no reader decodes stays black */
+static void draw_placeholder(int x, int y, enum photo_thumb_state state)
+{
+    if (state == PHOTO_THUMB_PENDING)
+    {
+        lcd_set_foreground(LOADING_FILL);
+        lcd_fillrect(x, y, CELL_W, CELL_H);
+        lcd_set_foreground(LOADING_EDGE);
+        lcd_drawrect(x, y, CELL_W, CELL_H);
+    }
+    else
+    {
+        lcd_set_foreground(LCD_BLACK);
+        lcd_fillrect(x, y, CELL_W, CELL_H);
+    }
+}
+
+/* Tells photo_thumbs.c which loose pictures the grid shows */
+static void focus_grid(const struct albums *a, int first)
+{
+    int lo = a->loose_first, hi = lo + a->loose_count;
+    int vis_lo = MAX(first, a->slide_count) - a->slide_count + lo;
+    int vis_hi = MIN(first + GRID_PAGE, photo_total(a)) - a->slide_count + lo;
+    photo_thumbs_focus(lo, hi, vis_lo, MAX(vis_lo, vis_hi));
+}
+
+/* The grid with `sel` framed, or with no frame when `framed` is false */
 static void draw_grid(const struct albums *a, const char *title,
-                      int sel, int first)
+                      int sel, int first, bool framed)
 {
     static fb_data tile[THUMB_EDGE * THUMB_EDGE];
 
-    draw_grid_header(a, title, sel);
+    focus_grid(a, first);
+    draw_grid_header(a, title, sel, true);
     lcd_set_foreground(GRID_GREY);
     lcd_fillrect(0, GRID_TOP, LCD_WIDTH, LCD_HEIGHT - GRID_TOP);
-    for (int i = first; i < a->slide_count && i < first + GRID_PAGE; i++)
+    for (int i = first; i < photo_total(a) && i < first + GRID_PAGE; i++)
     {
         int cell = i - first;
         int x = cell % GRID_COLS * GRID_PITCH_X + 1;
         int y = GRID_TOP + cell / GRID_COLS * GRID_PITCH_Y;
-        lcd_set_foreground(LCD_BLACK);
-        lcd_fillrect(x, y, CELL_W, CELL_H);
-        if (stock_photo_pixels(&a->db, a->slides[i], THUMB_EDGE, THUMB_EDGE,
-                               tile))
-            lcd_bitmap_part(tile, 1, 0, THUMB_EDGE, x, y, CELL_W, CELL_H);
-        if (i == sel)
+        int file = slide_file(a, i);
+        const fb_data *pixels = tile;
+        enum photo_thumb_state state = PHOTO_THUMB_READY;
+        if (file >= 0)
+            state = photo_thumbs_tile(file, &pixels);
+        else if (!stock_photo_pixels(&a->db, a->slides[i], THUMB_EDGE,
+                                     THUMB_EDGE, tile))
+            state = PHOTO_THUMB_BROKEN;
+        if (state == PHOTO_THUMB_READY)
+            lcd_bitmap_part(pixels, 1, 0, THUMB_EDGE, x, y, CELL_W, CELL_H);
+        else
+            draw_placeholder(x, y, state);
+        if (i == sel && framed)
             draw_frame(x, y);
     }
 }
 
-static void draw_photo(const struct albums *a, int sel, fb_data *pixels)
+/* A loose picture full screen with no thumbnail yet, or that no reader
+ * decodes: black, the ground every photo is fitted on */
+static void draw_photo_placeholder(fb_data *pixels)
 {
-    if (!stock_photo_pixels(&a->db, a->slides[sel], LCD_WIDTH, LCD_HEIGHT, pixels))
-        memset(pixels, 0, PHOTO_PIXELS * sizeof(*pixels));
+    memset(pixels, 0, PHOTO_PIXELS * sizeof(*pixels));
+}
+
+/* The photo at screen size. False while a loose picture's decode is still to
+ * finish: pixels then hold its thumbnail enlarged, or the placeholder. */
+static bool draw_photo(const struct albums *a, int sel, fb_data *pixels,
+                       long wait)
+{
+    int file = slide_file(a, sel);
+    if (file < 0)
+    {
+        if (!stock_photo_pixels(&a->db, a->slides[sel], LCD_WIDTH, LCD_HEIGHT,
+                                pixels))
+            memset(pixels, 0, PHOTO_PIXELS * sizeof(*pixels));
+        return true;
+    }
+    enum photo_thumb_state state = photo_thumbs_screen(file, pixels, wait);
+    if (state == PHOTO_THUMB_READY)
+        return true;
+    if (state == PHOTO_THUMB_BROKEN || !photo_thumbs_preview(file, pixels))
+        draw_photo_placeholder(pixels);
+    return state == PHOTO_THUMB_BROKEN;
 }
 
 /* A slideshow's first transition is always Cross Fade, whatever the
@@ -624,9 +761,12 @@ static void present_photo(const fb_data *pixels, bool brightness)
 }
 
 /* Stock pushes between the grid and a photo in 8 frames of 1/30 s, easing
- * out quadratically; forward moves the pages left. */
+ * out quadratically; forward moves the pages left. Its two directions run
+ * the curve at different phases: these are the distances it moves. */
 static void push_pages(const fb_data *from, const fb_data *to, bool forward)
 {
+    static const uint16_t out[] = { 54, 123, 181, 229, 267, 295, 312 };
+    static const uint16_t back[] = { 75, 141, 196, 241, 276, 301, 316 };
     if (global_settings.animations)
     {
         struct ui_motion motion = ui_motion_begin("photo-push");
@@ -636,8 +776,7 @@ static void push_pages(const fb_data *from, const fb_data *to, bool forward)
             long frame = start + k * HZ / 30;
             if (TIME_BEFORE(current_tick, frame))
                 sleep(frame - current_tick);
-            int rest = 8 - k;
-            int off = (LCD_WIDTH * (64 - rest * rest) + 63) / 64;
+            int off = forward ? out[k - 1] : back[k - 1];
             int keep = LCD_WIDTH - off;
             if (forward)
             {
@@ -666,39 +805,67 @@ enum photo_view_result {
     PHOTO_VIEW_USB,
 };
 
+/* The photo after the one on screen, whose screen copy is readied ahead */
+static int photo_ahead(const struct albums *a, const int *order, bool playing,
+                       int position, int sel, int direction)
+{
+    int total = photo_total(a);
+    int next = playing ? position + 1 : sel + direction;
+    if (playing && next >= total && global_settings.photo_repeat)
+        next = 0;
+    if (next < 0 || next >= total)
+        return -1;
+    return slide_file(a, playing ? order[next] : next);
+}
+
 static enum photo_view_result photo_view(const struct albums *a, int *sel)
 {
-    int handle = core_alloc(3 * PHOTO_PIXELS * sizeof(fb_data) +
-                            a->slide_count * sizeof(int));
-    if (handle <= 0)
-        return PHOTO_VIEW_GRID;
-    fb_data *current = core_get_data_pinned(handle);
+    fb_data *current = a->view;
     fb_data *next = current + PHOTO_PIXELS;
     fb_data *mix = next + PHOTO_PIXELS;
-    int *order = (int *)(mix + PHOTO_PIXELS);
+    int *order = a->order;
+    int total = photo_total(a);
     int position = *sel;
     enum slideshow_music music = SLIDESHOW_UNCHANGED;
     int interval = MIN(20, MAX(0, global_settings.photo_duration)) * HZ;
     int last_transition = PHOTO_CUT;
-    bool playing = false, initial = false;
+    bool playing = false, paused = false, initial = false;
     long due = current_tick + interval;
     bool brightness = false;
     long brightness_due = 0;
+    /* The loose picture whose decode the screen still shows a stand-in
+     * for, or -1, and which way the last step went */
+    int waiting = -1, direction = 1;
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
     int initial_brightness = global_settings.brightness;
 #endif
     enum photo_view_result result = PHOTO_VIEW_GRID;
+    /* Stock pushes the grid away to black, then cuts to the photo */
     memcpy(mix, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
-    draw_photo(a, *sel, current);
+    memset(current, 0, PHOTO_PIXELS * sizeof(fb_data));
     push_pages(mix, current, true);
+    if (!draw_photo(a, *sel, current, SCREEN_WAIT))
+        waiting = slide_file(a, *sel);
+    present_photo(current, false);
     for (;;)
     {
         long now = current_tick;
-        int timeout = playing && interval ? MAX(1, due - now) : TIMEOUT_BLOCK;
+        int timeout = playing && !paused && interval ? MAX(1, due - now)
+                                                     : TIMEOUT_BLOCK;
         if (brightness)
         {
             int remaining = MAX(1, brightness_due - now);
             timeout = timeout == TIMEOUT_BLOCK ? remaining : MIN(timeout, remaining);
+        }
+        if (waiting >= 0)
+            timeout = timeout == TIMEOUT_BLOCK ? HZ / 20
+                                               : MIN(timeout, HZ / 20);
+        else
+        {
+            int ahead = photo_ahead(a, order, playing, position, *sel,
+                                    direction);
+            if (ahead >= 0)
+                photo_thumbs_prefetch(ahead);
         }
         int action = get_custom_action(
             CONTEXT_PLUGIN | CONTEXT_WHEEL_DETENTS,
@@ -720,16 +887,31 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
             brightness = false;
             redraw = true;
         }
+        if (waiting >= 0)
+        {
+            enum photo_thumb_state state =
+                photo_thumbs_screen_take(waiting, current);
+            if (state == PHOTO_THUMB_BROKEN)
+                draw_photo_placeholder(current);
+            if (state != PHOTO_THUMB_PENDING)
+            {
+                waiting = -1;
+                redraw = true;
+            }
+        }
 
         int pos = playing ? position : *sel;
         int step = 0;
-        if (action == ACTION_WPS_PLAY)
-            wps_wheel_transport(action);
-        else if (action == ACTION_WPS_BROWSE)
+        if (action == ACTION_WPS_PLAY && playing)
+        {
+            paused = !paused;
+            due = current_tick + interval;
+        }
+        else if (action == ACTION_WPS_BROWSE || action == ACTION_WPS_PLAY)
         {
             if (!playing)
             {
-                music = slideshow_start(order, a->slide_count, *sel);
+                music = slideshow_start(order, total, *sel);
                 pos = position = global_settings.photo_shuffle ? 0 : *sel;
                 last_transition = PHOTO_CUT;
                 playing = initial = true;
@@ -773,29 +955,33 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
         else if (!playing && action == ACTION_WPS_SEEKBACK)
             pos = 0;
         else if (!playing && action == ACTION_WPS_SEEKFWD)
-            pos = a->slide_count - 1;
+            pos = total - 1;
 
-        if (playing && !step && interval && !TIME_BEFORE(current_tick, due))
+        if (playing && !paused && !step && interval &&
+            !TIME_BEFORE(current_tick, due))
             step = 1;
         pos += step;
-        if (playing && (pos < 0 || pos >= a->slide_count))
+        if (playing && (pos < 0 || pos >= total))
         {
             if (global_settings.photo_repeat)
-                pos = pos < 0 ? a->slide_count - 1 : 0;
+                pos = pos < 0 ? total - 1 : 0;
             else if (step > 0)
                 break;
             else
                 pos = position;
         }
         else
-            pos = MIN(a->slide_count - 1, MAX(0, pos));
+            pos = MIN(total - 1, MAX(0, pos));
 
         if (playing ? (pos != position || (step && global_settings.photo_repeat))
                     : pos != *sel)
         {
+            direction = pos < (playing ? position : *sel) ? -1 : 1;
             position = pos;
             *sel = playing ? order[pos] : pos;
-            draw_photo(a, *sel, next);
+            waiting = draw_photo(a, *sel, next,
+                                 playing ? SLIDE_WAIT : SCREEN_WAIT) ?
+                      -1 : slide_file(a, *sel);
             if (playing)
             {
                 if (brightness || redraw)
@@ -818,8 +1004,6 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
     if (global_settings.brightness != initial_brightness)
         settings_save();
 #endif
-    core_unpin(handle);
-    core_free(handle);
     if (result == PHOTO_VIEW_USB)
         default_event_handler(SYS_USB_CONNECTED);
     return result;
@@ -829,46 +1013,134 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
 static void return_to_grid(const struct albums *a, const char *title,
                            int sel, int first)
 {
-    int handle = core_alloc(2 * PHOTO_PIXELS * sizeof(fb_data));
-    if (handle <= 0)
+    fb_data *photo = a->view;
+    fb_data *grid = photo + PHOTO_PIXELS;
+    memcpy(photo, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
+    draw_grid(a, title, sel, first, true);
+    memcpy(grid, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
+    push_pages(photo, grid, false);
+}
+
+/* Stock cuts to the grid with its title bar away, then once the page's
+ * thumbnails are in slides the bar down from above, the battery last. */
+static void grid_entry(const struct albums *a, const char *title)
+{
+    static const uint8_t hidden[] = { 13, 4, 0 };   /* rows above the top */
+    fb_data *bar = a->view;
+    fb_data *bare = bar + TITLE_ROWS * LCD_WIDTH;
+    draw_grid_header(a, title, 0, false);
+    memcpy(bare, FBADDR(0, 0), TITLE_ROWS * LCD_WIDTH * sizeof(fb_data));
+    draw_grid(a, title, 0, 0, true);
+    memcpy(bar, FBADDR(0, 0), TITLE_ROWS * LCD_WIDTH * sizeof(fb_data));
+    lcd_set_foreground(GRID_GREY);
+    lcd_fillrect(0, 0, LCD_WIDTH, TITLE_ROWS);
+    lcd_update();
+    if (!global_settings.animations)
     {
-        draw_grid(a, title, sel, first);
+        draw_grid(a, title, 0, 0, true);
         lcd_update();
         return;
     }
-    fb_data *photo = core_get_data_pinned(handle);
-    fb_data *grid = photo + PHOTO_PIXELS;
-    memcpy(photo, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
-    draw_grid(a, title, sel, first);
+    long start = current_tick;
+    unsigned made = photo_thumbs_generation();
+    while (TIME_BEFORE(current_tick, start + HZ * 3 / 10) &&
+           (photo_thumbs_pending() ||
+            TIME_BEFORE(current_tick, start + HZ * 15 / 100)))
+    {
+        sleep(1);
+        if (made == photo_thumbs_generation())
+            continue;
+        made = photo_thumbs_generation();
+        draw_grid(a, title, 0, 0, true);
+        lcd_set_foreground(GRID_GREY);
+        lcd_fillrect(0, 0, LCD_WIDTH, TITLE_ROWS);
+        lcd_update();
+    }
+    struct ui_motion motion = ui_motion_begin("photo-title");
+    start = current_tick;
+    for (unsigned k = 0; k < ARRAYLEN(hidden); k++)
+    {
+        long frame = start + (k + 1) * HZ / 30;
+        if (TIME_BEFORE(current_tick, frame))
+            sleep(frame - current_tick);
+        int shown = TITLE_ROWS - hidden[k];
+        lcd_bitmap_part(bare, 0, hidden[k], LCD_WIDTH, 0, 0, LCD_WIDTH,
+                        shown);
+        lcd_set_foreground(GRID_GREY);
+        lcd_fillrect(0, shown, LCD_WIDTH, hidden[k]);
+        lcd_update_rect(0, 0, LCD_WIDTH, TITLE_ROWS);
+    }
+    sleep(HZ / 20);
+    lcd_bitmap(bar, 0, 0, LCD_WIDTH, TITLE_ROWS);
+    lcd_update_rect(0, 0, LCD_WIDTH, TITLE_ROWS);
+    ui_motion_end(&motion);
+}
+
+/* Stock takes the frame off the selection, then slides the menu's list in
+ * from the left over the grid, its shadow on the grid. The pane follows
+ * when the list draws itself. */
+static void grid_exit(const struct albums *a, const char *title, int sel,
+                      int first)
+{
+    static const uint16_t edges[] = { 36, 81, 116, 141, 155, 160 };
+    draw_grid(a, title, sel, first, false);
+    lcd_update();
+    if (!global_settings.animations)
+        return;
+    fb_data *grid = a->view;
     memcpy(grid, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
-    push_pages(photo, grid, false);
-    core_unpin(handle);
-    core_free(handle);
+    int width = a->menu_split ? MENU_PANE_X : LCD_WIDTH;
+    struct ui_motion motion = ui_motion_begin("photo-grid-pop");
+    long start = current_tick;
+    for (unsigned k = 0; k < ARRAYLEN(edges); k++)
+    {
+        long frame = start + (k + 1) * HZ / 30;
+        if (TIME_BEFORE(current_tick, frame))
+            sleep(frame - current_tick);
+        int edge = edges[k] * width / MENU_PANE_X;
+        for (int y = 0; y < LCD_HEIGHT; y++)
+        {
+            fb_data *row = FBADDR(0, y);
+            memcpy(row, a->menu + y * LCD_WIDTH + width - edge,
+                   edge * sizeof(fb_data));
+            memcpy(row + edge, grid + y * LCD_WIDTH + edge,
+                   (LCD_WIDTH - edge) * sizeof(fb_data));
+            menu_pane_shadow(row, y, edge, LCD_WIDTH);
+        }
+        lcd_update();
+    }
+    ui_motion_end(&motion);
 }
 
 static bool photo_grid(const struct albums *a, const char *title)
 {
-    if (!a->slide_count)
+    int total = photo_total(a);
+    if (!total)
         return false;
 
     int sel = 0, first = 0;
-    int last_row = (a->slide_count - 1) / GRID_COLS;
+    unsigned made = photo_thumbs_generation();
+    int last_row = (total - 1) / GRID_COLS;
     int last_first = MAX(0, last_row - GRID_ROWS + 1) * GRID_COLS;
     unsigned foreground = lcd_get_foreground();
     viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
     lcd_set_viewport(NULL);
     bool usb = false;
-    draw_grid(a, title, sel, first);
-    lcd_update();
+    grid_entry(a, title);
     for (;;)
     {
         bool back = false;
         int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_PAGED_LIST,
-                                       TIMEOUT_BLOCK, photo_grid_keys);
+                                       photo_thumbs_pending() ? HZ / 20
+                                                              : TIMEOUT_BLOCK,
+                                       photo_grid_keys);
         int button;
         get_action_statuscode(&button);
         if (action == ACTION_STD_CANCEL)
+        {
+            grid_exit(a, title, sel, first);
             break;
+        }
         if (default_event_handler(action) == SYS_USB_CONNECTED)
         {
             usb = true;
@@ -877,7 +1149,7 @@ static bool photo_grid(const struct albums *a, const char *title)
         if (action == ACTION_WPS_SEEKBACK)
             sel = 0;
         else if (action == ACTION_WPS_SEEKFWD)
-            sel = a->slide_count - 1;
+            sel = total - 1;
         else if (action == ACTION_LISTTREE_PGUP && first > 0)
         {
             sel = MAX(0, sel - GRID_PAGE);
@@ -885,13 +1157,13 @@ static bool photo_grid(const struct albums *a, const char *title)
         }
         else if (action == ACTION_LISTTREE_PGDOWN && first < last_first)
         {
-            sel = MIN(a->slide_count - 1, sel + GRID_PAGE);
+            sel = MIN(total - 1, sel + GRID_PAGE);
             first = MIN(last_first, first + GRID_PAGE);
         }
         else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
             sel = MAX(0, sel - 1);
         else if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
-            sel = MIN(a->slide_count - 1, sel + 1);
+            sel = MIN(total - 1, sel + 1);
         else if (action == ACTION_STD_OK && (button & BUTTON_SELECT))
         {
             enum photo_view_result result = photo_view(a, &sel);
@@ -900,15 +1172,16 @@ static bool photo_grid(const struct albums *a, const char *title)
                 break;
             back = true;
         }
-        else
+        else if (made == photo_thumbs_generation())
             continue;
+        made = photo_thumbs_generation();
         int row_start = sel / GRID_COLS * GRID_COLS;
         first = MIN(row_start, MAX(first, row_start - GRID_PAGE + GRID_COLS));
         if (back)
             return_to_grid(a, title, sel, first);
         else
         {
-            draw_grid(a, title, sel, first);
+            draw_grid(a, title, sel, first, true);
             lcd_update();
         }
     }
@@ -921,33 +1194,24 @@ static bool photo_grid(const struct albums *a, const char *title)
     return usb;
 }
 
+/* Under the stock menu tree LEFT, RIGHT and PLAY neither open nor leave a
+ * row, as on stock; other trees leave them their usual meaning. */
 int stock_media_list_action(int action, struct gui_synclist *lists)
 {
     (void)lists;
     int button;
     get_action_statuscode(&button);
-    if ((button & (BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY)) &&
+    if (ui_wheel_navigation() &&
+        (button & (BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY)) &&
         (action == ACTION_STD_OK || action == ACTION_STD_CANCEL ||
          action == ACTION_TREE_WPS))
         return ACTION_NONE;
     return action;
 }
 
-/* Whether the file walk has found any images, or may yet. */
-static bool loose_photos(void)
-{
-    if (file_index_is_busy())
-        return true;
-    int fd = open(file_index_list(FLAT_IMAGES), O_RDONLY);
-    if (fd < 0)
-        return false;
-    bool any = ffilesize(fd) > 0;
-    close(fd);
-    return any;
-}
-
-/* The Photos menu's pane: the main menu's cover slideshow, as on stock, or
- * stock's No Photos picture when the library has no photos. */
+/* The Photos menu's pane: photos of the highlighted album, the library's
+ * for All Photos and Settings, or stock's No Photos picture when the
+ * library has no photos. */
 static void paint_no_photos(struct stock_canvas *band)
 {
     stock_art_mask(band, STOCK_ART_NO_CONTENT_PHOTO_PREVIEW, 178, 44,
@@ -956,10 +1220,12 @@ static void paint_no_photos(struct stock_canvas *band)
 
 static enum list_pane_kind photos_pane(int row, void *data, int *art)
 {
-    (void)row;
-    (void)art;
-    if (((struct albums *)data)->indexed)
-        return LIST_PANE_ART;
+    const struct albums *a = data;
+    if (a->indexed || a->loose.file_count)
+    {
+        *art = row > 1 ? row : 0;
+        return LIST_PANE_PHOTO;
+    }
     struct menu_pane_content c = {
         .kind = LIST_PANE_PICTURE, .art = -1, .baseline = 179,
         .paint = paint_no_photos,
@@ -969,6 +1235,47 @@ static enum list_pane_kind photos_pane(int row, void *data, int *art)
     return LIST_PANE_PICTURE;
 }
 
+static struct albums *pane_albums;
+
+/* menu_pane's next(): a photo of the menu row `set` other than the last,
+ * read at once from the Photo Database, or asked of photo_thumbs.c and
+ * collected on a later call. Only the menu is on screen, so the open album
+ * and the view are free to use. */
+static bool pane_next(int set)
+{
+    struct albums *a = pane_albums;
+    if (a->pane_file >= 0 && a->pane_set == set)
+    {
+        enum photo_thumb_state state =
+            photo_thumbs_screen_take(a->pane_file, a->pane);
+        if (state == PHOTO_THUMB_PENDING)
+            return false;
+        a->pane_file = -1;
+        return state == PHOTO_THUMB_READY;
+    }
+    read_album(a, set);
+    int total = photo_total(a);
+    if (!total)
+        return false;
+    int pick = rand() % total;
+    if (pick == a->pane_last && total > 1)
+        pick = (pick + 1) % total;
+    a->pane_last = pick;
+    int file = slide_file(a, pick);
+    if (file < 0)
+    {
+        if (!stock_photo_pixels(&a->db, a->slides[pick], LCD_WIDTH,
+                                LCD_HEIGHT, a->view))
+            return false;
+        memcpy(a->pane, a->view, PHOTO_PIXELS * sizeof(fb_data));
+        return true;
+    }
+    a->pane_set = set;
+    a->pane_file = file;
+    photo_thumbs_prefetch(file);
+    return false;
+}
+
 static int photos_list_action(int action, struct gui_synclist *lists)
 {
     if (action == ACTION_REDRAW)
@@ -976,36 +1283,66 @@ static int photos_list_action(int action, struct gui_synclist *lists)
     return stock_media_list_action(action, lists);
 }
 
+/* Takes from p what the Photo Database's tables need and reads them */
+static unsigned char *read_database(struct albums *a, unsigned char *p,
+                                    unsigned char *end)
+{
+    struct stock_record images, albums;
+    if (!stock_db_open(&a->db, true) ||
+        !stock_db_list(&a->db, 1, "mhli", &images) || !images.count ||
+        !stock_db_list(&a->db, 2, "mhla", &albums))
+        return p;
+    unsigned count = MIN(images.count, PHOTO_LIMIT);
+    p = (unsigned char *)ALIGN_UP((uintptr_t)p, 8);
+    size_t need = count * (sizeof(*a->photos) + sizeof(*a->slides)) +
+                  ALBUM_LIMIT * sizeof(*a->album);
+    if ((size_t)(end - p) < need)
+        return p;
+    a->photos = (struct photo *)p;
+    a->album = (off_t *)(a->photos + count);
+    a->slides = a->album + ALBUM_LIMIT;
+    a->slide_capacity = count;
+    read_photos(a, &images, count);
+    read_albums(a, &albums);
+    a->indexed = a->album_count && a->photo_count;
+    return (unsigned char *)(a->slides + count);
+}
+
 int stock_photos_screen(void)
 {
     struct albums a = {0};
-    struct stock_record images, albums;
-    int handle = -1, rc = 0;
+    int rc = 0;
+    size_t size;
+    unsigned char *arena = app_try_claim_buffer(&size, ARENA_OWNER);
+    if (!arena)
+        return 0;
+    unsigned char *end = arena + size;
     bool menu_back = action_set_menu_back(true);
-    if (stock_db_open(&a.db, true) &&
-        stock_db_list(&a.db, 1, "mhli", &images) && images.count &&
-        stock_db_list(&a.db, 2, "mhla", &albums))
-    {
-        unsigned count = MIN(images.count, PHOTO_LIMIT);
-        handle = core_alloc(count * (sizeof(*a.photos) + sizeof(*a.slides)) +
-                            ALBUM_LIMIT * sizeof(*a.album));
-        if (handle > 0)
-        {
-            a.photos = core_get_data_pinned(handle);
-            a.album = (off_t *)(a.photos + count);
-            a.slides = a.album + ALBUM_LIMIT;
-            a.slide_capacity = count;
-            read_photos(&a, &images, count);
-            read_albums(&a, &albums);
-            a.indexed = a.album_count && a.photo_count;
-        }
-    }
+
+    /* Three screens, the pane's and the menu's, the thumbnail cache, the
+     * Photo Database's tables, the loose pictures, and a slideshow's order
+     * for every photo */
+    a.view = (fb_data *)ALIGN_UP((uintptr_t)arena, 8);
+    a.pane = a.view + 3 * PHOTO_PIXELS;
+    a.menu = a.pane + PHOTO_PIXELS;
+    a.pane_file = a.pane_last = -1;
+    unsigned char *thumbs = (unsigned char *)(a.menu + PHOTO_PIXELS);
+    unsigned char *p = read_database(&a, thumbs + photo_thumbs_bytes(), end);
+    size_t left = end - p;
+    size_t order = left / 6 + a.photo_count * sizeof(int) + 16;
+    if (left > order)
+        p += photo_folders_scan(&a.loose, p, left - order, a.indexed);
+    a.order = (int *)ALIGN_UP((uintptr_t)p, sizeof(int));
+    photo_thumbs_open(&a.loose, thumbs, photo_thumbs_bytes());
+    struct menu_pane_photos pane = { a.pane, pane_next };
+    pane_albums = &a;
+    menu_pane_set_photos(&pane);
 
     struct ui_scene scene = {0};
     ui_scene_open_page(&scene, "photos-push");
     struct simplelist_info info;
     simplelist_info_init(&info, str(LANG_FRUIT_PHOTOS),
-                         a.indexed ? a.album_count + 1 : 2, &a);
+                         2 + db_rows(&a) + a.loose.album_count, &a);
     info.get_name = album_name;
     info.action_callback = photos_list_action;
     info.page_with_left_right = true;
@@ -1020,23 +1357,13 @@ int stock_photos_screen(void)
             break;
         if (info.selection == 1)
             rc = stock_photos_settings();
-        else if (!a.indexed)
-        {
-            /* Stock leaves an empty library's menu up. */
-            if (!loose_photos())
-                continue;
-            struct ui_scene files = {0};
-            ui_scene_open_page(&files, "loose-photos-push");
-            rc = browser_flat(FLAT_IMAGES);
-            ui_scene_close_modal(&files, rc == GO_TO_PREVIOUS,
-                                 "loose-photos-pop");
-            if (rc == GO_TO_PREVIOUS)
-                rc = 0;
-        }
         else
         {
+            /* Stock leaves an empty library's menu up */
             char title[96];
-            read_album(&a, info.selection ? info.selection - 1 : 0);
+            read_album(&a, info.selection);
+            a.menu_split = menu_pane_themed();
+            memcpy(a.menu, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
             if (photo_grid(&a, album_name(info.selection, &a, title, sizeof(title))))
                 rc = MENU_ATTACHED_USB;
         }
@@ -1044,12 +1371,10 @@ int stock_photos_screen(void)
             break;
     }
     ui_scene_close_modal(&scene, !rc, "photos-pop");
-    if (handle > 0)
-    {
-        core_unpin(handle);
-        core_free(handle);
-    }
+    menu_pane_set_photos(NULL);
+    photo_thumbs_close();
     stock_db_close(&a.db);
+    app_release_buffer(ARENA_OWNER);
     action_set_menu_back(menu_back);
     return rc;
 }

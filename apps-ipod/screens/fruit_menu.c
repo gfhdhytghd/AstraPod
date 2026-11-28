@@ -988,11 +988,87 @@ static bool fruit_media_pane(const struct menu_item_ex *item)
     return false;
 }
 
+void fruit_videos_pane(const char *title)
+{
+    struct stock_video_census census;
+    stock_videos_census(&census);       /* finds the library's covers */
+    struct menu_pane_content c = {
+        .kind = LIST_PANE_ART, .art = STOCK_ART_NO_CONTENT_MOVIES_PREVIEW,
+        .videos = STOCK_MOVIE | STOCK_TV_SHOW | STOCK_MUSIC_VIDEO,
+    };
+    strlcpy(c.title, title, sizeof(c.title));
+    menu_pane_set_picture(&c);
+}
+
+/* Beside a Videos category, a slideshow of its videos' covers while it
+ * holds any, showing stock's film picture and the number of videos while
+ * no cover is made; else its own empty picture and caption */
+static bool videos_pane(const struct menu_item_ex *item)
+{
+    static const struct {
+        const struct menu_item_ex *videos, *home;
+        int art, empty;
+        unsigned covers;
+    } rows[] = {
+        { &movies_row, &home_movies, STOCK_ART_NO_CONTENT_MOVIES_PREVIEW,
+          LANG_FRUIT_NO_MOVIES, STOCK_MOVIE },
+        { &rentals_row, &home_rentals, STOCK_ART_NO_CONTENT_MOVIES_PREVIEW,
+          LANG_FRUIT_NO_RENTALS, 0 },
+        { &tv_shows_row, &home_tv_shows, STOCK_ART_NO_CONTENT_TVSHOW_PREVIEW,
+          LANG_FRUIT_NO_TV_SHOWS, STOCK_TV_SHOW },
+        { &music_videos_row, &home_music_videos,
+          STOCK_ART_NO_CONTENT_MUSIC_VIDEO_PREVIEW, LANG_FRUIT_NO_MUSIC_VIDEOS,
+          STOCK_MUSIC_VIDEO },
+        { &video_playlists_row, &home_video_playlists,
+          STOCK_ART_NO_CONTENT_PLAYLIST_PREVIEW, LANG_CATALOG_NO_PLAYLISTS, 0 },
+        { &video_settings_row, NULL, STOCK_ART_NO_CONTENT_MOVIES_PREVIEW,
+          LANG_FRUIT_NO_VIDEOS,
+          STOCK_MOVIE | STOCK_TV_SHOW | STOCK_MUSIC_VIDEO },
+    };
+    if (item == &videos_menu)
+    {
+        fruit_videos_pane(str(LANG_FRUIT_VIDEOS));
+        return true;
+    }
+    for (unsigned i = 0; i < ARRAYLEN(rows); i++)
+    {
+        if (item != rows[i].videos && item != rows[i].home)
+            continue;
+        struct stock_video_census census;
+        stock_videos_census(&census);
+        int total = census.movies + census.tv_shows + census.music_videos;
+        int held = (const int[]){ census.movies, 0, census.tv_shows,
+                                  census.music_videos, census.playlists,
+                                  total }[i];
+        struct menu_pane_content c = {
+            .kind = LIST_PANE_PICTURE, .art = rows[i].art,
+            .x = 178, .y = 44, .baseline = 179,
+        };
+        if (held)
+        {
+            if (rows[i].covers)
+            {
+                c.kind = LIST_PANE_ART;
+                c.videos = rows[i].covers;
+            }
+            c.art = STOCK_ART_NO_CONTENT_MOVIES_PREVIEW;
+            snprintf(c.title, sizeof(c.title),
+                     str(total == 1 ? LANG_VIDEO_ONE_VIDEO : LANG_VIDEO_COUNT),
+                     total);
+        }
+        else
+            strlcpy(c.title, str(rows[i].empty), sizeof(c.title));
+        menu_pane_set_picture(&c);
+        return true;
+    }
+    return false;
+}
+
 enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
                                          const struct menu_item_ex *item,
                                          int *art)
 {
-    if (extras_pane(item) || fruit_media_pane(item))
+    if (extras_pane(item) || fruit_media_pane(item) || videos_pane(item))
         return LIST_PANE_PICTURE;
     int bit = bit_of(home_bits, ARRAYLEN(home_bits), item);
     if (bit < 0)

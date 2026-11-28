@@ -203,6 +203,7 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->callback_get_item_kind = NULL;
     gui_list->callback_get_item_value = NULL;
     gui_list->value_below = false;
+    gui_list->video_rows = false;
     gui_list->callback_get_item_range = NULL;
     gui_list->callback_item_is_playing = NULL;
     gui_list->callback_get_item_description = NULL;
@@ -1064,6 +1065,7 @@ bool simplelist_show_list(struct simplelist_info *info)
     lists.callback_get_item_subtitle = info->get_subtitle;
     gui_synclist_set_albumart_callback(&lists, info->get_albumart);
     gui_synclist_set_row_height(&lists, info->row_height);
+    lists.value_below = lists.video_rows = info->video_rows;
     if (info->selection_color)
         gui_synclist_set_sel_color(&lists, info->selection_color);
 
@@ -1196,6 +1198,7 @@ void simplelist_info_init(struct simplelist_info *info, char* title,
     info->get_subtitle = NULL;
     info->get_range = NULL;
     info->get_albumart = NULL;
+    info->video_rows = false;
     info->row_height = 0;
     info->selection_color = NULL;
     info->callback_data = data;

@@ -74,7 +74,7 @@ Use `font.<role>=<basename>` to reference a font. The basename can contain 1–3
 | `panel` | `14-noto-sans` | `14-noto-sans` |
 | `pane_title` | `18-noto-sans-bold` | `17-helvetica-bold-pane` |
 | `pane_text` | `14-noto-sans` | `13-helvetica-bold` |
-| `list_value` | `18-noto-sans` | `13-helvetica-bold` |
+| `list_value` | `18-noto-sans` | `14-helvetica-bold-value` |
 
 The `helvetica` fonts are Apple's Helvetica from the stock firmware, at the
 stock sizes, with its CJK bitmaps at 11 or 16 px. They keep the stock
@@ -237,7 +237,7 @@ font.wps_meta = 13-helvetica-bold
 font.wps_time = 14-helvetica-bold
 font.pane_title = 17-helvetica-bold-pane
 font.pane_text = 13-helvetica-bold
-font.list_value = 13-helvetica-bold
+font.list_value = 14-helvetica-bold-value
 font.lyrics = 16-helvetica-bold
 font.lyrics_focus = 16-helvetica-bold
 font.lyrics_background = 13-helvetica-bold

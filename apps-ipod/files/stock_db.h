@@ -36,6 +36,9 @@ struct stock_record {
 
 bool stock_artwork_open(struct stock_db *db);
 bool stock_db_open(struct stock_db *db, bool photos);
+/* The size of the iTunes library's file, 0 for none: it changes when
+ * iTunes writes a different library */
+off_t stock_db_size(void);
 void stock_db_close(struct stock_db *db);
 bool stock_db_list(const struct stock_db *db, unsigned section,
                    const char *tag, struct stock_record *list);
@@ -51,4 +54,9 @@ bool stock_video_path(char *colon_path);
 bool stock_photo_pixels(const struct stock_db *db, off_t at, unsigned width,
                         unsigned height, void *pixels);
 int stock_artwork_pixels(const struct stock_db *db, off_t at, void *pixels);
+/* Image `at`'s largest thumbnail as an `edge`-pixel square in `pixels`:
+ * the middle of the 320-pixel one, or the 128-pixel one widened. False
+ * when it has neither. */
+bool stock_artwork_large(const struct stock_db *db, off_t at, void *pixels,
+                         int edge);
 #endif

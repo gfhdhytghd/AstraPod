@@ -164,6 +164,18 @@ bool stock_db_open(struct stock_db *db, bool photos)
     return true;
 }
 
+off_t stock_db_size(void)
+{
+    int fd = open(ITUNES_CDB, O_RDONLY);
+    if (fd < 0)
+        fd = open(ITUNES_DB, O_RDONLY);
+    if (fd < 0)
+        return 0;
+    off_t size = ffilesize(fd);
+    close(fd);
+    return size;
+}
+
 bool stock_artwork_open(struct stock_db *db)
 {
     *db = (struct stock_db){.fd = open("/iPod_Control/Artwork/ArtworkDB", O_RDONLY)};
@@ -260,18 +272,20 @@ bool stock_video_path(char *path)
     return !strcasecmp(extension, ".m4v") || !strcasecmp(extension, ".mp4");
 }
 
-static bool thumbnail_pixels(const struct stock_db *db, off_t at,
-                             unsigned format_id, unsigned size,
-                             const char *dir, void *pixels)
+/* The .ithmb file under `dir` holding image `at`'s thumbnail of
+ * `format_id`, `size` bytes, opened, with the thumbnail's offset; or -1 */
+static int thumbnail_file(const struct stock_db *db, off_t at,
+                          unsigned format_id, unsigned size, const char *dir,
+                          uint32_t *where)
 {
     struct stock_record image, data, thumb, name;
     if (!header(db, at, db->end, "mhii", false, &image))
-        return false;
+        return -1;
     for (off_t p = image.body; p < image.end; p = data.end)
     {
         uint32_t type, format, offset, length;
         if (!header(db, p, image.end, "mhod", false, &data))
-            return false;
+            return -1;
         if (data.body - p < 16 || !stock_db_u32(db, p + 12, &type) ||
             (type & 0xffff) != 2 ||
             !header(db, data.body, data.end, "mhni", false, &thumb) ||
@@ -283,26 +297,43 @@ static bool thumbnail_pixels(const struct stock_db *db, off_t at,
             continue;
         char location[64], path[64];
         if (!stock_db_photo_text(db, &name, location, sizeof(location)))
-            return false;
+            return -1;
         const char *leaf = strrchr(location, ':');
-        unsigned id, shard;
+        /* The firmware's sscanf has no %u. */
+        int id, shard;
         char basename[32];
-        if (!leaf || sscanf(leaf + 1, "F%u_%u", &id, &shard) != 2 ||
-            id != format_id || !shard)
-            return false;
-        snprintf(basename, sizeof(basename), "F%u_%u.ithmb", id, shard);
+        if (!leaf || sscanf(leaf + 1, "F%d_%d", &id, &shard) != 2 ||
+            id < 0 || (unsigned)id != format_id || shard <= 0)
+            return -1;
+        snprintf(basename, sizeof(basename), "F%d_%d.ithmb", id, shard);
         if (strcasecmp(basename, leaf + 1))
-            return false;
+            return -1;
         snprintf(path, sizeof(path), "%s/%s", dir, basename);
         int fd = open(path, O_RDONLY);
         if (fd < 0)
-            return false;
-        bool ok = (uint64_t)offset + size <= (uint64_t)ffilesize(fd) &&
-                  read_at(fd, offset, pixels, size);
-        close(fd);
-        return ok;
+            return -1;
+        if ((uint64_t)offset + size > (uint64_t)ffilesize(fd))
+        {
+            close(fd);
+            return -1;
+        }
+        *where = offset;
+        return fd;
     }
-    return false;
+    return -1;
+}
+
+static bool thumbnail_pixels(const struct stock_db *db, off_t at,
+                             unsigned format_id, unsigned size,
+                             const char *dir, void *pixels)
+{
+    uint32_t offset;
+    int fd = thumbnail_file(db, at, format_id, size, dir, &offset);
+    if (fd < 0)
+        return false;
+    bool ok = read_at(fd, offset, pixels, size);
+    close(fd);
+    return ok;
 }
 
 
@@ -321,4 +352,36 @@ int stock_artwork_pixels(const struct stock_db *db, off_t at, void *pixels)
     if (thumbnail_pixels(db, at, 1055, 128 * 128 * 2, dir, pixels))
         return 128;
     return 0;
+}
+
+bool stock_artwork_large(const struct stock_db *db, off_t at, void *pixels,
+                         int edge)
+{
+    const char *dir = "/iPod_Control/Artwork";
+    uint16_t *out = pixels;
+    uint32_t offset;
+    int fd = thumbnail_file(db, at, 1060, 320 * 320 * 2, dir, &offset);
+    if (fd >= 0 && edge <= 320)
+    {
+        /* The middle `edge` square of the 320-pixel thumbnail */
+        int margin = (320 - edge) / 2;
+        bool ok = true;
+        for (int y = 0; y < edge && ok; y++)
+            ok = read_at(fd, offset + ((y + margin) * 320 + margin) * 2,
+                         out + y * edge, edge * 2);
+        close(fd);
+        return ok;
+    }
+    if (fd >= 0)
+        close(fd);
+    /* The 128-pixel one, read to the buffer's end and widened from there:
+     * a row is written only after the rows it overlaps are read */
+    uint16_t *small = out + edge * edge - 128 * 128;
+    if (edge < 128 ||
+        !thumbnail_pixels(db, at, 1055, 128 * 128 * 2, dir, small))
+        return false;
+    for (int y = 0; y < edge; y++)
+        for (int x = 0; x < edge; x++)
+            out[y * edge + x] = small[(y * 128 / edge) * 128 + x * 128 / edge];
+    return true;
 }

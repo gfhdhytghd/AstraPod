@@ -6,7 +6,7 @@
  * status bar:
  *  - Connected: orange sphere + dock connector, "Connected" /
  *    "Eject before disconnecting."
- *  - Synchronizing (active disk I/O): orange sphere + rotating white sync
+ *  - Synchronizing (active disk I/O): orange sphere + rotating black sync
  *    arrows, "Do not disconnect." / "Eject before disconnecting."
  *  - Ejected: green sphere + white checkmark, "OK to disconnect."
  *
@@ -15,7 +15,6 @@
  * Everything is composed at 8 bits a channel in bands and truncated once.
  ****************************************************************************/
 
-#include <stdlib.h>
 #include "config.h"
 #include "system.h"
 #include "kernel.h"
@@ -38,6 +37,9 @@
 #define ART_X       100     /* the pictures' box, centred in it */
 #define ART_W       120
 #define SPHERE_Y    46
+#define SYNC_Y      62
+#define SYNC_FRAMES 18
+#define SYNC_STEP   MAX(1, HZ / 20)
 #define SPHERE_CX   160
 #define SPHERE_CY   106
 #define TEXT_X      10      /* the text's box */
@@ -56,6 +58,7 @@ enum usb_stock_state {
 static int title_font = -1, detail_font = -1;
 static unsigned last_stamp;
 static unsigned sync_phase;
+static long next_sync_frame;
 /* Fruit Company Ultra brings the picture in once the host is answered. */
 static bool entering;
 
@@ -79,8 +82,7 @@ static unsigned screen_stamp(enum usb_stock_state st)
            ((unsigned)(battery_level() & 0xff) << 4) |
            ((unsigned)(charge_state & 0x0f) << 12) |
            ((unsigned)(button_hold() ? 1 : 0) << 16) |
-           ((unsigned)(charger_inserted() ? 1 : 0) << 17) |
-           ((st == USB_STOCK_SYNCING ? (sync_phase & 3) : 0) << 18);
+           ((unsigned)(charger_inserted() ? 1 : 0) << 17);
 }
 
 static void precache_text(int font, const char *text)
@@ -109,6 +111,7 @@ void usb_stock_open(void)
     struct stock_canvas bar_dummy = { bar_scratch, 0, 0, 1, 1 };
     extras_bar_put(&bar_dummy, str(LANG_ROCKBOX_TITLE));
     sync_phase = 0;
+    next_sync_frame = current_tick + SYNC_STEP;
     last_stamp = 0;
     const struct stock_art *sync = &stock_art[STOCK_ART_DISKMODEIMAGE_SYNCICON];
     const struct stock_art *plug =
@@ -173,7 +176,7 @@ static void put_green_sphere(struct stock_canvas *band, int y)
     }
 }
 
-/* Thick line segment helper for the sync arrows and eject checkmark. */
+/* Thick line segment for the eject checkmark. */
 static void put_thick_line(struct stock_canvas *band, int x0, int y0,
                            int x1, int y1, int radius, uint32_t rgb)
 {
@@ -206,53 +209,6 @@ static void put_thick_line(struct stock_canvas *band, int x0, int y0,
                 stock_canvas_blend(band, x, y, rgb, 120);
         }
     }
-}
-
-/* Rotating circular sync arrows drawn over the orange sphere during I/O. */
-static void put_sync_arrows(struct stock_canvas *band, unsigned phase)
-{
-    const int r_in = 19, r_out = 27;
-    int y0 = MAX(band->y, SPHERE_CY - r_out - 6);
-    int y1 = MIN(band->y + band->height, SPHERE_CY + r_out + 7);
-    int rot = (int)(phase & 3);
-
-    for (int y = y0; y < y1; y++)
-    {
-        int dy = y - SPHERE_CY;
-        for (int x = SPHERE_CX - r_out - 6; x <= SPHERE_CX + r_out + 6; x++)
-        {
-            int dx = x - SPHERE_CX;
-            int d2 = dx * dx + dy * dy;
-            if (d2 < r_in * r_in || d2 > r_out * r_out)
-                continue;
-            /* Two opposing 120-degree arcs rotating by 45 degrees per step. */
-            int rx = dx, ry = dy;
-            if (rot == 1)
-                rx = dx - dy, ry = dx + dy;
-            else if (rot == 2)
-                rx = -dy, ry = dx;
-            else if (rot == 3)
-                rx = -dx - dy, ry = dx - dy;
-            if (abs(ry) * 3 < abs(rx))
-                continue;
-            stock_canvas_blend(band, x, y, 0x1a140c, 215);
-        }
-    }
-    /* Arrowheads at the leading ends of the two arcs. */
-    static const int8_t heads[4][4][2] = {
-        { { 20, -10 }, { 12, -16 }, { -20, 10 }, { -12, 16 } },
-        { { 16, 15 }, { 19, 5 }, { -16, -15 }, { -19, -5 } },
-        { { -10, 20 }, { -16, 12 }, { 10, -20 }, { 16, -12 } },
-        { { -15, -16 }, { -5, -19 }, { 15, 16 }, { 5, 19 } },
-    };
-    put_thick_line(band, SPHERE_CX + heads[rot][0][0],
-                   SPHERE_CY + heads[rot][0][1],
-                   SPHERE_CX + heads[rot][1][0],
-                   SPHERE_CY + heads[rot][1][1], 3, 0x1a140c);
-    put_thick_line(band, SPHERE_CX + heads[rot][2][0],
-                   SPHERE_CY + heads[rot][2][1],
-                   SPHERE_CX + heads[rot][3][0],
-                   SPHERE_CY + heads[rot][3][1], 3, 0x1a140c);
 }
 
 /* Bold white checkmark centered in the green "OK to disconnect" sphere. */
@@ -307,7 +263,13 @@ static void draw_rows(int top, int bottom, bool picture,
             {
                 put_centred(&band, STOCK_ART_DISKMODEIMAGE_SYNCICON, SPHERE_Y);
                 if (st == USB_STOCK_SYNCING)
-                    put_sync_arrows(&band, sync_phase);
+                {
+                    /* Stock 2.0.5 provides a 4-bit mask for each pose. */
+                    enum stock_art_id id = STOCK_ART_DISKMODEIMAGE_SYNCARROW01
+                                         + sync_phase;
+                    int x = ART_X + (ART_W - stock_art[id].width) / 2;
+                    stock_art_mask(&band, id, x, SYNC_Y, 0);
+                }
                 else
                     put_centred(&band, STOCK_ART_DISKMODEIMAGE_CONNECTEDICON,
                                 SPHERE_Y);
@@ -346,16 +308,36 @@ bool usb_stock_draw(void)
     return true;
 }
 
+int usb_stock_timeout(int timeout)
+{
+    return title_font >= 0 && detail_font >= 0 ? MIN(timeout, SYNC_STEP)
+                                               : timeout;
+}
+
 void usb_stock_tick(void)
 {
     if (title_font < 0 || detail_font < 0 || !stock_art_ready())
         return;
     enum usb_stock_state st = current_state();
-    if (st == USB_STOCK_SYNCING)
-        sync_phase++;
     unsigned stamp = screen_stamp(st);
     if (stamp != last_stamp)
+    {
+        if (st == USB_STOCK_SYNCING && (last_stamp & 3) != USB_STOCK_SYNCING)
+        {
+            sync_phase = 0;
+            next_sync_frame = current_tick + SYNC_STEP;
+        }
         usb_stock_draw();
+    }
+    else if (st == USB_STOCK_SYNCING && !TIME_BEFORE(current_tick, next_sync_frame))
+    {
+        unsigned steps = 1 + (current_tick - next_sync_frame) / SYNC_STEP;
+        next_sync_frame += steps * SYNC_STEP;
+        sync_phase = (sync_phase + steps) % SYNC_FRAMES;
+        int height = stock_art[STOCK_ART_DISKMODEIMAGE_SYNCARROW01].height;
+        draw_rows(SYNC_Y, SYNC_Y + height, true, st);
+        lcd_update_rect(0, SYNC_Y, LCD_WIDTH, height);
+    }
 }
 
 void usb_stock_enter(void)

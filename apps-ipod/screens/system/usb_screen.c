@@ -41,13 +41,12 @@ static bool usb_hid;
 static int handle_usb_events(void)
 {
 
-    /* Don't return until we get SYS_USB_DISCONNECTED or SYS_TIMEOUT */
     while(1)
     {
         int button;
         if (usb_hid)
         {
-            button = get_hid_usb_action();
+            button = get_hid_usb_action(usb_stock_timeout(HZ/4));
 
             /* On mode change, we need to refresh the screen */
             if (button == ACTION_USB_HID_MODE_SWITCH_NEXT ||
@@ -58,7 +57,7 @@ static int handle_usb_events(void)
         }
         else
         {
-            button = button_get_w_tmo(HZ/2);
+            button = button_get_w_tmo(usb_stock_timeout(HZ/2));
             /* hid emits the event in get_action */
             send_event(GUI_EVENT_ACTIONUPDATE, NULL);
         }
@@ -70,7 +69,7 @@ static int handle_usb_events(void)
             case SYS_CHARGER_DISCONNECTED:
                 reset_runtime();
                 break;
-            case SYS_TIMEOUT:
+            case BUTTON_NONE:
                 usb_stock_tick();
                 break;
 #ifdef USB_ENABLE_AUDIO

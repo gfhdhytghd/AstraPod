@@ -10,8 +10,9 @@ void usb_stock_open(void);
 /* Draw the screen and send it to the LCD, or return false and draw nothing
  * when the theme is not the stock look or its art is missing. */
 bool usb_stock_draw(void);
-/* Refresh the screen during an active USB session when the connection state
- * (connected, syncing, ejected), battery or hold changes. Safe after
+/* Bound the USB event wait while the stock screen is open. */
+int usb_stock_timeout(int timeout);
+/* Refresh the connection state, animation, battery and hold. Safe after
  * font_disable_all(): reads only cached glyphs and in-RAM stock art. */
 void usb_stock_tick(void);
 

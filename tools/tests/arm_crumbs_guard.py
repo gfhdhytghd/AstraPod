@@ -49,7 +49,7 @@ with a.elf.open('rb') as f:
     e = ELFFile(f)
     segments = [(s['p_paddr'], s['p_vaddr'], s.data(), s['p_filesz'])
                 for s in e.iter_segments() if s['p_type'] == 'PT_LOAD']
-    syms, kinds = {}, {}
+    syms, kinds, sizes = {}, {}, {}
     for s in e.get_section_by_name('.symtab').iter_symbols():
         if not s.name:
             continue
@@ -58,6 +58,7 @@ with a.elf.open('rb') as f:
         else:
             syms[s.name] = s['st_value']
             kinds[s.name] = s['st_info']['type']
+            sizes[s.name] = s['st_size']
     objects = [(s['st_value'], s.name) for s in
                e.get_section_by_name('.symtab').iter_symbols()
                if s['st_info']['type'] == 'STT_OBJECT']
@@ -405,30 +406,39 @@ res['crumbs_boot'] = dict(previous_boot=boot_no, entries=n, first_seq=first_seq,
 
 # --- the native crash payload survives another crumbs_boot ------------
 if 'crumbs_crash_record' in syms:
-    context_addr, message_addr = STUB + 0x400, STUB + 0x440
+    context_addr, message_addr = STUB + 0x400, STUB + 0x480
     message = b'Stack overflow in viewportmanager'
     u.mem_write(message_addr, message + b'\0')
     context = (1, 0x08123456, 0x08500000, 0, 0, 0x1f, 0, 0)
-    u.mem_write(context_addr, struct.pack('<8I', *context))
+    record_size = sizes['dram_crash']
+    payload = struct.pack('<8I', *context)
+    magic = 0x43525331
+    if record_size == 408:
+        magic = 0x43525332
+        payload += struct.pack('<7I16s', 0x08120004, 0x08700000, 0x0810100c,
+                               0x08102004, 0, 0, 0, b'mikey')
+    assert record_size == 12 + len(payload) + 64 + 256
+    u.mem_write(context_addr, payload)
     if 'recovery_started' in syms:
         u.state['stubs'][sym('system_reboot')] = 0
     assert call(u, 'crumbs_crash_record', message_addr, context_addr) == RET
     if 'recovery_started' in syms:
         assert u.state['stubs'][sym('system_reboot')] == 1
     crash_addrs = (sym('dram_crash'), IRAM1_RING - 512)
-    slots = [bytes(u.mem_read(addr, 364)) for addr in crash_addrs]
-    assert slots[1] == bytes(364)
-    check, magic, boot_no, *saved_context = struct.unpack_from('<11I', slots[0])
-    assert magic == 0x43525331 and boot_no == 42 and tuple(saved_context) == context
+    slots = [bytes(u.mem_read(addr, record_size)) for addr in crash_addrs]
+    assert slots[1] == bytes(record_size)
+    check, saved_magic, boot_no = struct.unpack_from('<3I', slots[0])
+    assert saved_magic == magic and boot_no == 42
+    assert slots[0][12:12 + len(payload)] == payload
     checksum = SALT
     for byte in slots[0][4:]:
         checksum = ((checksum ^ byte) * 0x01000193) & M
     assert check == (checksum or 1)
-    assert slots[0][108:].split(b'\0', 1)[0] == message
+    assert slots[0][12 + len(payload) + 64:].split(b'\0', 1)[0] == message
 
     assert call(u, 'crumbs_boot') == RET
     assert rd(u, sym('dram_ring') + 8) == 43
-    assert [bytes(u.mem_read(addr, 364)) for addr in crash_addrs] == slots
+    assert [bytes(u.mem_read(addr, record_size)) for addr in crash_addrs] == slots
     res['native_crash'] = dict(message=message.decode(), copies=1,
                                retained_from=42, new_boot=43,
                                persist=[hex(addr) for addr in crash_addrs])

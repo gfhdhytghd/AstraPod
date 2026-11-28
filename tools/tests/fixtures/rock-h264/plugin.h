@@ -17,6 +17,7 @@
 #define TIME_BEFORE(a, b) ((a) < (b))
 #define MAX_PATH 260
 #define PLUGIN_APPS_DATA_DIR "resume"
+#define ROCKBOX_DIR "."
 #define CACHEALIGN_SIZE 32
 #define HZ 100
 #define LCD_WIDTH 320
@@ -44,6 +45,7 @@ struct plugin_api {
     volatile long *current_tick;
     int (*open)(const char *, int, ...);
     int (*close)(int);
+    int (*fdprintf)(int, const char *, ...);
     off_t (*ffilesize)(int);
     off_t (*lseek)(int, off_t, int);
     ssize_t (*read)(int, void *, size_t);

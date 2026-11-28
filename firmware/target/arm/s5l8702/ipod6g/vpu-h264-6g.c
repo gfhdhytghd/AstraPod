@@ -782,7 +782,7 @@ int vpu_h264_configure(struct vpu_h264 *v,
         parse_sps(&v->sps, &b);
 
         if (b.error || apply_sps_dimensions(v) < 0)
-            return -1;
+            return -2;
         v->have_sps = 1;
         offset += sps_len;
     }
@@ -805,7 +805,7 @@ int vpu_h264_configure(struct vpu_h264 *v,
         b.error = 0;
         parse_pps(&v->pps, &b);
         if (b.error || !pps_supported(&v->pps))
-            return -1;
+            return -3;
         v->have_pps = 1;
         offset += pps_len;
     }
@@ -939,7 +939,7 @@ static int decode_picture(struct vpu_h264 *v, struct picture_slice *slices,
         v->pic_wmb, v->pic_hmb, v->pic_w, slice_count);
     commit_discard_dcache();
     if (ret != 0)
-        return -1;
+        return ret - 1; /* -2 timeout, -3 STATUS1 error. */
 
     v->last_out = out_buf;
     if (slices[0].nal_ref_idc != 0 && v->sps.max_num_ref_frames > 0)

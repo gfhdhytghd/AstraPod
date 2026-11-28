@@ -33,8 +33,12 @@ struct rock_video_request {
     const uint32_t *chapters;
     size_t chapter_count;
     bool has_previous;
+    bool probe;
     int result;
 };
+#ifdef HAVE_HW_H264
+int rock_probe_video(const char *path);
+#endif
 int rock_open_video(const char *path, const char *title, bool has_previous);
 int rock_run_from_shell(const char *path);
 bool rock_ui_raw(void);

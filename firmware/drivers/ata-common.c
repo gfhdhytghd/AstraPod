@@ -104,6 +104,15 @@ struct sector_cache_entry {
 /* buffer for reading and writing large physical sectors */
 static struct sector_cache_entry sector_cache STORAGE_ALIGN_ATTR;
 
+#ifdef ATA_CLASSIC_MOTION
+static void ata_motion_invalidate(uint64_t start, int count)
+{
+    if (sector_cache.inuse && sector_cache.sectornum >= start &&
+        sector_cache.sectornum - start < (unsigned)count)
+        sector_cache.inuse = false;
+}
+#endif
+
 static int ata_transfer_sectors(uint64_t start,
                                 int incount,
                                 void* inbuf,

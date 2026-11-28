@@ -449,6 +449,7 @@ static const struct tag_row tag_rows[] = {
 { "time format",         TAG_SYSTEM,                             "clock 12 24 hour" },
 { "time in title",       TAG_SYSTEM|TAG_APPEARANCE,              "clock status bar title fruit company classic" },
 { "contacts sort",       TAG_SYSTEM,                             "contacts sort by first last name vcard fruit company" },
+{ "voice memo quality",  TAG_RECORDING,                          "voice memos recording microphone headset quality low high sample rate fruit company" },
 { "lang",                TAG_SYSTEM,                             "language" },
 { "default codepage",    TAG_ADVANCED|TAG_SYSTEM,                "codepage character set encoding" },
 { "glyphs",              TAG_ADVANCED|TAG_SYSTEM|TAG_APPEARANCE, "glyph cache font limit" },

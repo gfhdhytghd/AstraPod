@@ -160,11 +160,23 @@ int mikey_probe(unsigned char *reg0)
 static volatile int mikey_btn = BUTTON_NONE;
 static volatile bool mic_active = false;
 static volatile bool mikey_detected = false;
+static volatile bool mic_seen = false;
 static long mikey_stack[DEFAULT_STACK_SIZE/2/sizeof(long)];
 
 bool mikey_present(void)
 {
     return mikey_detected;
+}
+
+/* A plug without a microphone shorts the mic line, which reg4 reads as the
+ * centre button held for as long as the plug is in. A headset's line reads
+ * released while no button is down, so a release that lasts this many polls
+ * means a microphone is in the jack. */
+#define MIKEY_MIC_POLLS     10
+
+bool mikey_mic_present(void)
+{
+    return mic_seen && headphones_inserted();
 }
 
 /* The recording path owns the chip while the jack mic is enabled; the
@@ -538,6 +550,7 @@ static void mikey_thread(void)
 {
     bool powered = false;
     int naks = 0;
+    int mic_polls = 0;
     struct mikey_decode decode;
 
     mikey_decode_reset(&decode);
@@ -547,6 +560,9 @@ static void mikey_thread(void)
     {
         if (!headphones_inserted() || mic_active)
         {
+            if (!headphones_inserted())
+                mic_seen = false;
+            mic_polls = 0;
             if (powered && !mic_active)
                 mikey_reset();
             powered = false;
@@ -566,6 +582,7 @@ static void mikey_thread(void)
         if (i2c_read(0, MIKEY_ADDR, MIKEY_REG_MODE, 1, &mode) != 0)
         {
             /* no ACK: chip resetting around insertion, or not present */
+            mic_polls = 0;
             mikey_decode_reset(&decode);
             mikey_report(BUTTON_NONE);
             if (naks < MIKEY_PROBE_TRIES)
@@ -583,6 +600,7 @@ static void mikey_thread(void)
 
         if (mode != MIKEY_MODE_REMOTE)
         {
+            mic_polls = 0;
             mikey_write(MIKEY_REG_MODE, MIKEY_MODE_REMOTE);
             mikey_decode_reset(&decode);
             mikey_report(BUTTON_NONE);
@@ -615,6 +633,10 @@ static void mikey_thread(void)
             ghost_volume_trace(GHOST_MIKEY_VOLUME_EDGE, btn, evt, decoded);
 #endif
         mikey_report(decoded);
+        if (btn & MIKEY_BTN_CENTER)
+            mic_polls = 0;
+        else if (++mic_polls >= MIKEY_MIC_POLLS)
+            mic_seen = true;
 
         /* volume edge events stay readable for under 60ms, so the poll
          * has to come round inside that */

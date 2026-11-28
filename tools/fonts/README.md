@@ -59,6 +59,7 @@ record size), then the PBF1 bitmap records in the same order.
 | `21-helvetica-bold` | Helvetica Bold | 21.9375 px |
 | `21-helvetica-bold-stopwatch` | Helvetica Bold | 21.25 px |
 | `23-helvetica-bold` | Helvetica Bold | 22.875 px |
+| `25-helvetica-bold` | Helvetica Bold | 25.578125 px |
 | `29-helvetica-bold` | Helvetica Bold | 29.4375 px |
 
 The scale is `FT_Set_Char_Size`'s, in 1/64 px at 72 dpi.

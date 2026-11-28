@@ -157,6 +157,8 @@ void mikey_set_track_skip(bool enable);
  * there. Answers from boot, unlike mikey_present(), which cannot latch
  * until something occupies the jack. */
 bool mikey_supported(void);
+/* Whether the jack holds a microphone: a headset, not a plain plug. */
+bool mikey_mic_present(void);
 
 /* The register scope behind Debug > Mikey remote. While it is on, the polling
  * thread reads every register each poll instead of just reg0, reg4 and reg5,

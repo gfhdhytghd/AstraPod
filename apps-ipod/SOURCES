@@ -384,6 +384,9 @@ screens/settings/eq_curve.c
 screens/main_menu.c
 screens/main_menu_config.c
 screens/fruit_menu.c
+#if defined(HAVE_RECORDING) && defined(HAVE_MIKEY_REMOTE)
+screens/voice_memos.c
+#endif
 screens/context_menu_config.c
 screens/music_menu_config.c
 screens/settings/common_settings.c

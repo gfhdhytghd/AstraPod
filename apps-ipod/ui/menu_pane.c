@@ -827,9 +827,15 @@ static void still_lines(struct pane_lines *lines,
             songs_line(lines);
             break;
         case LIST_PANE_PICTURE:
+        {
+            int first = lines->count;
             pane_line(lines, c->title, fonts.title, c->baseline);
             pane_line(lines, c->caption, fonts.title, c->baseline + 21);
+            if (c->centre)
+                for (int i = first; i < lines->count; i++)
+                    lines->line[i].x += c->centre - PANE_MID;
             break;
+        }
         default:
             pane_line(lines, c->title, fonts.title, 179);
             break;
@@ -928,6 +934,7 @@ static bool same_content(const struct menu_pane_content *a,
     return a->kind == b->kind && a->art == b->art &&
            !strcmp(a->title, b->title) && !strcmp(a->caption, b->caption) &&
            a->x == b->x && a->y == b->y && a->baseline == b->baseline &&
+           a->centre == b->centre &&
            a->paint == b->paint && a->stamp == b->stamp &&
            a->videos == b->videos;
 }

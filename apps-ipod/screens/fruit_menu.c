@@ -50,6 +50,7 @@
 #include "ui/native_theme_runtime.h"
 #include "ui/stock_art_ids.h"
 #include "fruit_menu.h"
+#include "voice_memos.h"
 #include "ui/scene.h"
 
 bool fruit_menu_active(void)
@@ -710,6 +711,8 @@ static int in_place(const struct menu_item_ex *item, bool step)
 bool fruit_menu_describe(const struct menu_item_ex *item,
                          enum list_row_kind *kind, const char **value)
 {
+    if (voice_memos_describe(item, kind, value))
+        return true;
     int word = in_place(item, false);
     if (word < 0)
         return false;
@@ -720,7 +723,7 @@ bool fruit_menu_describe(const struct menu_item_ex *item,
 
 bool fruit_menu_step(const struct menu_item_ex *item)
 {
-    return in_place(item, true) >= 0;
+    return voice_memos_step(item) || in_place(item, true) >= 0;
 }
 
 /** The main menu **/
@@ -852,6 +855,9 @@ static const struct menu_item_ex *const home_rows[] = {
     &extras_menu, &home_clocks, &home_alarms, &home_calendars,
     &home_contacts, &home_games, &home_notes, &home_screen_lock,
     &home_stopwatch,
+#if defined(HAVE_RECORDING) && defined(HAVE_MIKEY_REMOTE)
+    &voice_memos_menu,
+#endif
     &settings_menu, &home_shuffle, &home_sleep, &home_playback_report,
     &home_now_playing,
 };
@@ -869,7 +875,7 @@ bool fruit_menu_owns(const struct menu_item_ex *menu)
 {
     return menu == &home_menu || menu == &music_menu_fruit ||
            menu == &videos_menu || menu == &photos_menu ||
-           menu == &extras_menu;
+           menu == &extras_menu || voice_memos_owns(menu);
 }
 
 bool fruit_menu_is_stock(const struct menu_item_ex *menu)
@@ -1068,7 +1074,8 @@ enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
                                          const struct menu_item_ex *item,
                                          int *art)
 {
-    if (extras_pane(item) || fruit_media_pane(item) || videos_pane(item))
+    if (voice_memos_pane(menu, item) || extras_pane(item) ||
+        fruit_media_pane(item) || videos_pane(item))
         return LIST_PANE_PICTURE;
     int bit = bit_of(home_bits, ARRAYLEN(home_bits), item);
     if (bit < 0)

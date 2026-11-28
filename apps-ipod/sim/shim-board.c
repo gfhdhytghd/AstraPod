@@ -14,6 +14,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <SDL.h>
 #include "system.h"
 #include "adc.h"
@@ -67,6 +68,12 @@ void mikey_set_track_skip(bool enable)
 bool mikey_supported(void)
 {
     return true;
+}
+
+/* No jack either: PODBOX_SIM_MIC stands for a headset in it. */
+bool mikey_mic_present(void)
+{
+    return getenv("PODBOX_SIM_MIC") != NULL;
 }
 #endif
 

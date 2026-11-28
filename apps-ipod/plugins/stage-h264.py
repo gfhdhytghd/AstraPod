@@ -178,12 +178,13 @@ elif src.name == "video_playback.c":
 
 """)
     cut("            if (action == VIDEO_INPUT_MENU)", "            if (redraw_requested")
-    replace("clock_ms = audio_master ? video_pcm_get_clock_ms() :",
-            "clock_ms = audio_master ? rb->h264_audio->clock_ms() :")
+    replace("return audio_master ? video_pcm_get_clock_ms() :",
+            "return audio_master ? rb->h264_audio->clock_ms() :")
     replace("(!video_audio_is_active() && video_pcm_empty())",
             "(!video_audio_is_active() && rb->h264_audio->buffered() == 0)")
     replace('#include "plugin.h"',
-            '#include "plugin.h"\n#include "plugins/rock_video_log.h"')
+            '#include "plugin.h"\n#include "plugins/rock_video_log.h"\n'
+            '#define VIDEO_SYNC_LOG ROCK_VIDEO_SYNC_LOG')
     replace("size_t video_h264_scratch_size(const char *path)", r"""
 static int video_log_open(const char *path, const char *stage, int code)
 {
@@ -417,18 +418,18 @@ size_t video_h264_scratch_size(const char *path)""")
                 video_audio_stop();
                 have_audio = false;""")
     replace("        uint32_t offset;\n        uint32_t size;\n", "")
-    cut("        if (mp4v_get_sample_offset(video_fd", "            rb->splash(HZ * 2, \"Video sample",
-        """\
-        offset = size = 0;
-        code = video_sample_read(video_fd, sample, read_buffer, &offset, &size);
-        if (code < 0)
-        {
-            failure = "sample-read";
+    cut('            if (mp4v_get_sample_offset(video_fd',
+        '                rb->splash(HZ * 2, "Video sample', """\
+            offset = size = 0;
+            code = video_sample_read(video_fd, sample, read_buffer, &offset, &size);
+            if (code < 0)
+            {
+                failure = "sample-read";
 """)
-    replace('            rb->splash(HZ * 2, "VPU sample decode failed");',
-            '''            failure = "sample-decode";
-            code = decoded;
-            rb->splash(HZ * 2, "VPU sample decode failed");''')
+    replace('                rb->splash(HZ * 2, "VPU sample decode failed");',
+            '''                failure = "sample-decode";
+                code = decoded;
+                rb->splash(HZ * 2, "VPU sample decode failed");''')
     replace("cleanup:\n", r"""cleanup:
     if (failure)
     {

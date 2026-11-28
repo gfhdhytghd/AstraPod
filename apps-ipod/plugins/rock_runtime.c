@@ -1429,6 +1429,17 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
                                       &request);
     if (result == PLUGIN_USB_CONNECTED || result == PLUGIN_GOTO_ROOT)
         return ROCK_VIDEO_USB;
+#ifdef HAVE_HW_H264
+    if (result == PLUGIN_ERROR && !usb_exclusive_storage())
+    {
+        int fd = rock_open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND);
+        if (fd >= 0)
+        {
+            rock_fdprintf(fd, "%s stage=foreground-return code=%d\n", path, result);
+            rock_close(fd);
+        }
+    }
+#endif
     return request.result;
 }
 

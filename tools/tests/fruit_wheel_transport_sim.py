@@ -218,7 +218,7 @@ def probe_paging(sim, playback, name, region=np.s_[35:220, :], play_toggles=Fals
     print(f"PASS {name} paging", flush=True)
 
 
-def create_indexed_photos(root):
+def create_indexed_photos(root, named_albums=()):
     """Synthetic indexed photos, with enough entries to page the grid."""
     def record(tag, fields=(), body=b"", count=None):
         header = 12 + len(fields) * 4
@@ -246,11 +246,17 @@ def create_indexed_photos(root):
             thumb = record(b"mhni", (1, fmt, i * size, size, 0, 0), name)
             records.append(record(b"mhod", (2,), thumb))
         images.append(record(b"mhii", (len(records), i + 1), b"".join(records)))
-    album = record(b"mhba", (0, 0, 0, 0, 1 << 16))
+    albums = [record(b"mhba", (0, 0, 0, 0, 1 << 16))]
+    for label in named_albums:
+        title = label.encode()
+        name = record(b"mhod", body=struct.pack("<III", len(title), 0, 0)
+                      + title)
+        member = record(b"mhia", (0, 1))
+        albums.append(record(b"mhba", (1, 1, 0, 0, 0), name + member))
     sections = [
         record(b"mhsd", (1,), record(b"mhli", body=b"".join(images),
                                      count=len(images))),
-        record(b"mhsd", (2,), record(b"mhla", body=album, count=1)),
+        record(b"mhsd", (2,), record(b"mhla", body=b"".join(albums), count=len(albums))),
     ]
     (photos / "Photo Database").write_bytes(record(b"mhfd", body=b"".join(sections)))
 

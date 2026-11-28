@@ -506,7 +506,7 @@ static int next_thumb(void)
 
 static enum job next_job(int *file)
 {
-    if (!pt.ready || pt.stopped || pt.closing)
+    if (!pt.ready || pt.stopped || pt.closing || !pt.pf->file_count)
         return JOB_NONE;
     if (pt.want_screen >= 0 && pt.want_screen != pt.screen_file)
     {
@@ -604,6 +604,7 @@ bool photo_thumbs_open(struct photo_folders *pf, void *buf, size_t size,
     pt.load_data = data;
     pt.dat_fd = pt.idx_fd = -1;
     pt.want_screen = pt.screen_file = -1;
+    pt.backward = -1;
     for (int i = 0; i < RAM_SLOTS; i++)
         pt.ram[i].file = -1;
     if (size < photo_thumbs_bytes())

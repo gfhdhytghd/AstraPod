@@ -10,8 +10,8 @@ Generates about 200 pictures in nested folders -- JPEGs of several sizes
 with four of 4000 x 3000, one progressive, PNGs, BMPs, a corrupt file, a
 music album's art and hidden files that must stay out -- and checks:
 
-  - the Photos menu lists All Photos, Settings, then one album per folder,
-    "Parent/Name" where two folders share a name;
+  - Photos lists All Photos, Browse Files and Settings in order;
+  - Browse Files lists the current folder and opens its photos in the grid;
   - All Photos opens the thumbnail grid, with placeholders while the
     thumbnails are made and the thumbnails afterwards;
   - a photo opens full screen, LEFT and RIGHT step, PLAY starts and pauses
@@ -67,7 +67,7 @@ def picture(path, size, number, fmt="JPEG", **save):
 
 
 def library(disk):
-    """About 200 pictures; returns the albums the menu must list"""
+    """About 200 pictures in mixed and photo-only folders."""
     rng = random.Random(7)
     sizes = [(640, 480), (480, 640), (2592, 1944), (800, 450), (1600, 1200),
              (3264, 2448), (2048, 1536), (300, 900), (1944, 2592)]
@@ -107,8 +107,8 @@ def library(disk):
     picture(disk / "Pictures/Pets/cover.jpg", (640, 480), 902)
     shutil.copy(disk / "Pictures/Pets/IMG_0001.JPG",
                 disk / "Pictures/Pets/._IMG_0001.JPG")
-    return ["100apple", "day 2", "misc/family", "pictures/family", "pets",
-            "scans", "trip 2024", "wallpapers"]
+    picture(disk / "DCIM/portrait.jpg", (640, 480), 903)
+    picture(disk / "DCIM/folder.jpg", (640, 480), 904)
 
 
 def stock_library(disk, fixture):
@@ -259,6 +259,19 @@ def session(build, case, disk, theme):
                     proc.wait(timeout=5)
 
 
+def assert_menu_order(sim, image, rows):
+    menu = image.crop((0, 19, 160, 240)).resize((480, 663))
+    path = sim.case / "menu-ocr.png"
+    menu.save(path)
+    names = subprocess.check_output(
+        ["tesseract", path, "stdout", "--psm", "6"],
+        stderr=subprocess.DEVNULL, text=True).lower()
+    assert all(row in names for row in rows), names
+    order = [names.index(row) for row in rows]
+    assert order == sorted(order), names
+    return names
+
+
 def open_photos(sim, theme, at_once=False):
     if theme == "classic":
         sim.text("home", ["images"])
@@ -293,7 +306,7 @@ def run(build, evidence, theme, fixture):
     with (disk / ".rockbox/config.cfg").open("a") as cfg:
         cfg.write("root menu order: images,files,settings\n"
                   "photo duration: 3\nphoto transition: 0\n")
-    albums = stock_library(disk, fixture) if fixture else library(disk)
+    stock_library(disk, fixture) if fixture else library(disk)
     report = {"theme": theme}
 
     with session(build, case, disk, theme) as sim:
@@ -305,6 +318,7 @@ def run(build, evidence, theme, fixture):
         # pages' thumbnails can be made, then step with the wheel, while
         # the thumbnails are made
         report["made_at_entry"] = made()
+        assert not index.exists(), "opening Photos started the thumbnail index"
         grid_region = (0, GRID_TOP, 320, 240)
         sim.quick("select", 0.05)
         building, samples = None, []
@@ -400,13 +414,24 @@ def run(build, evidence, theme, fixture):
             sim.save("grid-second-visit"))
         sim.tap("menu")
         sim.text("photos-again", ["all photos", "settings"])
-        menu = sim.read(Image.open(case / "photos-again.png"))
-        for _ in range(9):
+        menu_image = Image.open(case / "photos-again.png")
+        menu = assert_menu_order(
+            sim, menu_image, ("all photos", "browse files", "settings"))
+        assert not any(name in menu for name in ("wallpapers", "100apple", "scans"))
+        if not fixture:
             sim.tap("down")
-        menu += sim.read(sim.save("photos-end"))
-        report["menu_missing"] = [name for name in albums if name not in menu]
-        for word in ("album", "secret", "hidden", "music"):
-            assert word not in menu.split(), f"menu lists {word}: {menu!r}"
+            sim.step("select", "browse-root", ["dcim", "pictures", "wallpapers"],
+                     absent=["100apple", "hidden"])
+            sim.tap("down")  # Root Photos row, then DCIM
+            sim.step("select", "browse-mixed", ["100apple"], absent=["wallpapers"])
+            sim.step("select", "mixed-grid", ["1 photo"])
+            sim.step("menu", "mixed-return", ["100apple"])
+            sim.tap("down")
+            sim.step("select", "leaf-grid", ["35 photos"])
+            sim.step("menu", "leaf-return", ["100apple"])
+            sim.step("menu", "browse-return", ["dcim", "pictures"])
+            sim.step("menu", "photos-return", ["all photos", "browse files", "settings"])
+            report["browse_verified"] = True
 
     with session(build, case, disk, theme) as sim:
         open_photos(sim, theme)
@@ -435,8 +460,6 @@ def main():
                  args.stock_fixture)
     print(json.dumps(report, indent=2))
     failures = []
-    if report["menu_missing"]:
-        failures.append(f"albums missing: {report['menu_missing']}")
     if not args.stock_fixture and not report["placeholders_while_building"]:
         failures.append("no placeholder seen while building")
     if report["placeholders_after"]:

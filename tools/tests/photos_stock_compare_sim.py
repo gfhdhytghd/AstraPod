@@ -34,7 +34,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from photos_loose_sim import session, open_photos  # noqa: E402
+from photos_loose_sim import assert_menu_order, open_photos, session  # noqa: E402
+from fruit_wheel_transport_sim import create_indexed_photos  # noqa: E402
 from videos_sim import player  # noqa: E402
 
 FONT = "/usr/share/fonts/liberation/LiberationSans-Regular.ttf"
@@ -169,44 +170,12 @@ def steady(sim, quiet, box=(0, 0, 160, 240), timeout=20):
     raise AssertionError("the list never settled")
 
 
-def pane_shift(frame, final):
-    """How far the pane's picture past its shadow moved between frames, by
-    best match: positive when it moved left"""
-    a = rgb565(frame)[30:230, 186:320]
-    b = rgb565(final)[30:230, 186:320]
-    best = None
-    for k in range(-40, 41):
-        if k > 0:
-            d = float((a[:, k:] != b[:, :-k]).mean())
-        elif k < 0:
-            d = float((a[:, :k] != b[:, -k:]).mean())
-        else:
-            d = float((a != b).mean())
-        if best is None or d < best[0]:
-            best = (d, k)
-    return best[1]
-
-
 def save_frames(frames, case, label):
     folder = case / label
     folder.mkdir(exist_ok=True)
     t0 = frames[0][0] if frames else 0
     for i, (t, image) in enumerate(frames):
         image.save(folder / f"f{i:03d}_{(t - t0) * 1000:06.0f}ms.png")
-
-
-def pane_window(pane, renditions):
-    """Which rendition, at which window column, the pane shows past its
-    shadow, and how many pixels of that differ"""
-    p = rgb565(pane)[:, 186:320]
-    best = None
-    for name, image in renditions.items():
-        r = rgb565(image)
-        for x in range(0, 161):
-            d = int((r[:, x + 26:x + 160] != p).sum())
-            if best is None or d < best[2]:
-                best = (name, x, d)
-    return best
 
 
 def run(build, captures, evidence, theme):
@@ -221,6 +190,7 @@ def run(build, captures, evidence, theme):
         cfg.write("root menu order: images,files,settings\n"
                   "animations: on\n")
     library(disk)
+    create_indexed_photos(disk, ("Camera Roll",))
     stock = lambda name: Image.open(captures / f"{name}.png")
     entry_ref = sorted((captures / "series-grid-entry/png").glob("*.png"))
     out = {"theme": theme, "states": {}, "motion": {}}
@@ -237,23 +207,22 @@ def run(build, captures, evidence, theme):
 
     with session(build, case, disk, theme) as sim:
         open_photos(sim, theme)
+        sim.text("photos-with-itunes-albums",
+                 ["all photos", "browse files", "settings", "camera roll"])
         steady(sim, 1.5)
         menu = sim.save("menu")
+        assert_menu_order(
+            sim, menu, ("all photos", "browse files", "settings", "camera roll"))
         compare("menu-list", menu, "pm-all-photos", (0, 0, 160, 240))
-        # the pane over three seconds: its pan speed and direction
-        pane = record(sim, 3.0)
-        if len(pane) > 2:
-            first, last = pane[0], pane[-1]
-            px = pane_shift(first[1], last[1])
-            motion["pane_px_per_s"] = round(px / (last[0] - first[0]), 2)
-
-        # Thirty Three: entry and exit
         for _ in range(3):
             sim.tap("down")
-        steady(sim, 1.5)
-        thirty = sim.save("menu-thirty-three")
-        compare("menu-thirty-three-list", thirty, "pm-album-thirty-three",
-                (0, 0, 160, 240))
+        sim.step("select", "itunes-grid", ["1 photo"])
+        sim.step("menu", "itunes-return", ["camera roll"])
+        sim.tap("up")
+        sim.tap("up")
+        sim.step("select", "browse-root", ["thirty three", "weekly"])
+        sim.tap("down")  # Photos holds the synthetic Photo Database
+        sim.tap("down")
         sim.quick("select", 0.05)
         frames = record(sim, 1.5)
         save_frames(frames, case, "grid-entry")
@@ -274,8 +243,9 @@ def run(build, captures, evidence, theme):
         if mids:
             mids[len(mids) // 2].save(case / "grid-exit-mid.png")
 
-        # Aspect Test: the grid, the push into a1, each aspect, the return
-        sim.tap("up")
+        # Aspect Test: the grid, the push into a1, each aspect, the return.
+        # Returning from a photo-only leaf reloads the root folder.
+        sim.text("browse-return", ["thirty three", "weekly"])
         steady(sim, 1.5)
         sim.quick("select", 0.05)
         time.sleep(1.5)
@@ -288,13 +258,11 @@ def run(build, captures, evidence, theme):
         motion["push_in_offsets"] = [shift_of(grid, f, (60, 230), 320)
                                      for t, f in frames]
         sim.settle(0.8)
-        renditions = {}
         for i, name in enumerate(FS_NAMES):
             if i:
                 sim.tap("right")
                 sim.settle(0.8)
             image = sim.image()
-            renditions[name] = image
             compare(name, image, name)
         sim.quick("menu", 0.05)
         frames = record(sim, 1.2)
@@ -305,15 +273,7 @@ def run(build, captures, evidence, theme):
         motion["push_back_offsets"] = [320 - shift_of(back, f, (60, 230),
                                                       320)
                                        for t, f in frames]
-        # the pane on the Aspect Test row shows one of its renditions 1:1
-        sim.quick("menu", 0.05)
-        steady(sim, 2.0)
-        pane_shot = sim.save("menu-aspect")
-        compare("menu-aspect-list", pane_shot, "pm-album-aspect",
-                (0, 0, 160, 240))
-        name, x, d = pane_window(pane_shot, renditions)
-        motion["aspect_pane"] = {"rendition": name, "window_x": x,
-                                 "differing_past_shadow": d}
+        sim.step("menu", "browse-aspect-return", ["thirty three", "weekly"])
         sim.quick("select", 0.05)
         time.sleep(1.5)
         sim.settle(1.0)

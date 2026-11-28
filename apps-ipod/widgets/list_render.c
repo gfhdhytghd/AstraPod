@@ -2784,7 +2784,7 @@ static bool marker_damage(const struct native_list *render,
         band.x = shown->marker.x;
         band.width = shown->marker.width;
     }
-    if (ultra && (render->glint_frame >= 0 || !marquee_resting(render)))
+    if ((ultra && render->glint_frame >= 0) || !marquee_resting(render))
     {
         struct ui_rect bar = { g->rows.x, render->cursor_y, g->rows.width,
                                render->cursor_height };
